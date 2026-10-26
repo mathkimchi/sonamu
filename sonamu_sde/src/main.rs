@@ -22,8 +22,10 @@ use singularity_standard_tabs::{
     code_editor::CodeEditorApplet, file_manager::FileManagerApplet, image_viewer::ImageViewerApplet,
 };
 use singularity_sttk::{
-    command_hub::CommandHubApplet, help::HelpApplet,
-    nodular_applet::root_node_applet::RootNodeApplet, session,
+    command_hub::CommandHubApplet,
+    help::HelpApplet,
+    nodular_applet::root_node_applet::{self, RootNodeApplet},
+    session,
 };
 use std::collections::BTreeMap;
 use tracing_subscriber::EnvFilter;
@@ -32,33 +34,36 @@ fn main() {
     init_logging();
     singularity_common::settings::load_and_watch();
 
-    AppletRunner::run(RootNodeApplet::get_initializer(
-        CommandHubApplet::get_boxed_initiator(),
-        BTreeMap::from_iter(vec![
-            (
-                "command_hub".to_string(),
-                CommandHubApplet::get_applet_spawner(),
-            ),
-            // (
-            //     "text_editor".to_string(),
-            //     TextEditorApplet::get_applet_spawner(),
-            // ),
-            (
-                "code_editor".to_string(),
-                CodeEditorApplet::get_applet_spawner(),
-            ),
-            (
-                "file_manager".to_string(),
-                FileManagerApplet::get_applet_spawner(),
-            ),
-            (
-                "image_viewer".to_string(),
-                ImageViewerApplet::get_applet_spawner(),
-            ),
-            ("help".to_string(), HelpApplet::get_applet_spawner()),
-        ]),
-        session::session_path(),
-    ))
+    AppletRunner::run(
+        RootNodeApplet::get_initializer(
+            CommandHubApplet::get_boxed_initiator(),
+            BTreeMap::from_iter(vec![
+                (
+                    "command_hub".to_string(),
+                    CommandHubApplet::get_applet_spawner(),
+                ),
+                // (
+                //     "text_editor".to_string(),
+                //     TextEditorApplet::get_applet_spawner(),
+                // ),
+                (
+                    "code_editor".to_string(),
+                    CodeEditorApplet::get_applet_spawner(),
+                ),
+                (
+                    "file_manager".to_string(),
+                    FileManagerApplet::get_applet_spawner(),
+                ),
+                (
+                    "image_viewer".to_string(),
+                    ImageViewerApplet::get_applet_spawner(),
+                ),
+                ("help".to_string(), HelpApplet::get_applet_spawner()),
+            ]),
+            session::session_path(),
+        ),
+        root_node_applet::is_keybind,
+    );
 }
 
 fn init_logging() {

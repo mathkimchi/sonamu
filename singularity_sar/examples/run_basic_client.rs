@@ -101,5 +101,5 @@ impl RawClientInitializer for BasicInitializer {
 }
 
 pub fn main() {
-    AppletRunner::run(Box::new(BasicInitializer));
+    AppletRunner::run(Box::new(BasicInitializer), |_| false);
 }

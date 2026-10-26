@@ -179,7 +179,7 @@ pub struct SmithayState {
     /// The layer surface (not an exclusive one) that a click gave the keyboard
     layer_focus: Option<WlSurface>,
     /// The tile that Sonamu focus asked the keyboard to be on
-    wl_target: Option<WlSurfaceId>,
+    pub(crate) wl_target: Option<WlSurfaceId>,
     /// The pointer is on a layer surface, or a button pressed on one is still held
     pointer_on_layer: bool,
     layer_buttons_down: u32,
@@ -652,19 +652,6 @@ impl SmithayState {
                     };
 
                     match wl_event {
-                        WlSurfaceRequest::Key {
-                            keycode,
-                            pressed: true,
-                        } => {
-                            // target_surface.key(seat, data, key, state, serial, time); // TODO: use this instead of needing to jankily set focus?
-                            // usually already focused by `StandardRequest::WlKeyboardFocus`
-                            state.focus_wl_keyboard_on(target_surface);
-                            state.press_wl_key(keycode);
-                        }
-                        WlSurfaceRequest::Key {
-                            keycode,
-                            pressed: false,
-                        } => state.release_wl_key(keycode),
                         WlSurfaceRequest::Close => {
                             if let Some(toplevel) = state.smithay_state.toplevel_of(&target_surface)
                             {
@@ -1186,18 +1173,11 @@ impl AppletRunner {
             );
     }
 
-    /// For a press from a tile. Repeats of a held key are dropped, since clients repeat keys
-    /// themselves. If the key was already released (the release reached the runner before
-    /// this press got through the applets), it's released right away, or the client would
-    /// think it's held and repeat it (#56).
-    fn press_wl_key(&mut self, keycode: u32) {
+    /// Repeats of a held key are dropped, since clients repeat keys themselves
+    pub(crate) fn press_wl_key(&mut self, keycode: u32) {
         let keyboard = self.smithay_state.seat.get_keyboard().unwrap();
-        if keyboard.pressed_keys().contains(&Keycode::new(keycode)) {
-            return;
-        }
-        self.wl_key_input(keycode, KeyState::Pressed);
-        if !self.held_keys.contains(&keycode) {
-            self.wl_key_input(keycode, KeyState::Released);
+        if !keyboard.pressed_keys().contains(&Keycode::new(keycode)) {
+            self.wl_key_input(keycode, KeyState::Pressed);
         }
     }
 
