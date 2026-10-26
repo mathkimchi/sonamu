@@ -1,5 +1,6 @@
 use crate::{msg_socket::MsgSocket, pluck_place::PluckPlace, smithay::SmithayState, ui_handle::UIHandle};
 use calloop::{EventLoop, LoopHandle, LoopSignal};
+use std::collections::HashSet;
 use singularity_common::{
     msg,
     sap::{
@@ -42,6 +43,9 @@ pub struct AppletRunner {
     pub(crate) pluck_place: PluckPlace,
     /// In window px, for drawing what's plucked under the pointer
     pub(crate) pointer_position: [f64; 2],
+    /// Keys (xkb) physically down. A tile's key press reaches the compositor through the
+    /// applets, so it may come after the key was already released here (#56)
+    pub(crate) held_keys: HashSet<u32>,
 }
 impl AppletRunner {
     fn new(
@@ -73,6 +77,7 @@ impl AppletRunner {
             plucked: None,
             pluck_place: PluckPlace::Idle,
             pointer_position: [0.0, 0.0],
+            held_keys: HashSet::new(),
         }
     }
 
@@ -193,12 +198,18 @@ impl AppletRunner {
     pub(crate) fn handle_ui_event(&mut self, mut event: UIEvent) {
         if let UIEvent::Key {
             raw_keycode,
-            pressed: false,
+            pressed,
             ..
         } = event
         {
             // evdev -> xkb
-            self.release_wl_key(raw_keycode + 8);
+            let keycode = raw_keycode + 8;
+            if pressed {
+                self.held_keys.insert(keycode);
+            } else {
+                self.held_keys.remove(&keycode);
+                self.release_wl_key(keycode);
+            }
         }
 
         if let UIEvent::WindowResized(screen_size) = event {

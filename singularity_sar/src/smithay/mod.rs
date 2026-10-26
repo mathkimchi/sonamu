@@ -659,7 +659,7 @@ impl SmithayState {
                             // target_surface.key(seat, data, key, state, serial, time); // TODO: use this instead of needing to jankily set focus?
                             // usually already focused by `StandardRequest::WlKeyboardFocus`
                             state.focus_wl_keyboard_on(target_surface);
-                            state.wl_key_input(keycode, KeyState::Pressed);
+                            state.press_wl_key(keycode);
                         }
                         WlSurfaceRequest::Key {
                             keycode,
@@ -1184,6 +1184,21 @@ impl AppletRunner {
                 self.smithay_state.now_input_time(),
                 |_, _, _| FilterResult::Forward,
             );
+    }
+
+    /// For a press from a tile. Repeats of a held key are dropped, since clients repeat keys
+    /// themselves. If the key was already released (the release reached the runner before
+    /// this press got through the applets), it's released right away, or the client would
+    /// think it's held and repeat it (#56).
+    fn press_wl_key(&mut self, keycode: u32) {
+        let keyboard = self.smithay_state.seat.get_keyboard().unwrap();
+        if keyboard.pressed_keys().contains(&Keycode::new(keycode)) {
+            return;
+        }
+        self.wl_key_input(keycode, KeyState::Pressed);
+        if !self.held_keys.contains(&keycode) {
+            self.wl_key_input(keycode, KeyState::Released);
+        }
     }
 
     /// Called for every release, even if sonamu focus is elsewhere,
