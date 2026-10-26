@@ -163,8 +163,9 @@ pub fn restore_command(wl: &SavedWl) -> Option<std::process::Command> {
                 .collect()
         }
         (Some("firefox"), Some(url)) => ["firefox", "--new-window", url].map(String::from).into(),
+        // Chromium rewrites its command line as one space-separated string
         _ if let Some((id, profile)) = wl.web_app() => vec![
-            program_name(wl.argv.first()?),
+            program_name(wl.argv.first()?.split(' ').next()?),
             format!("--app-id={id}"),
             format!("--profile-directory={profile}"),
         ],
