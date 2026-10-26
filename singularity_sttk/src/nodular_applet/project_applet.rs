@@ -4,18 +4,20 @@
 use crate::{
     command_hub::{BG, CommandHubApplet},
     nodular_applet::{
-        Answer, AppletContext, EmbeddedId, NodeRequest, NodularAppletInitializer, StandardApplet,
-        WrapInitializer,
+        Answer, AppletContext, AppletSpawner, AppletSpawnerTrait, EmbeddedId, NodeRequest,
+        NodularAppletInitializer, StandardApplet, WrapInitializer,
         node_holder::NodeHolder,
         node_tree::{AttachClient, NodeId, NodeTree, PROJECT_ICON, SpawnClient, root_label_mut},
     },
+    session,
     standard_keybinds::{BROWSER, TERMINAL},
 };
 use singularity_common::{
     sap::{
         detached::{DetachedClient, DetachedTree, Layout},
         packets::{
-            AwaitedWl, NewWlSurface, NodeAction, SpawnPosition, StandardEvent, StandardRequest,
+            AwaitedWl, NewWlSurface, NodeAction, OpenApplet, SpawnPosition, StandardEvent,
+            StandardRequest,
         },
         session::{SavedApplet, SavedTree},
     },
@@ -278,6 +280,29 @@ impl ProjectApplet {
             project.holder.directory = directory;
             Box::new(project) as Box<dyn StandardApplet>
         })
+    }
+
+    /// Registered as `project` by the root, to restore saved projects (`save`); no args: an empty project
+    pub fn get_applet_spawner() -> AppletSpawner {
+        struct Spawner;
+        impl AppletSpawnerTrait for Spawner {
+            fn create_initializer(&self, args: &[&str]) -> Option<NodularAppletInitializer> {
+                args.is_empty().then(|| ProjectApplet::empty(None))
+            }
+
+            fn restore_initializer(
+                &self,
+                _args: &[&str],
+                inner: SavedTree,
+            ) -> Option<NodularAppletInitializer> {
+                Some(ProjectApplet::restorer(inner))
+            }
+
+            fn duplicate(&self) -> AppletSpawner {
+                Box::new(Self)
+            }
+        }
+        Box::new(Spawner)
     }
 
     /// Makes a project with nothing in it, in `directory`
@@ -831,13 +856,14 @@ impl StandardApplet for ProjectApplet {
             | StandardEvent::SettingsChanged(_)
             | StandardEvent::DamageAck(_)
             | StandardEvent::WlSurfaceRegistered(_)
+            | StandardEvent::Open(_)
             | StandardEvent::Pluck(_)
             | StandardEvent::Place(..)
             | StandardEvent::Focus(_)
             | StandardEvent::ToggleCollapsed(_)
             | StandardEvent::NodeAction(..) => {}
             // only the root gets these
-            StandardEvent::Capturing(_) | StandardEvent::Open { .. } => {}
+            StandardEvent::Capturing(_) => {}
         }
     }
 
@@ -936,14 +962,23 @@ impl StandardApplet for ProjectApplet {
         Ok(())
     }
 
+    fn take_open(&mut self, open: OpenApplet) -> Result<(), OpenApplet> {
+        if self.dissolved {
+            return Err(open);
+        }
+        self.holder.open(open);
+        Ok(())
+    }
+
     fn save(&self) -> Option<SavedApplet> {
-        (!self.dissolved).then(|| {
-            let mut contents = self.holder.tree.save();
-            contents.label = Some(self.name.clone());
-            contents.directory.clone_from(&self.holder.directory);
-            contents.icon.clone_from(&self.icon);
-            SavedApplet::Project(Box::new(contents))
-        })
+        if self.dissolved {
+            return None;
+        }
+        let mut contents = self.holder.tree.save();
+        contents.label = Some(self.name.clone());
+        contents.directory.clone_from(&self.holder.directory);
+        contents.icon.clone_from(&self.icon);
+        Some(session::saved_with_inner("project", Vec::new(), contents))
     }
 
     fn awaiting_wl(&self) -> Vec<AwaitedWl> {

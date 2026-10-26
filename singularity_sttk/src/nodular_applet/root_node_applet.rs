@@ -4,6 +4,8 @@ use crate::{
         AppletSpawner, NodeRequest, NodularAppletInitializer,
         node_holder::{NodeHolder, client_spawners},
         node_tree::{NodeId, NodeTree},
+        project_applet::ProjectApplet,
+        split_applet::SplitApplet,
         treeview::{TreeviewAction, TreeviewPointer, TreeviewRow, inner_layer_rows, treeview_rows},
     },
     session,
@@ -215,12 +217,15 @@ impl RootNodeApplet {
     #[must_use]
     fn new(
         root_initializer: NodularAppletInitializer,
-        applet_spawner_registry: BTreeMap<String, AppletSpawner>,
+        mut applet_spawner_registry: BTreeMap<String, AppletSpawner>,
         session_path: Option<PathBuf>,
         surface: SharedState<UITree>,
         request_sender: Sender<StandardRequest>,
         event_loop: &LoopHandle<'static, Self>,
     ) -> Self {
+        // saved projects and splits are made again by these
+        applet_spawner_registry.insert("project".to_string(), ProjectApplet::get_applet_spawner());
+        applet_spawner_registry.insert("split".to_string(), SplitApplet::get_applet_spawner());
         let applet_spawners = Arc::new(RwLock::new(applet_spawner_registry));
         let (spawn_client, attach_client) = client_spawners(
             event_loop,
@@ -402,10 +407,7 @@ impl RootNodeApplet {
             StandardEvent::SettingsChanged(_) => self.surface.damage(),
             // its tree is in the runner's directory
             StandardEvent::Directory(_) => {}
-            StandardEvent::Open { applet, args } => {
-                let args: Vec<&str> = args.iter().map(String::as_str).collect();
-                self.holder.open(&applet, &args);
-            }
+            StandardEvent::Open(open) => self.holder.open(open),
             StandardEvent::UIEvent(_)
             | StandardEvent::FocusChanged(..)
             | StandardEvent::Highlighted(..) => {

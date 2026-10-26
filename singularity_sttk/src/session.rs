@@ -2,16 +2,13 @@
 
 use crate::{
     command_hub::program_command,
-    nodular_applet::{
-        AppletContext, NodularAppletInitializer, StandardApplet, project_applet::ProjectApplet,
-        split_applet::SplitApplet,
-    },
+    nodular_applet::{AppletContext, NodularAppletInitializer, StandardApplet},
     standard_keybinds::standard_keybind_request,
 };
 use singularity_common::{
     sap::{
         packets::{AwaitedWl, StandardEvent},
-        session::{SavedApplet, SavedWl, Session, title_without_url},
+        session::{SavedApplet, SavedTree, SavedWl, Session, title_without_url},
     },
     utils::tree::world_tree::WorldTree,
 };
@@ -77,20 +74,33 @@ pub fn saved_with_path(name: &str, path: &Path) -> Option<SavedApplet> {
     Some(SavedApplet::Spawner {
         name: name.to_string(),
         args: vec![path.to_string_lossy().into_owned()],
+        inner: None,
     })
+}
+
+/// Saved as made by the spawner registered as `name` from `args` and its inner tree
+/// (`AppletSpawnerTrait::restore_initializer`)
+pub fn saved_with_inner(name: &str, args: Vec<String>, inner: SavedTree) -> SavedApplet {
+    SavedApplet::Spawner {
+        name: name.to_string(),
+        args,
+        inner: Some(Box::new(inner)),
+    }
 }
 
 /// Makes the saved applet again. A wl client isn't started: its tile hibernates until `wake`.
 pub fn restore(saved: SavedApplet) -> NodularAppletInitializer {
     match &saved {
-        SavedApplet::Spawner { name, args } => {
-            let (name, args) = (name.clone(), args.clone());
+        SavedApplet::Spawner { name, args, inner } => {
+            let (name, args, inner) = (name.clone(), args.clone(), inner.clone());
             let initializer: NodularAppletInitializer = Box::new(move |hook: AppletContext| {
                 let args: Vec<&str> = args.iter().map(String::as_str).collect();
                 match hook
                     .find_applet_spawner(&name)
-                    .and_then(|spawner| spawner.create_initializer(&args))
-                {
+                    .and_then(|spawner| match inner {
+                        Some(inner) => spawner.restore_initializer(&args, *inner),
+                        None => spawner.create_initializer(&args),
+                    }) {
                     Some(initializer) => initializer(hook),
                     None => Box::new(RestoringApplet {
                         label: format!("Couldn't restore {name} {}", args.join(" ")),
@@ -101,8 +111,6 @@ pub fn restore(saved: SavedApplet) -> NodularAppletInitializer {
             });
             initializer
         }
-        SavedApplet::Project(tree) => ProjectApplet::restorer((**tree).clone()),
-        SavedApplet::Split(tree) => SplitApplet::restorer((**tree).clone()),
         SavedApplet::Wl(wl) => {
             let label = format!("{} (inactive)", wl_label(wl));
             RestoringApplet::initializer(saved, label)
@@ -144,7 +152,7 @@ fn wl_label(wl: &SavedWl) -> String {
 }
 
 /// Browsers open the saved url in a new window (of a running instance, if any); other clients run as they were
-fn restore_command(wl: &SavedWl) -> Option<std::process::Command> {
+pub fn restore_command(wl: &SavedWl) -> Option<std::process::Command> {
     let argv: Vec<String> = match (wl.app_id.as_deref(), wl.url()) {
         (Some("org.qutebrowser.qutebrowser" | "qutebrowser"), url) => {
             ["qutebrowser", "--target", "window"]

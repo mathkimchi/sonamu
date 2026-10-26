@@ -548,7 +548,7 @@ impl StandardApplet for CommandHubApplet {
             // doesn't show wl surfaces (only the root gets these)
             StandardEvent::WlSurfaceRegistered(_)
             | StandardEvent::Capturing(_)
-            | StandardEvent::Open { .. } => {}
+            | StandardEvent::Open(_) => {}
         }
     }
 
@@ -575,6 +575,7 @@ impl StandardApplet for CommandHubApplet {
         Some(singularity_common::sap::session::SavedApplet::Spawner {
             name: "command_hub".to_string(),
             args: Vec::new(),
+            inner: None,
         })
     }
 

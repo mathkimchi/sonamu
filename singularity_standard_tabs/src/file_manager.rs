@@ -10,6 +10,7 @@ use singularity_common::{
             AwaitedWl, NewWlSurface, NodeAction, SpawnPosition, StandardEvent, StandardRequest,
             WlSurfaceId,
         },
+        session::{SavedApplet, SavedTree},
     },
     settings::{self, Palette, Settings},
     utils::tree::{
@@ -25,6 +26,7 @@ use singularity_sttk::{
         Answer, AppletContext, AppletSpawner, AppletSpawnerTrait, EmbeddedId, NodeRequest,
         NodularAppletInitializer, StandardApplet, with_opacity,
     },
+    session,
     standard_keybinds::{handle_standard_keybinds, standard_keybind_request},
     wl_surface_applet::WlSurfaceApplet,
 };
@@ -37,6 +39,7 @@ use sonamu_ui::{
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
+    process::Command,
     sync::mpsc,
 };
 
@@ -125,8 +128,9 @@ pub struct FileManagerApplet {
     preview: Option<Preview>,
     /// The file list row under the mouse
     hovered: Option<usize>,
-    /// Okular processes started for these PDFs, whose windows become documents (`take_wl_surface`)
-    starting: Vec<(u32, PathBuf)>,
+    /// Okular processes started for these PDFs (or restored wl clients), whose windows become documents
+    /// (`take_wl_surface`)
+    starting: Vec<(u32, Option<PathBuf>)>,
     /// Pids of `starting` processes that ended, from the threads waiting on them
     exited_sender: mpsc::Sender<u32>,
     exited: mpsc::Receiver<u32>,
@@ -164,21 +168,32 @@ impl CreatableNodularApplet<PathBuf> for FileManagerApplet {
     }
 }
 impl FileManagerApplet {
-    /// Args: the root directory (default: the directory of the tree it is in, eg a project's)
+    /// Args: the root directory (default: the directory of the tree it is in, eg a project's).
+    /// Restored with its documents as its saved inner tree's children (`save`).
     #[must_use]
     pub fn get_applet_spawner() -> AppletSpawner {
         struct Spawner;
         impl AppletSpawnerTrait for Spawner {
             fn create_initializer(&self, args: &[&str]) -> Option<NodularAppletInitializer> {
-                if let Some(root) = args.first() {
-                    return Some(FileManagerApplet::get_boxed_initiator(PathBuf::from(root)));
-                }
+                self.restore_initializer(args, SavedTree::default())
+            }
+
+            fn restore_initializer(
+                &self,
+                args: &[&str],
+                inner: SavedTree,
+            ) -> Option<NodularAppletInitializer> {
+                let root = args.first().map(PathBuf::from);
+                let follows_directory = root.is_none();
                 // until its node answers
-                let root = std::env::current_dir().ok()?;
+                let root = root.or_else(|| std::env::current_dir().ok())?;
                 Some(Box::new(move |hook: AppletContext| {
-                    hook.get_directory();
+                    if follows_directory {
+                        hook.get_directory();
+                    }
                     let mut file_manager = FileManagerApplet::new(root, hook);
-                    file_manager.follows_directory = true;
+                    file_manager.follows_directory = follows_directory;
+                    file_manager.restore_documents(inner.children);
                     Box::new(file_manager)
                 }))
             }
@@ -324,10 +339,21 @@ impl FileManagerApplet {
 
     /// Its window becomes a document (`take_wl_surface`)
     fn start_okular(&mut self, file: PathBuf) {
-        if self.starting.iter().any(|(_, starting)| *starting == file) {
+        if self
+            .starting
+            .iter()
+            .any(|(_, starting)| starting.as_ref() == Some(&file))
+        {
             return;
         }
-        match program_command("okular", &[]).arg(&file).spawn() {
+        let mut command = program_command("okular", &[]);
+        command.arg(&file);
+        self.start(command, Some(file));
+    }
+
+    /// Its window becomes a document (`take_wl_surface`)
+    fn start(&mut self, mut command: Command, file: Option<PathBuf>) {
+        match command.spawn() {
             Ok(mut child) => {
                 let pid = child.id();
                 self.starting.push((pid, file));
@@ -343,8 +369,36 @@ impl FileManagerApplet {
                     waker.wake();
                 });
             }
-            Err(err) => self.status = Some(format!("Can't start okular: {err}")),
+            Err(err) => {
+                let program = command.get_program().to_string_lossy();
+                self.status = Some(format!("Can't start {program}: {err}"));
+            }
         }
+    }
+
+    /// Makes its saved documents again, none active; wl clients are started, their windows becoming documents
+    fn restore_documents(&mut self, documents: Vec<SavedTree>) {
+        for saved in documents.into_iter().filter_map(|document| document.main) {
+            let file = saved_file(&saved);
+            match saved {
+                SavedApplet::Wl(wl) => {
+                    if let Some(command) = session::restore_command(&wl) {
+                        self.start(command, file);
+                    }
+                }
+                saved => {
+                    let (id, handle) = self.hook.embed(session::restore(saved));
+                    self.add_document(Document {
+                        id,
+                        handle,
+                        file,
+                        wl: None,
+                    });
+                }
+            }
+        }
+        self.set_active(None);
+        self.set_pane(Pane::Files);
     }
 
     /// Closes the document; a wl client is asked first, and its document goes once its window does
@@ -941,7 +995,7 @@ impl StandardApplet for FileManagerApplet {
         self.add_document(Document {
             id,
             handle,
-            file: Some(file),
+            file,
             wl,
         });
         self.hook.damage_window();
@@ -991,9 +1045,30 @@ impl StandardApplet for FileManagerApplet {
         )))
     }
 
-    /// Only its root; its open documents aren't saved
-    fn save(&self) -> Option<singularity_common::sap::session::SavedApplet> {
-        singularity_sttk::session::saved_with_path("file_manager", &self.root)
+    /// Its root (none if it follows its tree's directory), and its documents as its inner tree's children,
+    /// but not which is active
+    fn save(&self) -> Option<SavedApplet> {
+        let args = if self.follows_directory {
+            Vec::new()
+        } else {
+            let root = std::path::absolute(&self.root).ok()?;
+            vec![root.to_string_lossy().into_owned()]
+        };
+        let children = self
+            .documents
+            .iter()
+            .filter_map(|document| {
+                Some(SavedTree {
+                    main: Some(document.handle.get_treeview().saved?),
+                    ..SavedTree::default()
+                })
+            })
+            .collect();
+        let inner = SavedTree {
+            children,
+            ..SavedTree::default()
+        };
+        Some(session::saved_with_inner("file_manager", args, inner))
     }
 
     /// On the selected element while selecting; otherwise inside the active document while the document pane has
@@ -1126,12 +1201,13 @@ impl StandardApplet for FileManagerApplet {
                 return;
             }
             NodeRequest::Standard(_) => return,
-            // documents can't hold children, split, be wrapped or hold wl surfaces here, so this node does
+            // documents can't hold children, split, be wrapped or hold wl surfaces or opened applets here, so this node does
             request @ (NodeRequest::AddChild(_)
             | NodeRequest::Split { .. }
             | NodeRequest::Wrap(_)
             | NodeRequest::Run(_)
             | NodeRequest::AddWlSurface(_)
+            | NodeRequest::Open(_)
             | NodeRequest::FocusSelf) => {
                 self.hook.request(request);
             }
@@ -1156,6 +1232,21 @@ impl StandardApplet for FileManagerApplet {
         // a document's surface or title may have changed
         self.hook.damage_window();
         self.hook.damage_treeview();
+    }
+}
+
+/// The file a saved document shows: a code editor's, or a PDF its wl client (eg Okular) was started with
+fn saved_file(saved: &SavedApplet) -> Option<PathBuf> {
+    match saved {
+        SavedApplet::Spawner { name, args, .. } if name == "code_editor" => {
+            args.first().map(PathBuf::from)
+        }
+        SavedApplet::Wl(wl) => wl
+            .argv
+            .last()
+            .map(PathBuf::from)
+            .filter(|file| is_pdf(file)),
+        SavedApplet::Spawner { .. } => None,
     }
 }
 

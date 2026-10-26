@@ -25,7 +25,7 @@ DEVLOG.md is 10k+ lines, read it with tail.
 - An applet owns its inner tree directly; it changes its children only by requests to its node. See `.claude/CLIENT_HANDLE_REFACTOR.md`.
 - Sessions: applets publish `StandardApplet::save` with their treeview; the root saves the tree every 2 s and restores it on start (wl clients by command line, matched back by pid/app id). See `.claude/SESSIONS.md`.
 - Settings (#63): JSON, or JSON printed by an executable settings program, live-reloaded. See `.claude/SETTINGS.md`.
-- Other processes reach the runner over `$SONAMU_SOCKET` (`singularity_common::msg`, `singularity_sar/src/msg_socket.rs`): `sonamu-msg open <applet> [args]` becomes `StandardEvent::Open` to the root, which adds that registered applet after the focus (`NodeHolder::open`). `assets/sonamu-file-manager.desktop` makes the file manager the default for folders.
+- Other processes reach the runner over `$SONAMU_SOCKET` (`singularity_common::msg`, `singularity_sar/src/msg_socket.rs`): `sonamu-msg open <applet> [args]` becomes `StandardEvent::Open` to the root, which places that registered applet like a new wl surface: into the focused applet if focus is inside it (`StandardApplet::take_open`, else `NodeRequest::Open` back), otherwise as the focused node's child (`NodeHolder::open`). `assets/sonamu-file-manager.desktop` makes the file manager the default for folders.
 - World tree, paths ("inside" a node), focus, selectors, and who owns what (incl. projects, which are plain applets holding a `NodeTree`): `.claude/WORLD_TREE.md`.
 
 # Rules

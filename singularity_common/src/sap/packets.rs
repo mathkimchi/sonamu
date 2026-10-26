@@ -173,9 +173,15 @@ pub enum StandardEvent {
     /// The working directory of the tree the client is in (`None`: the runner's),
     /// when it changes or was asked for (eg a project's directory)
     Directory(Option<std::path::PathBuf>),
-    /// Open the applet registered under `applet` with `args` beside the focus, focused
-    /// (eg from `sonamu-msg`). Only the root gets these.
-    Open { applet: String, args: Vec<String> },
+    /// Open an applet where focus is, like a new wl surface (eg from `sonamu-msg`)
+    Open(OpenApplet),
+}
+
+/// The applet registered under `applet`, made with `args`
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenApplet {
+    pub applet: String,
+    pub args: Vec<String>,
 }
 
 /// Compositor to wl surface applet, through `NewWlSurface::wl_event_queue`

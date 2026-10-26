@@ -2,7 +2,10 @@
 
 use crate::runner::AppletRunner;
 use calloop::{Interest, LoopHandle, Mode, PostAction, generic::Generic};
-use singularity_common::{msg::Message, sap::packets::StandardEvent};
+use singularity_common::{
+    msg::Message,
+    sap::packets::{OpenApplet, StandardEvent},
+};
 use std::{
     io::Read,
     os::unix::net::{UnixListener, UnixStream},
@@ -41,7 +44,7 @@ impl MsgSocket {
                         match read_message(stream) {
                             Ok(Message::Open { applet, args }) => runner
                                 .root_client
-                                .send_event(StandardEvent::Open { applet, args }),
+                                .send_event(StandardEvent::Open(OpenApplet { applet, args })),
                             Err(err) => eprintln!("Bad message on the socket: {err}"),
                         }
                     }

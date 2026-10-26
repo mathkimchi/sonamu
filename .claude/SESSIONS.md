@@ -7,8 +7,18 @@ Sonamu owns the session; apps' own session restore should be off.
 
 - **Saved form** (`singularity_common/src/sap/session.rs`): `Session { tree: SavedTree, focus }`.
   `SavedTree { main: Option<SavedApplet>, layout, children, label }` (`label`: only a project's inner root, its name).
-  `SavedApplet` is one of `Spawner { name, args }` (made again by the registered applet spawner, like the command hub does),
-  `Project(Box<SavedTree>)`, or `Wl(SavedWl { argv, cwd, app_id, title })`.
+  `SavedApplet` is one of `Spawner { name, args }` (made again by the registered applet spawner, like the command hub does)
+  or `Wl(SavedWl { argv, cwd, app_id, title })`.
+- **Applets with an inner tree** (#130) save it as `Spawner::inner` (`session::saved_with_inner`), restored by
+  `AppletSpawnerTrait::restore_initializer(args, inner)` (default: `create_initializer`, so other spawners never see it).
+  JSON is only used to read and write the file; published saved forms stay structured.
+  - `project`: no args, inner = its `NodeTree::save()` with label/directory/icon on the inner root (the treeview's
+    icon reads `inner.icon`). `split`: no args, inner = its `NodeTree::save()`. Both spawners are registered by
+    `RootNodeApplet` itself; `project` with no args (not restoring) is an empty project, `split` can't be made.
+  - `file_manager`: args = its root (none when it follows its tree's directory), inner's children = its documents,
+    each `main` saved by the document itself. Restored with `session::restore`, none active; a wl document (eg Okular)
+    is started with `session::restore_command` and its window claimed by pid like a newly opened PDF (`starting`).
+    A document's file is read back from its saved form (`saved_file`: a code editor's arg, a PDF in the wl argv).
 - **Publishing**: every applet publishes `StandardApplet::save()` as `Treeview::saved`, so a holder reads it
   synchronously like the treeview. `None` (the default, eg the help) leaves the node out, its children taking its place.
   A split left with one pane is left out too. A project saves its whole `NodeTree` (`NodeTree::save`).
@@ -42,6 +52,10 @@ Sonamu owns the session; apps' own session restore should be off.
     its own windows on top of Sonamu's: duplicates, which then get saved as new tiles.
 
 ## Decisions
+
+- No `SavedApplet` variant per applet (projects and splits had them): every native applet is a `Spawner`, with its
+  inner tree in `inner` if it has one (#130). Not JSON in an arg: that would serialize on every treeview publish. Sessions from before that don't parse (moved to `.json.bad`).
+- A restored split asks its node for its directory (`get_directory`), like a new one gets it from `wrapper` (#129).
 
 - Sonamu owns the session, not the apps: the alternative means guessing which restored window goes in which tile.
 - Saved state is published with the treeview, not collected by request and answer: synchronous, no new messages,
@@ -95,7 +109,7 @@ User-facing setup (incl. NixOS / Home Manager) is in `docs/persistent_apps.md`.
 - Every toplevel is a tile, so dialogs are saved and restored as windows too (no `xdg_toplevel.parent` check).
 - A wl tile's saved cwd only updates when it publishes (eg a title change).
 - A placeholder for a client that never opens a window stays "Starting ..." forever (Ctrl+W drops it). No timeout.
-- Not saved: the view root (Super+V), collapsed nodes, the file manager's open documents, unsaved editor buffers.
+- Not saved: the view root (Super+V), collapsed nodes, the file manager's active document, unsaved editor buffers.
 - Killed with SIGKILL / crash: up to 2 s of changes are lost.
 - `NodeRequest::Run` and the command hub's `$` still leave zombies when their child exits (pre-existing).
 - On restore, every wl client is spawned while the root starts, before the compositor loop runs; they connect once it does.

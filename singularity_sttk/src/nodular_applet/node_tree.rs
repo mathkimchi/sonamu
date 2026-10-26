@@ -355,18 +355,7 @@ impl NodeTree {
     }
 
     /// Makes the saved node and its descendants under `parent` (not added to its children)
-    fn restore_subtree(&mut self, parent: Option<NodeId>, mut saved: SavedTree) -> NodeId {
-        // a split saved before splits were applets: one now, holding its panes
-        if parent.is_some() && saved.main.is_none() && matches!(saved.layout, Layout::Split(_)) {
-            saved = SavedTree {
-                main: Some(SavedApplet::Split(Box::new(saved))),
-                layout: Layout::Single,
-                children: Vec::new(),
-                label: None,
-                directory: None,
-                icon: None,
-            };
-        }
+    fn restore_subtree(&mut self, parent: Option<NodeId>, saved: SavedTree) -> NodeId {
         let hibernated = match &saved.main {
             Some(SavedApplet::Wl(wl)) => Some(wl.clone()),
             _ => None,
@@ -1635,10 +1624,14 @@ pub(crate) const PROJECT_ICON: char = '\u{f0b1}';
 /// A project's is the one it picked, if any.
 fn icon(saved: Option<&SavedApplet>) -> Option<String> {
     let icon = match saved? {
-        SavedApplet::Project(contents) => {
+        SavedApplet::Spawner {
+            name,
+            inner: Some(contents),
+            ..
+        } if name == "project" => {
             return contents.icon.clone().or(Some(PROJECT_ICON.to_string()));
         }
-        SavedApplet::Split(_) => return None,
+        SavedApplet::Spawner { name, .. } if name == "split" => return None,
         SavedApplet::Spawner { name, .. } => match name.as_str() {
             "command_hub" => '\u{f054}',
             "file_manager" => '\u{f07b}',

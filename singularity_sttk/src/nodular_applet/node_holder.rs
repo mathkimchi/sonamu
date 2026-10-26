@@ -4,7 +4,8 @@
 use crate::{
     command_hub::CommandHubApplet,
     nodular_applet::{
-        AppletClient, AppletSpawnerRegistry, NodeRequest, NodularAppletInitializer, WrapInitializer,
+        AppletClient, AppletSpawnerRegistry, NodeRequest, NodularAppletInitializer,
+        WrapInitializer,
         node_tree::{AttachClient, NodeId, NodeTree, SpawnClient},
         project_applet::ProjectApplet,
         split_applet::SplitApplet,
@@ -17,8 +18,8 @@ use singularity_common::{
         client_handle::ClientHandle,
         detached::{DetachedClient, DetachedTree},
         packets::{
-            NewApplet, NewWlSurface, NodeAction, SpawnPosition, StandardEvent, StandardRequest,
-            WlSurfaceId,
+            NewApplet, NewWlSurface, NodeAction, OpenApplet, SpawnPosition, StandardEvent,
+            StandardRequest, WlSurfaceId,
         },
     },
     settings,
@@ -286,13 +287,24 @@ impl NodeHolder {
         }
     }
 
-    /// Adds the applet registered under `applet` after the focused node, focused inside
-    pub fn open(&mut self, applet: &str, args: &[&str]) {
-        let Some(initializer) = self.initializer(applet, args) else {
+    /// Like `add_wl_surface`: into the focused node's main if focus is inside it
+    /// (it may take it or give it back with `NodeRequest::Open`), otherwise under the focused node
+    pub fn open(&mut self, open: OpenApplet) {
+        let id = self.tree.focused_node();
+        if self.tree.is_inner(id) {
+            self.tree.send_event(id, StandardEvent::Open(open));
+        } else {
+            self.open_under(id, &open);
+        }
+    }
+
+    /// As the node's last child, focused inside. It's in this tree's directory unless `args` say otherwise.
+    fn open_under(&mut self, parent: NodeId, OpenApplet { applet, args }: &OpenApplet) {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(initializer) = self.initializer(applet, &args) else {
             return;
         };
-        let (parent, position) = self.tree.spawn_target(self.tree.focused_node(), true);
-        if let Some(new) = self.tree.add_child_at(parent, position, initializer) {
+        if let Some(new) = self.tree.add_child(parent, initializer) {
             self.tree.focus(new, true);
         }
     }
@@ -467,6 +479,7 @@ impl NodeHolder {
                 self.run(program);
             }
             NodeRequest::AddWlSurface(surface) => self.tree.add_wl_surface(id, surface),
+            NodeRequest::Open(open) => self.open_under(id, &open),
             NodeRequest::GetDirectory => self
                 .tree
                 .send_event(id, StandardEvent::Directory(self.directory.clone())),

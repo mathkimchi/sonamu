@@ -17,7 +17,10 @@ impl Message {
     pub fn encode(&self) -> Vec<u8> {
         let Self::Open { applet, args } = self;
         let mut bytes = Vec::new();
-        for field in ["open", applet].into_iter().chain(args.iter().map(String::as_str)) {
+        for field in ["open", applet]
+            .into_iter()
+            .chain(args.iter().map(String::as_str))
+        {
             bytes.extend_from_slice(field.as_bytes());
             bytes.push(0);
         }
@@ -41,8 +44,8 @@ impl Message {
 /// Where the runner of this wl socket listens: in `XDG_RUNTIME_DIR` (else the temp dir)
 #[must_use]
 pub fn socket_path(wayland_socket: &OsStr) -> PathBuf {
-    let directory = std::env::var_os("XDG_RUNTIME_DIR")
-        .map_or_else(std::env::temp_dir, PathBuf::from);
+    let directory =
+        std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
     let mut name = std::ffi::OsString::from("sonamu-");
     name.push(wayland_socket);
     name.push(".sock");

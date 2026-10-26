@@ -14,7 +14,7 @@ pub struct Session {
 }
 
 /// A node, like a `DetachedTree` but saved
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedTree {
     /// `None` for containers and splits
     pub main: Option<SavedApplet>,
@@ -36,12 +36,14 @@ pub struct SavedTree {
 /// How to make a node's main again
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SavedApplet {
-    /// Made by the registered applet spawner with this name, from these args (like the command hub does)
-    Spawner { name: String, args: Vec<String> },
-    /// A project holding this tree as its inner tree
-    Project(Box<SavedTree>),
-    /// A split holding this tree (its root the split, its children the panes) as its inner tree
-    Split(Box<SavedTree>),
+    /// Made by the registered applet spawner with this name, from these args (like the command hub does),
+    /// and its inner tree if it saves one (eg projects)
+    Spawner {
+        name: String,
+        args: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inner: Option<Box<SavedTree>>,
+    },
     /// A wl client's toplevel
     Wl(SavedWl),
 }

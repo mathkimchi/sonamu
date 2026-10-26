@@ -7,11 +7,11 @@ use singularity_common::{
         client_handle::ClientHandle,
         detached::{Axis, DetachedClient, DetachedTree},
         packets::{
-            AwaitedWl, NewWlSurface, NodeAction, SpawnPosition, StandardEvent, StandardRequest,
-            StateKind, Treeview, WlSurfaceEvent,
+            AwaitedWl, NewWlSurface, NodeAction, OpenApplet, SpawnPosition, StandardEvent,
+            StandardRequest, StateKind, Treeview, WlSurfaceEvent,
         },
         raw_client_initializer::RawClientInitializer,
-        session::SavedApplet,
+        session::{SavedApplet, SavedTree},
         shared_state::{SharedState, StatePublisher},
     },
     settings::{self, Settings},
@@ -131,6 +131,11 @@ pub trait StandardApplet {
         Err(surface)
     }
 
+    /// An applet to open while focus is inside this applet (`StandardEvent::Open`), like `take_wl_surface`
+    fn take_open(&mut self, open: OpenApplet) -> Result<(), OpenApplet> {
+        Err(open)
+    }
+
     /// How to make it again on the next start (see `.claude/SESSIONS.md`); `None` isn't saved.
     /// Published with the treeview, so call `AppletContext::damage_treeview` when it changes
     fn save(&self) -> Option<SavedApplet> {
@@ -186,6 +191,15 @@ pub type NodularAppletInitializer =
 pub trait AppletSpawnerTrait: Send + Sync {
     fn create_initializer(&self, args: &[&str]) -> Option<NodularAppletInitializer>;
 
+    /// Makes a saved applet again that saved its inner tree too (`session::saved_with_inner`)
+    fn restore_initializer(
+        &self,
+        args: &[&str],
+        _inner: SavedTree,
+    ) -> Option<NodularAppletInitializer> {
+        self.create_initializer(args)
+    }
+
     /// Clone on its own is not dyn compatible because it outputs -> Self.
     /// Using the AppletSpawnerTrait, AppletSpawner workaround for that.
     fn duplicate(&self) -> AppletSpawner;
@@ -227,6 +241,8 @@ pub enum NodeRequest {
     Run(&'static str),
     /// A wl surface the applet didn't take (`StandardApplet::take_wl_surface`), as a child of its node
     AddWlSurface(NewWlSurface),
+    /// An applet to open the applet didn't take (`StandardApplet::take_open`), as a child of its node
+    Open(OpenApplet),
     /// Asks for the working directory of the tree the applet is in, answered with `StandardEvent::Directory`
     GetDirectory,
 }
@@ -436,6 +452,11 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         let _ = state
                             .request_sender
                             .send(NodeRequest::AddWlSurface(surface));
+                    }
+                }
+                calloop::channel::Event::Msg(StandardEvent::Open(open)) => {
+                    if let Err(open) = state.applet.take_open(open) {
+                        let _ = state.request_sender.send(NodeRequest::Open(open));
                     }
                 }
                 calloop::channel::Event::Msg(StandardEvent::UIEvent(ui_event))

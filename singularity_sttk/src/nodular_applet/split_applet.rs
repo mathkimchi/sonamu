@@ -1,15 +1,21 @@
 //! A split: an applet holding its panes as its inner tree, like a project holds its contents.
 //! Its node doesn't know it is a split; it only sees an applet with an inner tree.
 
-use crate::nodular_applet::{
-    Answer, AppletContext, EmbeddedId, NodeRequest, NodularAppletInitializer, StandardApplet,
-    WrapInitializer,
-    node_holder::NodeHolder,
-    node_tree::{AttachClient, NodeId, NodeTree, SpawnClient},
+use crate::{
+    nodular_applet::{
+        Answer, AppletContext, AppletSpawner, AppletSpawnerTrait, EmbeddedId, NodeRequest,
+        NodularAppletInitializer, StandardApplet, WrapInitializer,
+        node_holder::NodeHolder,
+        node_tree::{AttachClient, NodeId, NodeTree, SpawnClient},
+    },
+    session,
 };
 use singularity_common::sap::{
     detached::{Axis, DetachedClient, DetachedTree, Layout},
-    packets::{AwaitedWl, NewWlSurface, NodeAction, SpawnPosition, StandardEvent, StandardRequest},
+    packets::{
+        AwaitedWl, NewWlSurface, NodeAction, OpenApplet, SpawnPosition, StandardEvent,
+        StandardRequest,
+    },
     session::{SavedApplet, SavedTree},
 };
 use singularity_common::utils::tree::world_tree::{WorldTree, WorldTreePath};
@@ -56,13 +62,37 @@ impl SplitApplet {
         })
     }
 
-    /// Makes a saved split again, holding its saved panes
+    /// Makes a saved split again, holding its saved panes, in the directory of the tree it is in
     pub fn restorer(contents: SavedTree) -> NodularAppletInitializer {
         Box::new(move |hook| {
+            hook.get_directory();
             Box::new(Self::with_tree(hook, |spawn_client, attach_client| {
                 NodeTree::restore(contents, spawn_client, attach_client)
             })) as Box<dyn StandardApplet>
         })
+    }
+
+    /// Registered as `split` by the root, to restore saved splits (`save`); it can't be made new from args
+    pub fn get_applet_spawner() -> AppletSpawner {
+        struct Spawner;
+        impl AppletSpawnerTrait for Spawner {
+            fn create_initializer(&self, _args: &[&str]) -> Option<NodularAppletInitializer> {
+                None
+            }
+
+            fn restore_initializer(
+                &self,
+                _args: &[&str],
+                inner: SavedTree,
+            ) -> Option<NodularAppletInitializer> {
+                Some(SplitApplet::restorer(inner))
+            }
+
+            fn duplicate(&self) -> AppletSpawner {
+                Box::new(Self)
+            }
+        }
+        Box::new(Spawner)
     }
 
     /// Holds the tree made with clients embedded in it
@@ -138,13 +168,14 @@ impl StandardApplet for SplitApplet {
             | StandardEvent::SettingsChanged(_)
             | StandardEvent::DamageAck(_)
             | StandardEvent::WlSurfaceRegistered(_)
+            | StandardEvent::Open(_)
             | StandardEvent::Pluck(_)
             | StandardEvent::Place(..)
             | StandardEvent::Focus(_)
             | StandardEvent::ToggleCollapsed(_)
             | StandardEvent::NodeAction(..) => {}
             // only the root gets these
-            StandardEvent::Capturing(_) | StandardEvent::Open { .. } => {}
+            StandardEvent::Capturing(_) => {}
         }
     }
 
@@ -237,8 +268,23 @@ impl StandardApplet for SplitApplet {
         Ok(())
     }
 
+    fn take_open(&mut self, open: OpenApplet) -> Result<(), OpenApplet> {
+        if self.dissolved {
+            return Err(open);
+        }
+        self.holder.open(open);
+        Ok(())
+    }
+
     fn save(&self) -> Option<SavedApplet> {
-        (!self.dissolved).then(|| SavedApplet::Split(Box::new(self.holder.tree.save())))
+        if self.dissolved {
+            return None;
+        }
+        Some(session::saved_with_inner(
+            "split",
+            Vec::new(),
+            self.holder.tree.save(),
+        ))
     }
 
     fn awaiting_wl(&self) -> Vec<AwaitedWl> {

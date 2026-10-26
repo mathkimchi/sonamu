@@ -1,4 +1,6 @@
-use crate::{msg_socket::MsgSocket, pluck_place::PluckPlace, smithay::SmithayState, ui_handle::UIHandle};
+use crate::{
+    msg_socket::MsgSocket, pluck_place::PluckPlace, smithay::SmithayState, ui_handle::UIHandle,
+};
 use calloop::{EventLoop, LoopHandle, LoopSignal};
 use singularity_common::{
     msg,

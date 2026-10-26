@@ -14,7 +14,7 @@
   picker listing `ICONS` (Nerd Font) where the contents were: Up/Down + Enter or a click picks one, any typed
   character (eg an emoji) is used as is, Backspace goes back to the default (`PROJECT_ICON`), Esc cancels. Also shown
   before the name. Saved as `SavedTree::icon` on the inner root (like `label`), and the treeview's `icon` reads it
-  from the published `SavedApplet::Project`.
+  from the published `project` spawner's `inner`.
 - Previews (#82): below the rows, a card per child of the inner root (`CARD_WIDTH` wide, the project's own shape, wrapping
   into columns), each showing what that child shows (`NodeTree::preview`: its displayed node's surface, a split's first
   pane) scaled down to fit with `UIElement::Scaled`, over its number and label. They update live, since a child's
