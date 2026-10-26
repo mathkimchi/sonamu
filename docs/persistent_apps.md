@@ -24,8 +24,7 @@ reopened with `firefox --new-window <url>`.
 Download
 [sonamu.xpi](https://github.com/mathkimchi/singularity/releases/download/firefox-ext-v0.1.0/sonamu.xpi),
 then in Firefox, open `about:addons`, click the gear, then Install Add-on From File. It's signed, so release Firefox
-takes it. Firefox's install prompt doesn't show under Sonamu yet, so install it while running Firefox in another
-compositor (it stays installed in your profile). (To change it, see
+takes it. (To change it, see
 [extras/firefox/README.md](../extras/firefox/README.md).)
 
 To save private windows' urls too, allow it in private windows (`about:addons` → Sonamu → Run in Private Windows).

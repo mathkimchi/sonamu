@@ -108,8 +108,11 @@ User-facing setup (incl. NixOS / Home Manager) is in `docs/persistent_apps.md`.
   first window's cwd, and two awaiting tiles of the same app may get each other's windows (urls swapped).
 - Plucking or wrapping a tile while it is still "Starting ..." drops its `awaiting` (`DetachedTree` has no field for it):
   the placeholder stays, and the window opens at the focus instead.
-- Firefox's add-on install prompt (a doorhanger, `xdg_popup`) doesn't show under Sonamu, so the extension is installed
-  from another compositor (#77).
+- Fixed (#77): Firefox's add-on install prompt didn't show. Every toplevel was always `Activated`, and Firefox only
+  shows doorhangers in its active window, so it never did; now only the keyboard focus's toplevel is (`focus_changed`).
+  The prompt is a subsurface, which was drawn under the page: surface trees were walked top to bottom
+  (`surface_tree_layers` now uses `with_surface_tree_upward`). `surface_under` now respects input regions, since
+  Firefox's content subsurfaces have empty ones and its root takes the clicks.
 - Every toplevel is a tile, so dialogs are saved and restored as windows too (no `xdg_toplevel.parent` check).
 - A wl tile's saved cwd only updates when it publishes (eg a title change).
 - A placeholder for a client that never opens a window stays "Starting ..." forever (Ctrl+W drops it). No timeout.

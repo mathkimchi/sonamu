@@ -46,7 +46,7 @@ use smithay::{
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
             SurfaceData, TraversalAction, send_surface_state, with_states,
-            with_surface_tree_downward,
+            with_surface_tree_downward, with_surface_tree_upward,
         },
         cursor_shape::CursorShapeManagerState,
         fractional_scale::{
@@ -741,7 +741,8 @@ impl SmithayState {
         };
 
         let mut layers = Vec::new();
-        with_surface_tree_downward(
+        // upward: bottom to top
+        with_surface_tree_upward(
             root,
             origin,
             |_, states, &location| match view(states) {
@@ -865,10 +866,9 @@ impl SmithayState {
             .any(|layer| &layer.surface == surface)
     }
 
-    /// The topmost surface of the toplevel under `point` (relative to the root),
+    /// The topmost surface of the toplevel under `point` (relative to the root) that takes input there,
     /// and that surface's offset from the root.
-    ///
-    /// TODO: respect input regions
+    /// (eg Firefox's content subsurfaces have an empty input region, so its root gets the clicks)
     fn surface_under(
         root: &WlSurface,
         point: Point<f64, Logical>,
@@ -877,9 +877,17 @@ impl SmithayState {
             .into_iter()
             .rev()
             .find(|layer| {
-                Rectangle::new(layer.location, layer.view.dst)
-                    .to_f64()
-                    .contains(point)
+                let point = point - layer.location.to_f64();
+                Rectangle::from_size(layer.view.dst).to_f64().contains(point)
+                    && with_states(&layer.surface, |states| {
+                        states
+                            .cached_state
+                            .get::<SurfaceAttributes>()
+                            .current()
+                            .input_region
+                            .as_ref()
+                            .is_none_or(|region| region.contains(point.to_i32_floor()))
+                    })
             })
             .map(|layer| (layer.surface, layer.location.to_f64()))
     }
@@ -1263,6 +1271,30 @@ impl SeatHandler for AppletRunner {
         let client = focused.and_then(|surface| display_handle.get_client(surface.id()).ok());
         set_data_device_focus(display_handle, seat, client.clone());
         set_primary_focus(display_handle, seat, client);
+
+        // like other compositors, only the keyboard focus's toplevel is activated
+        // (eg Firefox only shows its doorhangers in an active window, #77)
+        let focused = focused.map(|surface| {
+            self.smithay_state
+                .popup_manager
+                .find_popup(surface)
+                .and_then(|popup| find_popup_root_surface(&popup).ok())
+                .unwrap_or_else(|| surface.clone())
+        });
+        for toplevel in self.smithay_state.xdg_shell_state.toplevel_surfaces() {
+            let activated = focused.as_ref() == Some(toplevel.wl_surface());
+            toplevel.with_pending_state(|state| {
+                use wayland_protocols::xdg::shell::server::xdg_toplevel::State;
+                if activated {
+                    state.states.set(State::Activated);
+                } else {
+                    state.states.unset(State::Activated);
+                }
+            });
+            if toplevel.is_initial_configure_sent() {
+                toplevel.send_pending_configure();
+            }
+        }
     }
 }
 impl CompositorHandler for AppletRunner {
@@ -1335,7 +1367,6 @@ impl XdgShellHandler for AppletRunner {
         surface.with_pending_state(|state| {
             use wayland_protocols::xdg::shell::server::xdg_toplevel::State;
             state.size = Some((800, 600).into());
-            state.states.set(State::Activated);
             // like niri for tiled windows: tells CSD clients (eg GTK) to drop shadows and rounded corners
             for tiled in [
                 State::TiledLeft,
