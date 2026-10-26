@@ -1,3 +1,32 @@
+2026-10-26 11:12AM
+
+I am just going to type a bunch of stuff
+via the Native file editor to see whether
+or not the "double keys" problem
+(issue 56)
+is specifically for Wl applets
+or goes for native as well.
+Ok, it's definitely just for Wl applets.
+
+Will type below on Wl applet (helix)
+to show contrast:
+
+Hello, I am typing from Helix.
+Ok, I'm not getting any oooo never mind,
+it happennd ok and now it happened again.
+Hmm, I never noticed that it sometimes overrides
+the next character.
+
+The quick brown fox jumps over the lazy dog.
+
+... I was hoping for something to break there.
+
+But anyways, I  am pretty sure thatt thiiis is a
+Wl only problem.
+
+I don't think this happened when I ran Smithay innnside
+oooof Niri as a winit app.
+
 2026-07-18 10:25PM
 
 Let's test pasting:
