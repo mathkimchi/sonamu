@@ -44,8 +44,9 @@ use std::{
     time::Duration,
 };
 
-const REPEAT_DELAY: Duration = Duration::from_millis(600);
-const REPEAT_INTERVAL: Duration = Duration::from_millis(40);
+/// Key repeat, also given to wl clients (which repeat keys themselves)
+pub const REPEAT_DELAY: Duration = Duration::from_millis(600);
+pub const REPEAT_INTERVAL: Duration = Duration::from_millis(40);
 /// px per wheel notch, like the winit backend
 const SCROLL_PER_NOTCH: f64 = 15.0;
 /// Reversed ("natural") scrolling on touchpads: content follows the fingers

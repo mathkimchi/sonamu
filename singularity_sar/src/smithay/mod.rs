@@ -90,6 +90,7 @@ use sonamu_ui::{
     display_units::{DisplayAreaPx, DisplayContainerSize},
     ui_element::{Cursor, Style, UIElement, UITree},
     ui_event::{MouseEvent, MouseEventKind},
+    winit_backend::drm::{REPEAT_DELAY, REPEAT_INTERVAL},
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use wgpu::{TextureView, TextureViewDescriptor};
@@ -488,8 +489,13 @@ impl SmithayState {
 
         let mut seat = seat_state.new_wl_seat(&display_handle, "hello");
 
-        seat.add_keyboard(smithay::input::keyboard::XkbConfig::default(), 200, 25)
-            .unwrap();
+        // same repeat as the udev backend's
+        seat.add_keyboard(
+            smithay::input::keyboard::XkbConfig::default(),
+            REPEAT_DELAY.as_millis() as i32,
+            (1000 / REPEAT_INTERVAL.as_millis()) as i32,
+        )
+        .unwrap();
         seat.add_pointer();
 
         let output_manager_state =
