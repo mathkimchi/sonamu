@@ -42,12 +42,15 @@ pub struct AppletRunner {
     pub(crate) pluck_place: PluckPlace,
     /// In window px, for drawing what's plucked under the pointer
     pub(crate) pointer_position: [f64; 2],
+    /// Whether the applets act on a key. Other keys go straight to the focused wl client
+    is_keybind: fn(&UIEvent) -> bool,
 }
 impl AppletRunner {
     fn new(
         event_loop: &LoopHandle<'static, Self>,
         loop_signal: LoopSignal,
         root_applet_initializer: Box<dyn RawClientInitializer>,
+        is_keybind: fn(&UIEvent) -> bool,
         smithay_state: SmithayState,
         on_tty: bool,
     ) -> Self {
@@ -73,6 +76,7 @@ impl AppletRunner {
             plucked: None,
             pluck_place: PluckPlace::Idle,
             pointer_position: [0.0, 0.0],
+            is_keybind,
         }
     }
 
@@ -95,7 +99,11 @@ impl AppletRunner {
     ///
     /// Runs on the monitor directly (as the actual compositor) when there's no display server to open a window in
     /// (no `WAYLAND_DISPLAY` or `DISPLAY`), or when `SONAMU_BACKEND=tty`; `SONAMU_BACKEND=winit` forces a window.
-    pub fn run(root_applet_initializer: Box<dyn RawClientInitializer>) {
+    /// `is_keybind`: whether the applets act on a key, rather than a focused wl client
+    pub fn run(
+        root_applet_initializer: Box<dyn RawClientInitializer>,
+        is_keybind: fn(&UIEvent) -> bool,
+    ) {
         let on_tty = match std::env::var("SONAMU_BACKEND").as_deref() {
             Ok("tty") => true,
             Ok("winit") => false,
@@ -130,6 +138,7 @@ impl AppletRunner {
             &event_loop.handle(),
             event_loop.get_signal(),
             root_applet_initializer,
+            is_keybind,
             smithay_state,
             on_tty,
         );
@@ -283,6 +292,21 @@ impl AppletRunner {
                 keybind.run();
                 return;
             }
+        }
+
+        // like other compositors, keys for a focused wl client go straight to it, so its
+        // presses and releases stay in order (#56); keybinds still go through the applets
+        if let UIEvent::Key {
+            raw_keycode,
+            pressed: true,
+            ..
+        } = event
+            && self.smithay_state.wl_target.is_some()
+            && !(self.is_keybind)(&event)
+        {
+            // evdev -> xkb
+            self.press_wl_key(raw_keycode + 8);
+            return;
         }
 
         self.root_client.send_event(StandardEvent::UIEvent(event));

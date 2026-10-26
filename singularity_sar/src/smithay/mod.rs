@@ -90,6 +90,7 @@ use sonamu_ui::{
     display_units::{DisplayAreaPx, DisplayContainerSize},
     ui_element::{Cursor, Style, UIElement, UITree},
     ui_event::{MouseEvent, MouseEventKind},
+    winit_backend::drm::{REPEAT_DELAY, REPEAT_INTERVAL},
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use wgpu::{TextureView, TextureViewDescriptor};
@@ -179,7 +180,7 @@ pub struct SmithayState {
     /// The layer surface (not an exclusive one) that a click gave the keyboard
     layer_focus: Option<WlSurface>,
     /// The tile that Sonamu focus asked the keyboard to be on
-    wl_target: Option<WlSurfaceId>,
+    pub(crate) wl_target: Option<WlSurfaceId>,
     /// The pointer is on a layer surface, or a button pressed on one is still held
     pointer_on_layer: bool,
     layer_buttons_down: u32,
@@ -488,8 +489,13 @@ impl SmithayState {
 
         let mut seat = seat_state.new_wl_seat(&display_handle, "hello");
 
-        seat.add_keyboard(smithay::input::keyboard::XkbConfig::default(), 200, 25)
-            .unwrap();
+        // same repeat as the udev backend's
+        seat.add_keyboard(
+            smithay::input::keyboard::XkbConfig::default(),
+            REPEAT_DELAY.as_millis() as i32,
+            (1000 / REPEAT_INTERVAL.as_millis()) as i32,
+        )
+        .unwrap();
         seat.add_pointer();
 
         let output_manager_state =
@@ -652,19 +658,6 @@ impl SmithayState {
                     };
 
                     match wl_event {
-                        WlSurfaceRequest::Key {
-                            keycode,
-                            pressed: true,
-                        } => {
-                            // target_surface.key(seat, data, key, state, serial, time); // TODO: use this instead of needing to jankily set focus?
-                            // usually already focused by `StandardRequest::WlKeyboardFocus`
-                            state.focus_wl_keyboard_on(target_surface);
-                            state.wl_key_input(keycode, KeyState::Pressed);
-                        }
-                        WlSurfaceRequest::Key {
-                            keycode,
-                            pressed: false,
-                        } => state.release_wl_key(keycode),
                         WlSurfaceRequest::Close => {
                             if let Some(toplevel) = state.smithay_state.toplevel_of(&target_surface)
                             {
@@ -1184,6 +1177,14 @@ impl AppletRunner {
                 self.smithay_state.now_input_time(),
                 |_, _, _| FilterResult::Forward,
             );
+    }
+
+    /// Repeats of a held key are dropped, since clients repeat keys themselves
+    pub(crate) fn press_wl_key(&mut self, keycode: u32) {
+        let keyboard = self.smithay_state.seat.get_keyboard().unwrap();
+        if !keyboard.pressed_keys().contains(&Keycode::new(keycode)) {
+            self.wl_key_input(keycode, KeyState::Pressed);
+        }
     }
 
     /// Called for every release, even if sonamu focus is elsewhere,

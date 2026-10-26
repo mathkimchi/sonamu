@@ -7,6 +7,7 @@ use crate::{
         treeview::{TreeviewAction, TreeviewPointer, TreeviewRow, inner_layer_rows, treeview_rows},
     },
     session,
+    standard_keybinds::standard_keybind_request,
 };
 use calloop::{
     EventLoop, LoopHandle,
@@ -357,6 +358,17 @@ impl RootNodeApplet {
 
     /// From the runner
     fn handle_event(&mut self, event: StandardEvent) {
+        if let StandardEvent::UIEvent(ui_event) = &event
+            && let Some(keybind) = RootKeybind::of(ui_event)
+        {
+            match keybind {
+                RootKeybind::Help => self.toggle_help(),
+                RootKeybind::ViewRoot => self.holder.tree.toggle_view_root(),
+                RootKeybind::ViewLayer => self.set_view_layer(&self.holder.tree.get_focus_path()),
+            }
+            self.damage_if_tree_changed();
+            return;
+        }
         match event {
             StandardEvent::UIEvent(UIEvent::WindowResized(size)) => {
                 self.latest_size = size;
@@ -394,24 +406,6 @@ impl RootNodeApplet {
                 let args: Vec<&str> = args.iter().map(String::as_str).collect();
                 self.holder.open(&applet, &args);
             }
-            StandardEvent::UIEvent(UIEvent::Key {
-                symbol: Some(KeySymbol::Char('?')),
-                modifiers: KeyModifiers { logo: true, .. },
-                pressed: true,
-                ..
-            }) => self.toggle_help(),
-            StandardEvent::UIEvent(UIEvent::Key {
-                symbol: Some(KeySymbol::Char('v' | 'V')),
-                modifiers: KeyModifiers { logo: true, .. },
-                pressed: true,
-                ..
-            }) => self.holder.tree.toggle_view_root(),
-            StandardEvent::UIEvent(UIEvent::Key {
-                symbol: Some(KeySymbol::Char('r')),
-                modifiers: KeyModifiers::ALT,
-                pressed: true,
-                ..
-            }) => self.set_view_layer(&self.holder.tree.get_focus_path()),
             StandardEvent::UIEvent(_)
             | StandardEvent::FocusChanged(..)
             | StandardEvent::Highlighted(..) => {
@@ -679,4 +673,39 @@ fn view_rows(
 /// The part of the path inside the node's applet
 fn inner_path(path: &WorldTreePath) -> WorldTreePath {
     WorldTreePath(path.0.get(1..).unwrap_or_default().into())
+}
+
+/// The root's own keybinds
+enum RootKeybind {
+    /// Super+?
+    Help,
+    /// Super+V
+    ViewRoot,
+    /// Alt+r
+    ViewLayer,
+}
+impl RootKeybind {
+    fn of(ui_event: &UIEvent) -> Option<Self> {
+        let UIEvent::Key {
+            symbol: Some(KeySymbol::Char(c)),
+            modifiers,
+            pressed: true,
+            ..
+        } = *ui_event
+        else {
+            return None;
+        };
+        match c {
+            '?' if modifiers.logo => Some(Self::Help),
+            'v' | 'V' if modifiers.logo => Some(Self::ViewRoot),
+            'r' if modifiers == KeyModifiers::ALT => Some(Self::ViewLayer),
+            _ => None,
+        }
+    }
+}
+
+/// Whether the root or a node acts on this key, rather than a focused wl client.
+/// The runner sends other keys straight to the client (#56).
+pub fn is_keybind(ui_event: &UIEvent) -> bool {
+    RootKeybind::of(ui_event).is_some() || standard_keybind_request(ui_event).is_some()
 }

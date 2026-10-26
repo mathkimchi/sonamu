@@ -59,15 +59,8 @@ impl StandardApplet for WlSurfaceApplet {
                 return;
             }
             None => match ui_event {
-                UIEvent::Key {
-                    raw_keycode,
-                    pressed,
-                    ..
-                } => WlSurfaceRequest::Key {
-                    // evdev -> xkb
-                    keycode: raw_keycode + 8,
-                    pressed,
-                },
+                // the runner sends keys straight to the client
+                UIEvent::Key { .. } => return,
                 UIEvent::Mouse(mouse_event) => WlSurfaceRequest::Mouse(mouse_event),
                 UIEvent::WindowResized(new_size) => WlSurfaceRequest::Resize(new_size),
                 // the other swipes aren't forwarded to clients yet

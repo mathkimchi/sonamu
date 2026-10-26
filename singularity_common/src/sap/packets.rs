@@ -192,11 +192,6 @@ pub enum WlSurfaceEvent {
 /// Wl surface applet to compositor
 #[derive(Clone, Copy, Debug)]
 pub enum WlSurfaceRequest {
-    /// `keycode` is an xkb keycode (evdev + 8)
-    Key {
-        keycode: u32,
-        pressed: bool,
-    },
     Resize(DisplayContainerSize),
     Mouse(MouseEvent),
     /// Asks the client to close the toplevel; its tile closes once the toplevel is destroyed
