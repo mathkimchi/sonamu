@@ -1210,8 +1210,6 @@ impl DrawingSharedData<'_> {
                 // drawing_shared_data.queue.submit(Some(encoder.finish()));
                 // drawing_shared_data.frame.present();
 
-                // drawing_shared_data.atlas.trim();
-
                 // dt.draw_text(
                 //     font,
                 //     FONT_SIZE as f32,
@@ -1617,6 +1615,8 @@ impl UIDisplay {
         }
         text_cache.end_frame();
         image_cache.end_frame();
+        // lets glyphon evict glyphs this frame didn't use, else the atlas fills up
+        atlas.trim();
 
         let copy = capture
             .then(|| FrameCopy::start(device, &mut encoder, &output.texture))
