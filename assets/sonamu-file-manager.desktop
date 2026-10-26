@@ -5,5 +5,4 @@ Type=Application
 Name=Sonamu File Manager
 Exec=sonamu-msg open file_manager %f
 MimeType=inode/directory;
-NoDisplay=true
 Terminal=false
