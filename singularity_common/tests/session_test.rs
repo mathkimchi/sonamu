@@ -36,3 +36,17 @@ fn title_shown_without_url() {
     );
     assert_eq!(title_without_url("bash | ~/code"), "bash | ~/code");
 }
+
+#[test]
+fn web_app_from_app_id() {
+    let with_app_id = |app_id: &str| SavedWl {
+        app_id: Some(app_id.to_string()),
+        ..with_title("")
+    };
+    assert_eq!(
+        with_app_id("chrome-agimnkijcaahngcdmfeangaknmldooml-Profile_1").web_app(),
+        Some(("agimnkijcaahngcdmfeangaknmldooml", "Profile 1".to_string()))
+    );
+    assert_eq!(with_app_id("chromium-browser").web_app(), None);
+    assert_eq!(with_app_id("google-chrome").web_app(), None);
+}

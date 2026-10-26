@@ -42,6 +42,9 @@ Sonamu owns the session; apps' own session restore should be off.
   - Restore command (`restore_command`):
     - qutebrowser (app id `org.qutebrowser.qutebrowser`): `qutebrowser --target window [url]`.
     - firefox with a url: `firefox --new-window url`.
+    - Chromium web apps / PWAs (#96, app id `chrome-<id>-<profile dir, spaces as _>`, `SavedWl::web_app`): the saved
+      browser (argv[0]) with `--app-id=<id> --profile-directory=<profile>`. Claimed by app id, since every window is the
+      browser's pid. Not tested in Sonamu yet. No PWA icons yet.
     - Anything else: the saved argv. A `/nix/store/...` program is replaced by its name, minus a `.foo-wrapped` wrapper
       prefix/suffix, since the store path may be garbage collected.
   - The url comes from the title (`SavedWl::url`): before its first ` | ` (firefox, via `extras/firefox`), else after

@@ -151,7 +151,8 @@ fn wl_label(wl: &SavedWl) -> String {
     }
 }
 
-/// Browsers open the saved url in a new window (of a running instance, if any); other clients run as they were
+/// Browsers open the saved url in a new window (of a running instance, if any), Chromium web apps (PWAs) open by
+/// their id with the browser they ran in; other clients run as they were
 pub fn restore_command(wl: &SavedWl) -> Option<std::process::Command> {
     let argv: Vec<String> = match (wl.app_id.as_deref(), wl.url()) {
         (Some("org.qutebrowser.qutebrowser" | "qutebrowser"), url) => {
@@ -162,6 +163,11 @@ pub fn restore_command(wl: &SavedWl) -> Option<std::process::Command> {
                 .collect()
         }
         (Some("firefox"), Some(url)) => ["firefox", "--new-window", url].map(String::from).into(),
+        _ if let Some((id, profile)) = wl.web_app() => vec![
+            program_name(wl.argv.first()?),
+            format!("--app-id={id}"),
+            format!("--profile-directory={profile}"),
+        ],
         _ => {
             let (program, args) = wl.argv.split_first()?;
             std::iter::once(program_name(program))
