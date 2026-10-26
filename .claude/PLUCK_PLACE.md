@@ -73,6 +73,9 @@ Alt+P does both (first global keybind). The user then said: make the decisions, 
 - Mouse: click a row focuses it (a node row gets `Focusing`; an inner-element row gets `Inner`, since focus inside applets is TODO).
   Press and drag past a threshold sends `RequestPluck(row)`; releasing sends `RequestPlace(row under cursor)`,
   or `RequestPlace` at the focused node if released outside the treeview.
+- A drop on a row's top/bottom edge inserts a sibling (`drop_target`), in the root's tree and in inner trees alike
+  (projects and splits insert via their `NodeHolder`); roots, inner roots and `‹` rows are appended to.
+  Applets without a `NodeTree` ignore the position.
 - Keyboard focus paths still work the same.
 - Marker bar on the focused row: yellow when the node itself is focused (traversal keys), green when its applet is (keys go in).
 - Mouse events over the treeview, or during a press that started there, don't reach applets.

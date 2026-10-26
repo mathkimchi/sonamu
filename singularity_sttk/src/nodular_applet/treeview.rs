@@ -385,11 +385,11 @@ enum DropZone {
 }
 
 /// Where a drop on `row` goes: the path of the parent, and the position among its children.
-/// Only the nodes of a tree have siblings (in the root's tree or in an applet's inner tree),
-/// so anything else (eg an applet's elements, or an inner root) is appended to.
+/// Roots (incl. inner roots) and `‹` rows have no siblings, so they are appended to.
+/// An applet that can't insert there (eg one without a `NodeTree`) appends or gives it back.
 fn drop_target(row: &TreeviewRow, zone: DropZone) -> (WorldTreePath, SpawnPosition) {
     let append = || (row.path.clone(), SpawnPosition::AppendChild);
-    let Some((node, outer)) = row.path.0.split_last().filter(|_| !row.inner) else {
+    let Some((node, outer)) = row.path.0.split_last().filter(|_| row.closable) else {
         return append();
     };
     let Some((&index, parent)) = node.0.split_last() else {
