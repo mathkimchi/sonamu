@@ -36,7 +36,7 @@ print(json.dumps({
     "font_size": 24.0 * bar.get("fontScale", 1.0),
     # floating over the middle of the panes, only while focus is on a node
     "treeview": {"position": "floating", "pinned": False},
-    # "treeview": {"position": "left", "pinned": False},
+    # "treeview": {"position": "left", "pinned": True},
     # evdev key codes
     "keybinds": [
         {"key": 115, "command": "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"},  # volume up
@@ -46,7 +46,8 @@ print(json.dumps({
         {"key": 224, "command": "brightnessctl set 5%-"},  # brightness down
         # {"key": 99, "command": "dms screenshot"},  # Print: select a region
         # {"key": 99, "command": "grim -g \"$(slurp)\" - | wl-copy"},  # screenshot and copy, this is the Prt Sc key
-        {"key": 99, "command": "grim - | swappy -f -"},  # screenshot and edit with swappy, this is the Prt Sc key
+        # {"key": 99, "command": "grim - | swappy -f -"},  # screenshot and edit with swappy, this is the Prt Sc key
+        {"key": 99, "command": "grim"},  # swappy is broken bro
     ],
     "watch": [str(colors_path), str(dms_settings_path)],
 }, indent=2))

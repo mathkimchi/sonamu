@@ -10496,3 +10496,8 @@ trading the small things for the big.
 
 I have been feeling that I am destined to make a new path for myself,
 grant me courage.
+
+2026-10-27 01:22PM
+
+Took a bunch of screenshots with grim and swappy.
+But swappy sucks and didn't actually save any of them.
