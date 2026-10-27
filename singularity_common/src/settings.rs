@@ -90,7 +90,13 @@ impl Keybind {
 
     /// Runs the command without waiting for it.
     pub fn run(&self) {
-        match Command::new("sh").arg("-c").arg(&self.command).spawn() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(&self.command);
+        // connect wl clients (grim, swappy, ...) to Sonamu
+        if let Some(socket) = std::env::var_os("SONAMU_WAYLAND_DISPLAY") {
+            command.env("WAYLAND_DISPLAY", socket);
+        }
+        match command.spawn() {
             Ok(mut child) => {
                 // reap it
                 thread::spawn(move || child.wait());
