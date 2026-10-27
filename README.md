@@ -22,7 +22,7 @@ It also enables you to traverse at different depths, which enables speed and pre
 
 MVP Video Link:
 
-[![Sonamu MVP Video](https://img.youtube.com/vi/73bF5PrCmOE/hqdefault.jpg)](https://youtu.be/73bF5PrCmOE)
+[![Sonamu MVP Video](https://img.youtube.com/vi/73bF5PrCmOE/maxresdefault.jpg)](https://youtu.be/73bF5PrCmOE)
 
 Some more screenshots:
 
