@@ -46,9 +46,9 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 - `radius`: pane corners; the pane's content (rects, char grids, wl textures) is clipped to the rounded inside; glyphon text only to its bounding rect.
 - `font_size`: physical px (Sonamu's UI isn't scaled). Mirrored into `sonamu_ui::ui_element::font_size()` on load, since `sonamu_ui` can't depend on `singularity_common`; used by glyphon text, char grid cell size (width = size / 1.933, ceil), and row heights in treeview, project overview, file manager and the pluck ghost.
 - `always_frame` (default true): a pane alone in its tree also gets border, gap and radius, and the treeview is framed like a pane (gap left/top/bottom, the panes' gap on its right; `border.unfocused`; mouse coords shifted by gap + border in `RootNodeApplet::handle_mouse`). False: a lone pane fills its tree and the treeview is flush. The treeview's border is `border.treeview` (DMS `secondary` in the example config).
-- `treeview.side` (`left`, `right`; default `left`): where a pinned treeview's column is (20% of the width; the panes
+- `treeview.side` (`left`, `right`; default `left`): where a pinned treeview's column is (`treeview.width`% of the width, default 20, capped at 100; the panes
   get the rest). `treeview.floating` (`center`, `side`; default `center`): where an unpinned one floats over the panes
-  (only while traversing): 40% x 70% of the window in the middle, or the column's place at `side`, inset by `gap`.
+  (only while traversing): `treeview.floating_size`% (`[w, h]`, default `[40, 70]`, capped at 100) of the window in the middle, or the column's place at `side`, inset by `gap`.
   Whether it's pinned is not a setting but part of the session, toggled by the ●/○ pin button in its top right corner
   (`on_pin_button`, handled in `RootNodeApplet::handle_mouse` before the treeview's own handling).
 - A pane whose applet `frames_itself` (published in `Treeview`; a split, or a project showing its panes, not its overview) is never framed (no border, no radius) and grows by `gap` on every side: its own tree frames its panes and adds its own outer gap, so leaf content gets exactly one frame and one gap at any nesting depth. `NodeTree::update_layout` reads only that flag, never the applet's type. Such a node's focus then only shows in the treeview.

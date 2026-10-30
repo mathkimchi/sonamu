@@ -107,13 +107,28 @@ impl Keybind {
 }
 
 /// Whether the treeview is pinned is part of the session, toggled by its pin button
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct TreeviewSettings {
     /// The side a pinned one is on
     pub side: TreeviewSide,
+    /// The side column's width, in percent of the window's
+    pub width: u32,
     /// Where an unpinned one floats (only while focus is on a node)
     pub floating: TreeviewFloating,
+    /// A `Center` floating one's width and height, in percent of the window's
+    pub floating_size: [u32; 2],
+}
+
+impl Default for TreeviewSettings {
+    fn default() -> Self {
+        Self {
+            side: TreeviewSide::default(),
+            width: 20,
+            floating: TreeviewFloating::default(),
+            floating_size: [40, 70],
+        }
+    }
 }
 
 /// A column beside the panes, which get the rest of the width

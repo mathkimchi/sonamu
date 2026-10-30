@@ -35,7 +35,12 @@ print(json.dumps({
     # physical px; Sonamu's own UI isn't scaled
     "font_size": 24.0 * bar.get("fontScale", 1.0),
     # pinned on the left (the treeview's pin button pins it); unpinned, it floats over the middle of the panes
-    "treeview": {"side": "left", "floating": "center"},
+    "treeview": {
+        "side": "left",
+        "floating": "center",
+        "width": 15,  # the pinned column's, in percent of the window's width
+        "floating_size": [50, 70],  # a center floating one's width and height, in percent of the window's
+    },
     # evdev key codes
     "keybinds": [
         {"key": 115, "command": "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"},  # volume up

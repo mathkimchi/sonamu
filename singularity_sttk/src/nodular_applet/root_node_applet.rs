@@ -91,10 +91,6 @@ struct OpenHelp {
     parent_inner: bool,
 }
 impl RootNodeApplet {
-    /// Of the width, beside the panes
-    const TREEVIEW_PERCENT: u32 = 20;
-    /// Of the width and height, floating
-    const FLOATING_PERCENT: [u32; 2] = [40, 70];
     /// How often the session is saved (if it changed), besides before quitting
     const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -106,7 +102,7 @@ impl RootNodeApplet {
         }
         let DisplayContainerSize { width, height } = self.latest_size;
         let side = settings.treeview.side;
-        let column = width * Self::TREEVIEW_PERCENT / 100;
+        let column = width * settings.treeview.width.min(100) / 100;
         let column_x = match side {
             TreeviewSide::Left => 0,
             TreeviewSide::Right => width - column,
@@ -116,10 +112,8 @@ impl RootNodeApplet {
         }
         let area = match settings.treeview.floating {
             TreeviewFloating::Center => {
-                let [w, h] = [
-                    width * Self::FLOATING_PERCENT[0] / 100,
-                    height * Self::FLOATING_PERCENT[1] / 100,
-                ];
+                let [w, h] = settings.treeview.floating_size;
+                let [w, h] = [width * w.min(100) / 100, height * h.min(100) / 100];
                 [(width - w) / 2, (height - h) / 2, w, h]
             }
             // in the column's place, with the gap all around
