@@ -106,30 +106,34 @@ impl Keybind {
     }
 }
 
+/// Whether the treeview is pinned is part of the session, toggled by its pin button
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct TreeviewSettings {
-    pub position: TreeviewPosition,
-    /// Always shown; otherwise only while focus is on a node (traversing). A floating one is never pinned.
-    pub pinned: bool,
+    /// The side a pinned one is on
+    pub side: TreeviewSide,
+    /// Where an unpinned one floats (only while focus is on a node)
+    pub floating: TreeviewFloating,
 }
 
-/// Where the root's treeview is
+/// A column beside the panes, which get the rest of the width
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TreeviewPosition {
-    /// A column left of the panes, which get the rest of the width
+pub enum TreeviewSide {
+    #[default]
     Left,
     Right,
-    /// Over the middle of the panes, which keep their size
-    #[default]
-    Floating,
 }
-impl TreeviewSettings {
-    /// Whether it is always shown
-    pub fn is_pinned(&self) -> bool {
-        self.pinned && self.position != TreeviewPosition::Floating
-    }
+
+/// Where an unpinned treeview floats over the panes, which keep their size
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TreeviewFloating {
+    /// Over the middle
+    #[default]
+    Center,
+    /// At `side`
+    Side,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

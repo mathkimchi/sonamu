@@ -6,7 +6,10 @@ use crate::{
         node_tree::{NodeId, NodeTree},
         project_applet::ProjectApplet,
         split_applet::SplitApplet,
-        treeview::{TreeviewAction, TreeviewPointer, TreeviewRow, inner_layer_rows, treeview_rows},
+        treeview::{
+            BTN_LEFT, TreeviewAction, TreeviewPointer, TreeviewRow, close_width, inner_layer_rows,
+            treeview_rows, with_opacity,
+        },
     },
     session,
     standard_keybinds::standard_keybind_request,
@@ -23,7 +26,7 @@ use singularity_common::{
         session::Session,
         shared_state::{SharedState, StatePublisher},
     },
-    settings::{self, Settings, TreeviewPosition},
+    settings::{self, Settings, TreeviewFloating, TreeviewSide},
     utils::tree::{
         tree_node_path::TreeNodePath,
         world_tree::{WorldTree, WorldTreePath},
@@ -31,8 +34,8 @@ use singularity_common::{
 };
 use sonamu_ui::{
     display_units::DisplayContainerSize,
-    ui_element::{Length, Style, UIElement, UITree},
-    ui_event::{KeyModifiers, KeySymbol, MouseEvent, UIEvent},
+    ui_element::{Cursor, CursorIcon, Length, Style, UIElement, UITree, font_size},
+    ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::{
     collections::BTreeMap,
@@ -56,8 +59,10 @@ pub struct RootNodeApplet {
     last_drop: Option<(WorldTreePath, NodeId)>,
     /// The help Super+? opened, to close it on the next one
     help: Option<OpenHelp>,
-    /// Pinned in the settings, or traversing (see `update_treeview_visibility`)
+    /// Pinned, or traversing (see `update_treeview_visibility`)
     treeview_shown: bool,
+    /// Always shown, beside the panes; toggled by its pin button and saved in the session
+    treeview_pinned: bool,
     /// The node whose inner tree the treeview shows (right click › Set as view layer, Alt+R);
     /// `None` for the outermost tree. Moves out with focus (see `update_view_layer`).
     view_layer: Option<WorldTreePath>,
@@ -67,6 +72,15 @@ pub struct RootNodeApplet {
     session_path: Option<PathBuf>,
     /// The last one written, so unchanged ones aren't written again
     saved_session: Option<Session>,
+}
+
+/// Where the treeview is
+#[derive(Debug, Clone, Copy)]
+enum TreeviewPlace {
+    /// Pinned beside the panes
+    Column(TreeviewSide),
+    /// Over the panes
+    Floating,
 }
 
 /// A help node, and where it was opened
@@ -86,37 +100,52 @@ impl RootNodeApplet {
 
     /// Where the treeview is drawn (`[x, y, width, height]`, frame included), and how;
     /// `None` while hidden
-    fn treeview_area(&self, settings: &Settings) -> Option<([u32; 4], TreeviewPosition)> {
+    fn treeview_area(&self, settings: &Settings) -> Option<([u32; 4], TreeviewPlace)> {
         if !self.treeview_shown {
             return None;
         }
         let DisplayContainerSize { width, height } = self.latest_size;
-        let position = settings.treeview.position;
+        let side = settings.treeview.side;
         let column = width * Self::TREEVIEW_PERCENT / 100;
-        let area = match position {
-            TreeviewPosition::Left => [0, 0, column, height],
-            TreeviewPosition::Right => [width - column, 0, column, height],
-            TreeviewPosition::Floating => {
+        let column_x = match side {
+            TreeviewSide::Left => 0,
+            TreeviewSide::Right => width - column,
+        };
+        if self.treeview_pinned {
+            return Some(([column_x, 0, column, height], TreeviewPlace::Column(side)));
+        }
+        let area = match settings.treeview.floating {
+            TreeviewFloating::Center => {
                 let [w, h] = [
                     width * Self::FLOATING_PERCENT[0] / 100,
                     height * Self::FLOATING_PERCENT[1] / 100,
                 ];
                 [(width - w) / 2, (height - h) / 2, w, h]
             }
+            // in the column's place, with the gap all around
+            TreeviewFloating::Side => {
+                let gap = settings.gap.round() as u32;
+                [
+                    column_x + gap,
+                    gap,
+                    column.saturating_sub(2 * gap),
+                    height.saturating_sub(2 * gap),
+                ]
+            }
         };
-        Some((area, position))
+        Some((area, TreeviewPlace::Floating))
     }
 
     /// The applets' area's left edge and width: beside a treeview column, else everything
     fn applet_area(&self, settings: &Settings) -> [u32; 2] {
         match self.treeview_area(settings) {
-            Some(([x, _, width, _], TreeviewPosition::Left)) => {
-                [x + width, self.latest_size.width - width]
+            Some(([_, _, width, _], TreeviewPlace::Column(TreeviewSide::Left))) => {
+                [width, self.latest_size.width - width]
             }
-            Some(([_, _, width, _], TreeviewPosition::Right)) => {
+            Some(([_, _, width, _], TreeviewPlace::Column(TreeviewSide::Right))) => {
                 [0, self.latest_size.width - width]
             }
-            Some((_, TreeviewPosition::Floating)) | None => [0, self.latest_size.width],
+            Some((_, TreeviewPlace::Floating)) | None => [0, self.latest_size.width],
         }
     }
 
@@ -128,10 +157,10 @@ impl RootNodeApplet {
     }
 
     /// Shows the treeview if pinned or traversing, else hides it, resizing the applets if their area changed
-    /// (also when the treeview settings did)
+    /// (also when the treeview settings or pinning did)
     fn update_treeview_visibility(&mut self) {
         let settings = settings::get();
-        let shown = settings.treeview.is_pinned()
+        let shown = self.treeview_pinned
             || self.holder.tree.is_traversing()
             // eg a drag or menu that started there
             || self.treeview_pointer.is_pressed();
@@ -157,6 +186,7 @@ impl RootNodeApplet {
         let treeview_area = self.treeview_area(&settings);
         let applet_area = self.applet_area(&settings);
         let height = self.latest_size.height;
+        let pinned = self.treeview_pinned;
         let Self {
             holder,
             treeview_pointer,
@@ -177,6 +207,7 @@ impl RootNodeApplet {
                         view_layer.as_ref(),
                         treeview_pointer,
                         area,
+                        pinned,
                     ));
                 }
                 UITree::new_container(window)
@@ -197,6 +228,7 @@ impl RootNodeApplet {
         let session = Session {
             tree: self.holder.tree.save(),
             focus: self.holder.tree.get_focus_path().0.into_vec(),
+            treeview_pinned: self.treeview_pinned,
         };
         if self.saved_session.as_ref() == Some(&session) {
             return;
@@ -262,6 +294,9 @@ impl RootNodeApplet {
             help: None,
             // the root node starts focused
             treeview_shown: true,
+            treeview_pinned: saved_session
+                .as_ref()
+                .is_some_and(|saved| saved.treeview_pinned),
             view_layer: None,
             applet_area: [0, 800],
             session_path,
@@ -459,9 +494,7 @@ impl RootNodeApplet {
         };
         // in the treeview's coords, inside its frame
         let ([x, y, width, height], border) = treeview_area
-            .map_or(([0; 4], 0), |(area, position)| {
-                treeview_frame(&settings, area, position)
-            });
+            .map_or(([0; 4], 0), |(area, place)| treeview_frame(&settings, area, place));
         let [x, y, width, height] = [x, y, width, height].map(f64::from);
         let [pointer_x, pointer_y] = mouse_event.position;
         let in_treeview = treeview_area.is_some()
@@ -472,6 +505,23 @@ impl RootNodeApplet {
             pointer_x - x - f64::from(border),
             pointer_y - y - f64::from(border),
         ];
+        let inner_width = (width - f64::from(2 * border)).max(0.0);
+        if in_treeview
+            && !self.treeview_pointer.is_pressed()
+            && on_pin_button(treeview_event.position, inner_width)
+            && matches!(
+                mouse_event.kind,
+                MouseEventKind::Button {
+                    button: BTN_LEFT,
+                    pressed: true
+                }
+            )
+        {
+            self.treeview_pinned = !self.treeview_pinned;
+            self.surface.damage();
+            self.update_treeview_visibility();
+            return;
+        }
         let response = self.treeview_pointer.handle_mouse(
             &treeview_event,
             in_treeview,
@@ -588,24 +638,38 @@ impl RootNodeApplet {
         }
     }
 
-    /// The treeview at `area`, framed like a pane with `always_frame` (a floating one always is)
+    /// The treeview at `area` with its pin button, framed like a pane with `always_frame` (a floating one always is)
     fn get_treeview(
         tree: &NodeTree,
         view_layer: Option<&WorldTreePath>,
         treeview_pointer: &mut TreeviewPointer,
-        (area, position): ([u32; 4], TreeviewPosition),
+        (area, place): ([u32; 4], TreeviewPlace),
+        pinned: bool,
     ) -> UITree {
         let (rows, _) = view_rows(tree, view_layer);
         let settings = settings::get();
-        let ([x, y, width, height], border) = treeview_frame(&settings, area, position);
+        let ([x, y, width, height], border) = treeview_frame(&settings, area, place);
+        let inner_width = width.saturating_sub(2 * border) as f32;
         let treeview = treeview_pointer.render(
             &rows,
-            [
-                width.saturating_sub(2 * border) as f32,
-                height.saturating_sub(2 * border) as f32,
-            ],
+            [inner_width, height.saturating_sub(2 * border) as f32],
             &tree.get_focus_path(),
         );
+        let size = close_width();
+        let pin_button = UITree::leaf_styled(
+            UIElement::Text(vec![(
+                if pinned { "●" } else { "○" }.to_string(),
+                UIElement::glyphon_attr(with_opacity(settings.palette.fg)),
+            )]),
+            Style::absolute(
+                [
+                    inner_width - size + (size - font_size()) / 2.0,
+                    (size - font_size()) / 2.0,
+                ],
+                [size, size],
+            ),
+        )
+        .with_cursor(Some(Cursor::Named(CursorIcon::Pointer)));
         UITree::new_styled(
             UIElement::Bordered {
                 color: settings.border.treeview,
@@ -615,9 +679,15 @@ impl RootNodeApplet {
                 border: Length::uniform_rect(Length::Px(border as f32)),
                 ..Style::absolute([x as f32, y as f32], [width as f32, height as f32])
             },
-            vec![treeview],
+            vec![treeview, pin_button],
         )
     }
+}
+
+/// Whether `[x, y]` (in the treeview's coords, inside its frame) is on its pin button, in its top right corner
+fn on_pin_button([x, y]: [f64; 2], inner_width: f64) -> bool {
+    let size = f64::from(close_width());
+    (inner_width - size..inner_width).contains(&x) && (0.0..size).contains(&y)
 }
 
 /// The treeview's frame (`[x, y, width, height]`, border included) in its `area`, and its border width.
@@ -626,14 +696,14 @@ impl RootNodeApplet {
 fn treeview_frame(
     settings: &Settings,
     [x, y, width, height]: [u32; 4],
-    position: TreeviewPosition,
+    place: TreeviewPlace,
 ) -> ([u32; 4], u32) {
     let gap = settings.gap.round() as u32;
     let border = settings.border.width.round() as u32;
-    match position {
-        TreeviewPosition::Floating => ([x, y, width, height], border.max(1)),
+    match place {
+        TreeviewPlace::Floating => ([x, y, width, height], border.max(1)),
         _ if !settings.always_frame => ([x, y, width, height], 0),
-        TreeviewPosition::Left => (
+        TreeviewPlace::Column(TreeviewSide::Left) => (
             [
                 x + gap,
                 y + gap,
@@ -642,7 +712,7 @@ fn treeview_frame(
             ],
             border,
         ),
-        TreeviewPosition::Right => (
+        TreeviewPlace::Column(TreeviewSide::Right) => (
             [
                 x,
                 y + gap,

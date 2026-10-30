@@ -34,9 +34,8 @@ print(json.dumps({
     "radius": dms_settings.get("cornerRadius", 12),
     # physical px; Sonamu's own UI isn't scaled
     "font_size": 24.0 * bar.get("fontScale", 1.0),
-    # floating over the middle of the panes, only while focus is on a node
-    "treeview": {"position": "floating", "pinned": False},
-    # "treeview": {"position": "left", "pinned": True},
+    # pinned on the left (the treeview's pin button pins it); unpinned, it floats over the middle of the panes
+    "treeview": {"side": "left", "floating": "center"},
     # evdev key codes
     "keybinds": [
         {"key": 115, "command": "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"},  # volume up

@@ -31,12 +31,12 @@ fn triangle_width() -> f32 {
     font_size()
 }
 /// The width of a row's close button, at its right end
-fn close_width() -> f32 {
+pub fn close_width() -> f32 {
     row_height()
 }
 /// How far the pointer moves while pressed before it's a drag
 const DRAG_THRESHOLD: f64 = 12.0;
-const BTN_LEFT: u32 = 0x110;
+pub const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
 /// Rows per scroll step
 const SCROLL_STEP: usize = 3;

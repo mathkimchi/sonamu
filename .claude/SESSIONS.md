@@ -1,11 +1,11 @@
 # Sessions: remembering and restoring the tree (2026-10-17)
 
-Sonamu saves the whole tree (layout, native applets, projects, wl clients, focus) and rebuilds it on the next start.
+Sonamu saves the whole tree (layout, native applets, projects, wl clients, focus, whether the treeview is pinned) and rebuilds it on the next start.
 Sonamu owns the session; apps' own session restore should be off.
 
 ## How it works
 
-- **Saved form** (`singularity_common/src/sap/session.rs`): `Session { tree: SavedTree, focus }`.
+- **Saved form** (`singularity_common/src/sap/session.rs`): `Session { tree: SavedTree, focus, treeview_pinned }` (`treeview_pinned`: the root treeview's pin button).
   `SavedTree { main: Option<SavedApplet>, layout, children, label }` (`label`: only a project's inner root, its name).
   `SavedApplet` is one of `Spawner { name, args }` (made again by the registered applet spawner, like the command hub does)
   or `Wl(SavedWl { argv, cwd, app_id, title })`.
