@@ -66,6 +66,9 @@ pub struct RootNodeApplet {
     /// The node whose inner tree the treeview shows (right click › Set as view layer, Alt+R);
     /// `None` for the outermost tree. Moves out with focus (see `update_view_layer`).
     view_layer: Option<WorldTreePath>,
+    /// The focus path `update_view_layer` last saw: it only moves the view layer out when focus moves, since right
+    /// after switching screens an applet's published focus (eg a project's) is still the other screen's
+    view_layer_focus: Option<WorldTreePath>,
     /// The applets' area's left edge and width, as last sent to them
     applet_area: [u32; 2],
     /// Where the session is saved, if anywhere
@@ -352,6 +355,7 @@ impl RootNodeApplet {
                 .as_ref()
                 .is_some_and(|saved| saved.treeview_pinned),
             view_layer: None,
+            view_layer_focus: None,
             applet_area: [0, 800],
             session_path,
             saved_session,
@@ -687,9 +691,11 @@ impl RootNodeApplet {
             return;
         };
         let focus = self.holder.tree.get_focus_path();
+        let focus_moved = self.view_layer_focus.as_ref() != Some(&focus);
+        self.view_layer_focus = Some(focus.clone());
         let treeview = self.holder.tree.get_treeview();
-        while !(focus.0.len() > holder.0.len()
-            && focus.0.starts_with(&holder.0)
+        while !((!focus_moved
+            || (focus.0.len() > holder.0.len() && focus.0.starts_with(&holder.0)))
             && matches!(treeview.safe_get(&holder), Some(WorldTree::World(_))))
         {
             let mut outer = holder.0.into_vec();
