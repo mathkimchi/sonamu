@@ -32,6 +32,10 @@ Non-major Wayland features. Delete a line when done.
 
 - IME: place the candidate window with winit `set_ime_cursor_area` using the client's text-input cursor rectangle. Blocked: smithay only stores that rectangle privately (for `input_method_v2` popups), with no public getter.
 
+## Buttons
+
+- Native applets have no buttons: they draw a node and hit-test clicks in `handle_mouse` with their own geometry (eg the file manager's list toggle, the treeview's pin and close), so the two can drift apart. Clicks are routed by hand (runner → `NodeTree::handle_mouse` → applet → its embedded documents), while only the cursor comes from the laid out tree (`CursorAreas`). Idea: `UITree::clickable(id)` (also setting the pointer cursor), with the applet laying out its own surface to hit-test it like `CursorAreas`. The id is explicit since buttons appear conditionally; `ClickId(u64)`, or type-erased if most buttons carry data (eg a row index). The old `singularity_sttk/src/components/button.rs` is dead code.
+
 ## Done (differently): replace nested `StandardApplet`s with per-client `ClientHandle`s
 
 Done in the ClientHandle refactor, but the tree lives in the root client, not the runner; see `.claude/CLIENT_HANDLE_REFACTOR.md`.
