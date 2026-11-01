@@ -737,11 +737,26 @@ impl DrmDisplay {
             .min_by_key(|image| image.size.abs_diff(wanted_size))
     }
 
+    /// The closest point on a monitor (not just in their bounding box, which has gaps when their sizes differ)
     fn clamp_to_screen(&self, [x, y]: [f64; 2]) -> [f64; 2] {
-        [
-            x.clamp(0.0, f64::from(self.size.width) - 1.0),
-            y.clamp(0.0, f64::from(self.size.height) - 1.0),
-        ]
+        self.outputs
+            .iter()
+            .map(|output| {
+                let (width, height) = output.mode.size();
+                let [left, top] = output.origin.map(f64::from);
+                [
+                    x.clamp(left, left + f64::from(width) - 1.0),
+                    y.clamp(top, top + f64::from(height) - 1.0),
+                ]
+            })
+            .min_by(|a, b| {
+                let distance = |[px, py]: [f64; 2]| (px - x).hypot(py - y);
+                distance(*a).total_cmp(&distance(*b))
+            })
+            .unwrap_or([
+                x.clamp(0.0, f64::from(self.size.width) - 1.0),
+                y.clamp(0.0, f64::from(self.size.height) - 1.0),
+            ])
     }
 
     fn send(&self, event: UIEvent) {
