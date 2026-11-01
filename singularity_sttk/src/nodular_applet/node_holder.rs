@@ -483,6 +483,7 @@ impl NodeHolder {
             NodeRequest::GetDirectory => self
                 .tree
                 .send_event(id, StandardEvent::Directory(self.directory.clone())),
+            NodeRequest::StartWl(wl) => self.tree.start_wl(id, &wl),
         }
         None
     }

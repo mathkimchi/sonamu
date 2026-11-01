@@ -2,7 +2,7 @@
 
 use crate::{
     command_hub::program_command,
-    nodular_applet::{AppletContext, NodularAppletInitializer, StandardApplet},
+    nodular_applet::{AppletContext, NodeRequest, NodularAppletInitializer, StandardApplet},
     standard_keybinds::standard_keybind_request,
 };
 use singularity_common::{
@@ -17,7 +17,7 @@ use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
     ui_element::{Style, UIElement, UITree},
-    ui_event::UIEvent,
+    ui_event::{KeySymbol, UIEvent},
 };
 use std::{
     fs, io,
@@ -133,15 +133,28 @@ pub fn hibernate(saved: SavedApplet) -> NodularAppletInitializer {
     RestoringApplet::initializer(saved, format!("{label} (inactive)"))
 }
 
-/// Starts a hibernating wl client. Its tile stands in as "Starting ..." and awaits its toplevel.
-/// A program running in its terminal is run again if it is in `restore_programs`.
+/// Starts a hibernating wl client, with the program running in its terminal if it is in `restore_programs`.
+/// If it had another one, its tile asks first whether to run it again (`RestorePrompt`).
 pub fn wake(wl: &SavedWl) -> (NodularAppletInitializer, Option<AwaitedWl>) {
-    let name = wl_label(wl);
-    let mut restored = wl.clone();
-    restored.running = restored
+    if wl
         .running
-        .filter(|running| restore_program(running).is_some());
-    let (label, awaiting) = match restore_command(&restored).map(|mut command| command.spawn()) {
+        .as_ref()
+        .is_some_and(|running| restore_program(running).is_none())
+    {
+        let wl = wl.clone();
+        return (
+            Box::new(move |hook| Box::new(RestorePrompt { wl, hook })),
+            None,
+        );
+    }
+    start(wl)
+}
+
+/// Starts the wl client (with the program running in its terminal, if any). Its tile stands in as "Starting ..."
+/// and awaits its toplevel.
+pub fn start(wl: &SavedWl) -> (NodularAppletInitializer, Option<AwaitedWl>) {
+    let name = wl_label(wl);
+    let (label, awaiting) = match restore_command(wl).map(|mut command| command.spawn()) {
         Some(Ok(mut child)) => {
             let awaiting = AwaitedWl {
                 pid: child.id(),
@@ -317,6 +330,87 @@ fn tty_and_foreground(pid: u32) -> Option<(i64, i64)> {
     // after the command name, which may have spaces: state, ppid, pgrp, session, tty_nr, tpgid
     let mut fields = stat.rsplit_once(')')?.1.split_whitespace().skip(4);
     Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
+}
+
+/// Stands in for a terminal being restored, asking whether to run the program that was running in it again
+struct RestorePrompt {
+    wl: SavedWl,
+    hook: AppletContext,
+}
+impl RestorePrompt {
+    fn command(&self) -> String {
+        self.wl
+            .running
+            .as_ref()
+            .map(|running| {
+                let mut argv = running.argv.clone();
+                if let Some(program) = argv.first_mut() {
+                    *program = base_name(program);
+                }
+                argv.join(" ")
+            })
+            .unwrap_or_default()
+    }
+}
+impl StandardApplet for RestorePrompt {
+    fn handle_standard_event(&mut self, standard_event: StandardEvent) {
+        let StandardEvent::UIEvent(ui_event @ UIEvent::Key { .. }) = standard_event else {
+            return;
+        };
+        if let Some(request) = standard_keybind_request(&ui_event) {
+            self.hook.request(request);
+            return;
+        }
+        let UIEvent::Key {
+            symbol: Some(key),
+            pressed: true,
+            ..
+        } = ui_event
+        else {
+            return;
+        };
+        let mut wl = self.wl.clone();
+        match key {
+            KeySymbol::Char('y') | KeySymbol::Enter => {}
+            KeySymbol::Char('n') | KeySymbol::Escape => wl.running = None,
+            _ => return,
+        }
+        self.hook.request(NodeRequest::StartWl(wl));
+    }
+
+    fn get_window_standard_applet(&self, container_size: DisplayContainerSize) -> UITree {
+        let margin = 16.0;
+        let cwd = self
+            .wl
+            .running
+            .as_ref()
+            .and_then(|running| running.cwd.as_ref())
+            .map(|cwd| format!(" in {}", cwd.display()))
+            .unwrap_or_default();
+        let text = format!(
+            "{} was running `{}`{cwd}.\n\nRun it again?\n  y / Enter: yes\n  n / Esc: no, just the terminal",
+            wl_label(&self.wl),
+            self.command()
+        );
+        UITree::leaf_styled(
+            UIElement::Text(vec![(text, UIElement::glyphon_attr(Color::LIGHT_GRAY))]),
+            Style::absolute(
+                [margin, margin],
+                [
+                    (container_size.width as f32 - 2.0 * margin).max(0.0),
+                    (container_size.height as f32 - 2.0 * margin).max(0.0),
+                ],
+            ),
+        )
+    }
+
+    fn get_treeview(&self) -> WorldTree<String> {
+        WorldTree::Base(format!("Restore `{}`?", self.command()))
+    }
+
+    fn save(&self) -> Option<SavedApplet> {
+        Some(SavedApplet::Wl(self.wl.clone()))
+    }
 }
 
 /// Stands in for an applet being restored: a wl client starting, or one that couldn't be made.

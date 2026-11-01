@@ -10,7 +10,7 @@ use singularity_common::{
         client_handle::ClientHandle,
         detached::{Axis, DetachedClient, DetachedTree, Layout},
         packets::{AwaitedWl, NewWlSurface, SpawnPosition, StandardEvent, WlSurfaceId},
-        session::{SavedApplet, SavedTree},
+        session::{SavedApplet, SavedTree, SavedWl},
     },
     settings,
     utils::tree::{
@@ -1103,6 +1103,24 @@ impl NodeTree {
             SavedApplet::Wl(wl) => session::wake(&wl),
             saved => (session::restore(saved), None),
         };
+        self.replace_main(id, initializer, awaiting);
+    }
+
+    /// Starts the saved wl client in the node, in place of its main (eg a prompt to restore it)
+    pub fn start_wl(&mut self, id: NodeId, wl: &SavedWl) {
+        if !self.nodes.contains_key(id) {
+            return;
+        }
+        let (initializer, awaiting) = session::start(wl);
+        self.replace_main(id, initializer, awaiting);
+    }
+
+    fn replace_main(
+        &mut self,
+        id: NodeId,
+        initializer: NodularAppletInitializer,
+        awaiting: Option<AwaitedWl>,
+    ) {
         let main = (self.spawn_client)(id, initializer);
         let node = &mut self.nodes[id];
         node.main = Some(main);

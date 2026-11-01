@@ -1304,7 +1304,10 @@ impl StandardApplet for FileManagerApplet {
                 TreeTraverseOperation::BfsPrev | TreeTraverseOperation::BfsNext,
             )) => self.hook.request(request),
             // TODO: a placed project dissolving here loses its contents (they'd need to be the node's children)
-            NodeRequest::ChangeFocus(_) | NodeRequest::SwapSibling(_) | NodeRequest::Unwrap(_) => {
+            NodeRequest::ChangeFocus(_)
+            | NodeRequest::SwapSibling(_)
+            | NodeRequest::Unwrap(_)
+            | NodeRequest::StartWl(_) => {
                 return;
             }
             NodeRequest::Close => {

@@ -53,7 +53,7 @@ print(json.dumps({
         # {"key": 99, "command": "grim - | swappy -f -"},  # screenshot and edit with swappy, this is the Prt Sc key
         {"key": 99, "command": "grim"},  # swappy is broken bro
     ],
-    # programs restored running in their terminal
+    # programs restored running in their terminal; for others, the restored terminal asks first
     "restore_programs": ["hx", {"program": "claude", "args": ["--continue"]}, "typst"],
     "watch": [str(colors_path), str(dms_settings_path)],
 }, indent=2))

@@ -59,6 +59,11 @@ Sonamu owns the session; apps' own session restore should be off.
     it exits). foot and kitty take the command as trailing args, others get `-e` (wrong for eg wezterm). A program
     in the setting with `args` gets those instead of its saved ones (eg `claude --continue`). Not handled: a terminal
     whose saved argv already runs a command (the program's command is appended after it).
+  - Any other running program: when the hibernating tile wakes (`session::wake`), it shows a `RestorePrompt`
+    instead of starting the terminal ("foot was running `cargo run` in ~/x. Run it again?", treeview
+    "Restore `cargo run`?"). y/Enter: with the program, n/Esc: just the terminal. It answers with
+    `NodeRequest::StartWl(wl)` (running cleared for no), which the holder handles with `NodeTree::start_wl`
+    (`session::start`, like waking). Saved as the wl client meanwhile. Inside the file manager, `StartWl` is ignored.
   - The url comes from the title (`SavedWl::url`): before its first ` | ` (firefox, via `extras/firefox`), else after
     its last ` | ` (qutebrowser), with no spaces; `about:` pages count, so they're hidden and restored too.
     So the browser has to put it there.

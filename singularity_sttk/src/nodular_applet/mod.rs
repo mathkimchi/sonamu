@@ -11,7 +11,7 @@ use singularity_common::{
             StandardRequest, StateKind, Treeview, WlSurfaceEvent,
         },
         raw_client_initializer::RawClientInitializer,
-        session::{SavedApplet, SavedTree},
+        session::{SavedApplet, SavedTree, SavedWl},
         shared_state::{SharedState, StatePublisher},
     },
     settings::{self, Settings},
@@ -249,6 +249,8 @@ pub enum NodeRequest {
     Open(OpenApplet),
     /// Asks for the working directory of the tree the applet is in, answered with `StandardEvent::Directory`
     GetDirectory,
+    /// Starts the saved wl client in the applet's node, in place of the applet (eg a prompt to restore it)
+    StartWl(SavedWl),
 }
 
 /// Makes an applet from a detached subtree (`NodeRequest::Wrap`) and the directory of the tree it is in
