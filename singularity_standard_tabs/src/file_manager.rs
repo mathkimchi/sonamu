@@ -1014,6 +1014,16 @@ impl StandardApplet for FileManagerApplet {
         true
     }
 
+    /// Asks its wl clients to close and deactivates its other documents; they are restored with it
+    fn deactivate(&mut self) {
+        for document in &self.documents {
+            document.handle.send_event(match document.wl {
+                Some(_) => StandardEvent::CloseRequest,
+                None => StandardEvent::Deactivate,
+            });
+        }
+    }
+
     fn get_window_standard_applet(&self, container_size: DisplayContainerSize) -> UITree {
         let list_width = self.list_width() as f32;
         let documents_width = container_size.width as f32 - list_width;

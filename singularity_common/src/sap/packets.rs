@@ -33,7 +33,8 @@ pub enum NodeAction {
     Close,
     /// Asks it and everything under it to close
     CloseWithChildren,
-    /// Stops its wl client, leaving its tile inactive until it is focused again (like a restored one)
+    /// Stops its applet (a wl client, or a native applet and everything inside it), leaving the node inactive
+    /// until it is focused again (like a restored wl tile)
     Deactivate,
     /// Wraps it and everything under it in a project, like Super+P on it
     MakeProject,
@@ -148,6 +149,8 @@ pub enum StandardEvent {
     // // Is a UI event already
     // Resize(DisplayContainerSize),
     CloseRequest,
+    /// Its holder is about to drop it inactive: stop what it holds (eg the wl clients in its inner tree)
+    Deactivate,
     /// The server read this state, so the client may publish a new value
     DamageAck(StateKind),
 

@@ -165,6 +165,7 @@ impl StandardApplet for SplitApplet {
             StandardEvent::Directory(directory) => self.holder.set_directory(directory),
             // handled by the applet's client
             StandardEvent::CloseRequest
+            | StandardEvent::Deactivate
             | StandardEvent::SettingsChanged(_)
             | StandardEvent::DamageAck(_)
             | StandardEvent::WlSurfaceRegistered(_)
@@ -258,6 +259,10 @@ impl StandardApplet for SplitApplet {
     fn close_requested(&mut self) -> bool {
         self.holder.dissolve = true;
         false
+    }
+
+    fn deactivate(&mut self) {
+        self.holder.tree.deactivate_all();
     }
 
     fn take_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), NewWlSurface> {

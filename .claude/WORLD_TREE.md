@@ -181,9 +181,16 @@ The holder converts them:
   project, all as `NodeAction::Spawn`. Native ones are added there and focused inside; for a program, the holder
   keeps `wl_target` and the next new wl surface it gets goes there. A spawn passed into an applet focuses inside
   it, so that surface is passed in too. A click elsewhere closes the menu.
-  - Deactivate (`NodeTree::deactivate`) only works on a live wl tile: it asks the client to close its toplevel
-    (forgetting the surface, so the node stays) and puts the restored-session stand-in in its place, inactive and
-    `hibernated`, so it starts again when focused. Focus on it moves to its parent, else it would wake right away.
+  - Deactivate (`NodeTree::deactivate`) puts a stand-in in the node's main, inactive and `hibernated` (its
+    `SavedApplet`), so it starts again when focused. Focus on it moves to its parent, else it would wake right away.
+    A live wl tile asks its client to close its toplevel (forgetting the surface, so the node stays). A native
+    applet with a saved form gets `StandardEvent::Deactivate` (`StandardApplet::deactivate`) and is dropped; waking
+    restores it from its saved form (`session::restore`, inner tree and all). Projects and splits stop their whole
+    inner tree (`NodeTree::deactivate_all`: wl tiles get `CloseRequest`, native mains `Deactivate`, recursively);
+    the file manager closes its wl documents and deactivates the others. Restored wl clients inside come back
+    hibernated, but the file manager's wl documents start right away. Starting placeholders and applets without a
+    saved form (eg the help) can't be deactivated. The node's own (outer) children are left alone. Not saved: a
+    deactivated native applet is restored active on the next start.
 - `Focus(path)` puts focus *at* the path: a path ending on an element selects it (the applet's selector),
   a longer one goes inside it.
 

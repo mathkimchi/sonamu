@@ -125,6 +125,10 @@ pub trait StandardApplet {
         true
     }
 
+    /// Its node is about to drop it inactive (`NodeAction::Deactivate`, restored from its `save` when focused);
+    /// stop what it holds that would outlive it, eg the wl clients in its inner tree
+    fn deactivate(&mut self) {}
+
     /// A new wl surface while focus is inside this applet, or one it awaits (`awaiting_wl`).
     /// `Err` gives it back, and its node gets it as a child.
     fn take_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), NewWlSurface> {
@@ -447,6 +451,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         let _ = state.request_sender.send(NodeRequest::Close);
                     }
                 }
+                calloop::channel::Event::Msg(StandardEvent::Deactivate) => state.applet.deactivate(),
                 calloop::channel::Event::Msg(StandardEvent::WlSurfaceRegistered(surface)) => {
                     if let Err(surface) = state.applet.take_wl_surface(surface) {
                         let _ = state

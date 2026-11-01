@@ -419,6 +419,8 @@ impl RootNodeApplet {
             StandardEvent::DamageAck(StateKind::Treeview) => {}
             // the root can't close without ending everything
             StandardEvent::CloseRequest => self.quit(),
+            // the root is never deactivated
+            StandardEvent::Deactivate => {}
             StandardEvent::WlSurfaceRegistered(surface) => {
                 // a restored tile, else where the user is working (eg under the command hub that ran it)
                 self.holder.add_wl_surface(surface);

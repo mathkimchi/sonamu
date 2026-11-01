@@ -539,6 +539,7 @@ impl StandardApplet for CommandHubApplet {
             StandardEvent::CloseRequest => self.hook.close(),
             // handled by the applet's client
             StandardEvent::DamageAck(_)
+            | StandardEvent::Deactivate
             | StandardEvent::SettingsChanged(_)
             | StandardEvent::Pluck(_)
             | StandardEvent::Place(..)

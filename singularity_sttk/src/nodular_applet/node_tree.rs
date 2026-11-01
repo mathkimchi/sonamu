@@ -10,7 +10,7 @@ use singularity_common::{
         client_handle::ClientHandle,
         detached::{Axis, DetachedClient, DetachedTree, Layout},
         packets::{AwaitedWl, NewWlSurface, SpawnPosition, StandardEvent, WlSurfaceId},
-        session::{SavedApplet, SavedTree, SavedWl},
+        session::{SavedApplet, SavedTree},
     },
     settings,
     utils::tree::{
@@ -62,8 +62,8 @@ struct Node {
     awaiting: Option<AwaitedWl>,
     /// Hibernating: shown grey in the treeview
     inactive: bool,
-    /// A restored wl client not started yet (its main stands in); started when focused
-    hibernated: Option<SavedWl>,
+    /// A restored wl client not started yet, or a deactivated applet (its main stands in); started when focused
+    hibernated: Option<SavedApplet>,
 }
 impl Node {
     const fn new(main: Option<ClientHandle>, layout: Layout, parent: Option<NodeId>) -> Self {
@@ -356,10 +356,10 @@ impl NodeTree {
 
     /// Makes the saved node and its descendants under `parent` (not added to its children)
     fn restore_subtree(&mut self, parent: Option<NodeId>, saved: SavedTree) -> NodeId {
-        let hibernated = match &saved.main {
-            Some(SavedApplet::Wl(wl)) => Some(wl.clone()),
-            _ => None,
-        };
+        let hibernated = saved
+            .main
+            .clone()
+            .filter(|main| matches!(main, SavedApplet::Wl(_)));
         let main = saved.main.map(session::restore);
         let spawn_client = &self.spawn_client;
         let id = self.nodes.insert_with_key(|id| Node {
@@ -888,28 +888,45 @@ impl NodeTree {
         ids
     }
 
-    /// Stops the wl client the node shows (asking it to close its toplevel), leaving the node inactive like a
-    /// restored one, until it is focused. Does nothing if it shows none. Focus on it moves to its parent,
-    /// or it would wake right away.
+    /// Stops the node's applet, leaving the node inactive like a restored wl tile, until it is focused:
+    /// a wl client is asked to close its toplevel, a native applet stops what it holds (eg its inner tree's wl
+    /// clients, `StandardEvent::Deactivate`) and is dropped. Does nothing if it has no saved form, or is still
+    /// starting. Focus on it moves to its parent, or it would wake right away.
     pub fn deactivate(&mut self, id: NodeId) {
-        if !self.wl_surfaces.values().any(|&node_id| node_id == id) {
+        let node = &self.nodes[id];
+        if node.hibernated.is_some() {
             return;
         }
-        let Some(SavedApplet::Wl(wl)) = self.nodes[id]
-            .main
-            .as_ref()
-            .and_then(|main| main.get_treeview().saved)
-        else {
+        let Some(treeview) = node.main.as_ref().map(ClientHandle::get_treeview) else {
             return;
         };
-        // its toplevel's destruction no longer closes the node
-        self.wl_surfaces.retain(|_, node_id| *node_id != id);
-        // a wl tile asks its client, without asking its node to close
-        self.send_event(id, StandardEvent::CloseRequest);
-        let stand_in = (self.spawn_client)(id, session::restore(SavedApplet::Wl(wl.clone())));
+        let stand_in = match treeview.saved {
+            Some(SavedApplet::Wl(_)) if !self.wl_surfaces.values().any(|&node_id| node_id == id) => {
+                return;
+            }
+            Some(saved @ SavedApplet::Wl(_)) => {
+                // its toplevel's destruction no longer closes the node
+                self.wl_surfaces.retain(|_, node_id| *node_id != id);
+                // a wl tile asks its client, without asking its node to close
+                self.send_event(id, StandardEvent::CloseRequest);
+                saved
+            }
+            Some(saved) => {
+                self.send_event(id, StandardEvent::Deactivate);
+                saved
+            }
+            None => return,
+        };
+        let initializer = match &stand_in {
+            SavedApplet::Wl(_) => session::restore(stand_in.clone()),
+            SavedApplet::Spawner { .. } => {
+                session::inactive(stand_in.clone(), treeview.tree.get_root_value())
+            }
+        };
+        let main = (self.spawn_client)(id, initializer);
         let node = &mut self.nodes[id];
-        node.main = Some(stand_in);
-        node.hibernated = Some(wl);
+        node.main = Some(main);
+        node.hibernated = Some(stand_in);
         node.inactive = true;
         node.inner_wl_focus = None;
         // so the new applet gets its size
@@ -921,6 +938,22 @@ impl NodeTree {
             self.focus(parent, false);
         }
         self.damaged = true;
+    }
+
+    /// Stops what every node's applet holds, before the tree is dropped (its holder is deactivated)
+    pub fn deactivate_all(&mut self) {
+        for (id, node) in &self.nodes {
+            // a stand-in (hibernated) has nothing to stop
+            if let Some(main) = &node.main
+                && node.hibernated.is_none()
+            {
+                main.send_event(if self.wl_surfaces.values().any(|&node_id| node_id == id) {
+                    StandardEvent::CloseRequest
+                } else {
+                    StandardEvent::Deactivate
+                });
+            }
+        }
     }
 
     /// Adds a tile for the surface as the parent's last child, and focuses inside it (so it's shown and gets keys)
@@ -1067,10 +1100,13 @@ impl NodeTree {
     /// Starts the focused node's wl client if it is hibernating
     pub fn wake_focused(&mut self) {
         let id = self.focused_node();
-        let Some(wl) = self.nodes[id].hibernated.take() else {
+        let Some(saved) = self.nodes[id].hibernated.take() else {
             return;
         };
-        let (initializer, awaiting) = session::wake(&wl);
+        let (initializer, awaiting) = match saved {
+            SavedApplet::Wl(wl) => session::wake(&wl),
+            saved => (session::restore(saved), None),
+        };
         let main = (self.spawn_client)(id, initializer);
         let node = &mut self.nodes[id];
         node.main = Some(main);

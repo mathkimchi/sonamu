@@ -118,6 +118,11 @@ pub fn restore(saved: SavedApplet) -> NodularAppletInitializer {
     }
 }
 
+/// Stands in for a deactivated native applet, saved as it was, until it is restored (`restore`)
+pub fn inactive(saved: SavedApplet, label: &str) -> NodularAppletInitializer {
+    RestoringApplet::initializer(saved, format!("{label} (inactive)"))
+}
+
 /// Starts a hibernating wl client. Its tile stands in as "Starting ..." and awaits its toplevel.
 pub fn wake(wl: &SavedWl) -> (NodularAppletInitializer, Option<AwaitedWl>) {
     let name = wl_label(wl);
