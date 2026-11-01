@@ -92,29 +92,26 @@ is replaced by that pane (it sends `Unwrap`). Saved as the `split` spawner with 
 
 ## Running as the actual compositor (TTY)
 
-- **Approach: present the existing wgpu renderer directly to a monitor** via wgpu's `SurfaceTargetUnsafe::Drm`
-  (Vulkan `VK_EXT_acquire_drm_display`), instead of smithay's DRM/GBM/GLES path. The whole renderer stays as is;
-  the Vulkan driver does the modesetting and page flips. Cost: needs a Vulkan driver with that extension
-  (Mesa has it; NVIDIA's proprietary driver probably not), no hardware cursor, and VT switching
-  is best effort (below). The smithay-renderer route would mean rewriting the renderer, so I didn't.
+- **Approach (#60): wgpu draws, smithay's KMS shows**, like niri but keeping the wgpu renderer. Each monitor gets a
+  CRTC, a `DrmSurface` and a `GbmBufferedSurface` (GBM scanout swapchain). Its buffers are imported into wgpu as
+  render targets (`sonamu_ui::dmabuf::import`, cached per buffer in `DrmOutput::textures`), drawn by one shared
+  offscreen `WgpuData` (`UIDisplay::draw_to`, with the monitor's `origin`), then queued; the next frame waits for its
+  vblank (`DrmEvent::VBlank` → `frame_submitted`). No fences yet: it waits for the GPU (`device.poll`) before each flip.
+  Formats: XRGB/ARGB8888 with the single plane modifiers Vulkan can draw into and copy from.
+  Earlier it presented through wgpu's `SurfaceTargetUnsafe::Drm` (Vulkan `VK_EXT_acquire_drm_display`), but Mesa
+  allows that acquire once per Vulkan instance and wgpu acquires (and panics) for every surface, so only one monitor
+  worked. Not done: hardware cursor plane, explicit sync, direct scanout of client buffers.
 - New `sonamu_ui::winit_backend::drm::run_drm_display` (exported as `sonamu_ui::run_drm_display`), same arguments as
   `UIDisplay::run_display`. It lives under `winit_backend` because it reuses that module's private `WgpuData` and draw
   code; the module name is now a bit wrong (`winit_backend` is really "the wgpu display").
 - **Selection**: `AppletRunner::run` runs on the TTY if neither `WAYLAND_DISPLAY` nor `DISPLAY` is set (like niri/anvil),
   or if `SONAMU_BACKEND=tty`; `SONAMU_BACKEND=winit` forces a window. On the TTY, wgpu is limited to Vulkan.
 - Session: smithay's `LibSeatSession` (logind or seatd); GPU: `udev::primary_gpu`, else the first GPU.
-  Monitors: every connected connector at its preferred mode, side by side left to right (#60), each its own surface
-  drawing its part of the one scene (`UIDisplay::draw`'s `origin`). Vulkan display plane index = the output's index
-  (Mesa numbers planes by its acquired connectors, in order), offset by `SONAMU_VK_DISPLAY_PLANE`.
-  **Only one monitor actually works on the TTY so far**: Mesa allows `vkAcquireDrmDisplayEXT` once per instance (later
-  displays are driven through that fd without one), but wgpu-hal's `create_surface_from_drm` acquires every time and
-  `.expect`s it, so the second monitor panics (caught in `new_output`, logged, and left off). Fix: patch wgpu-hal to
-  skip/tolerate the acquire once acquired (or a wgpu API to wrap a raw `VkSurfaceKHR`, which doesn't exist in 29).
-  Rescanned on udev changes (`update_outputs`; hotplug) and on VT switch back: new monitors are added, gone ones
+  Monitors: every connected connector at its preferred mode, side by side left to right (#60), each drawing its part
+  of the one scene. Rescanned on udev changes (`update_outputs`; hotplug) and on VT switch back: new monitors are added, gone ones
   dropped, and the runner gets `WindowResized` + `Screens` again. A connector only has modes once probed, which needs
   DRM master; smithay's "Unable to become drm master" warning is spurious with logind (the kernel refuses
   `SET_MASTER` from a non-opener without `CAP_SYS_ADMIN` even when the fd already is master).
-  wgpu matches the mode by exact refresh rate, so it's computed the way Mesa does (`vulkan_refresh_millihertz`).
 - Input: libinput (smithay's `LibinputInputBackend`) on the display thread, translated to the same `UIEvent`s as winit:
   xkb keymap from `XKB_DEFAULT_*`, key symbols from the keysym (so Ctrl+W is still `w`, not a control char),
   modifiers from before the key (like winit), **key repeat** done here (600 ms delay, 25/s; libinput doesn't repeat,
@@ -123,15 +120,15 @@ is replaced by that pane (it sends `Unwrap`). Saved as the `split` spawner with 
 - **Software cursor**: a small white box drawn on top of the scene (hidden where the scene asks for `Cursor::Hidden`).
   Pointer motion redraws the last scene, at most once per event batch. Named/custom cursor shapes are ignored.
 - **Ctrl+Alt+Backspace quits** (the TTY's own keyboard is off while this runs, so this is the escape hatch).
-  Ctrl+Alt+F1..F12 switch VTs through the session; on return, libinput resumes and the surface is reconfigured,
-  but whether Mesa restores the mode afterwards is untested.
-- If the session, GPU, monitor or Vulkan surface can't be set up, it logs why and returns, which ends Sonamu
+  Ctrl+Alt+F1..F12 switch VTs through the session (the DRM device pauses); on return it is activated with every
+  connector off, each surface's state and buffers are reset, and everything is drawn again (a full modeset).
+- If the session, GPU, DRM/GBM, or wgpu's dmabuf import can't be set up, it logs why and returns, which ends Sonamu
   (the proxy is sent first, so the runner isn't left waiting).
 - `DisplayProxy` (`Box<dyn Fn(DisplayRequest) + Send>`) replaces `EventLoopProxy<DisplayRequest>` in `UIHandle`,
   so either display can be woken. `Gpu { device, queue, instance, adapter }` bundles what the display gets
   (it needs the adapter for the surface's capabilities). `UIHandle::instance` (never read) is gone.
-- `WgpuData::new` now takes the surface and picks the format/alpha from its capabilities, preferring the old
-  `Bgra8UnormSrgb` + `PreMultiplied` (so the window is unchanged); a Vulkan display usually only has opaque alpha.
+- `WgpuData::new` takes the surface and picks the format/alpha from its capabilities, preferring
+  `Bgra8UnormSrgb` + `PreMultiplied`; `WgpuData::offscreen` (no surface) is for drawing into textures.
 - **`WAYLAND_DISPLAY` is never set in-process.** I first set it to Sonamu's socket on the TTY, which hung at startup:
   Mesa's Vulkan device-select layer connects to `WAYLAND_DISPLAY` while wgpu creates the instance, before Sonamu's
   loop runs. Instead sar sets `SONAMU_WAYLAND_DISPLAY` (before any thread starts), and the command hub passes it as

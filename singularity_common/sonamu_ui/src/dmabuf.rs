@@ -16,7 +16,10 @@ const HANDLE_TYPE: vk::ExternalMemoryHandleTypeFlags =
 /// The Vulkan usage for `usage` (only copying from and drawing into are supported),
 /// and the format features it needs
 fn vk_usage(usage: wgpu::TextureUsages) -> (vk::ImageUsageFlags, vk::FormatFeatureFlags) {
-    let mut flags = (vk::ImageUsageFlags::empty(), vk::FormatFeatureFlags::empty());
+    let mut flags = (
+        vk::ImageUsageFlags::empty(),
+        vk::FormatFeatureFlags::empty(),
+    );
     if usage.contains(wgpu::TextureUsages::COPY_SRC) {
         flags.0 |= vk::ImageUsageFlags::TRANSFER_SRC;
         flags.1 |= vk::FormatFeatureFlags::TRANSFER_SRC;

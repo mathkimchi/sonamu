@@ -1,15 +1,16 @@
 //! Runs the display on a monitor directly (from a TTY, as the actual compositor), with libinput for input.
 //!
-//! Draws with the same wgpu renderer as the window, onto a Vulkan display surface
-//! (`VK_EXT_acquire_drm_display`), so the Vulkan driver does the modesetting.
+//! Draws with the same wgpu renderer as the window, into each monitor's scanout buffers (GBM, imported into wgpu
+//! through Vulkan, `crate::dmabuf`), which smithay's DRM backend flips onto the monitor (KMS), like niri does.
 
 use crate::{
     display_units::{DisplayAreaPx, DisplayContainerSize},
+    dmabuf,
     ui_element::{Cursor, CursorIcon, PrimitiveScene, RoundRect, UIPrimitiveElement},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, SwipeDirection, UIEvent},
     winit_backend::{
-        DisplayInfo, DisplayNotification, DisplayProxy, DisplayRequest, Gpu, PointerGrab,
-        UIDisplay, WgpuData, rendering::Skipped,
+        CapturedFrame, DisplayInfo, DisplayNotification, DisplayProxy, DisplayRequest, Gpu,
+        PointerGrab, UIDisplay, WgpuData,
     },
 };
 use calloop::{
@@ -19,7 +20,12 @@ use calloop::{
 };
 use smithay::{
     backend::{
-        drm::{DrmDeviceFd, DrmNode},
+        allocator::{
+            Format, Fourcc,
+            dmabuf::Dmabuf,
+            gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
+        },
+        drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, GbmBufferedSurface},
         input::{
             AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event as _,
             GestureBeginEvent as _, GestureSwipeUpdateEvent as _, InputEvent, KeyState,
@@ -31,7 +37,7 @@ use smithay::{
     },
     input::keyboard::{Keycode, Keysym, xkb},
     reexports::{
-        drm::control::{Device as _, Mode, ModeTypeFlags, connector},
+        drm::control::{Device as _, Mode, ModeTypeFlags, connector, crtc},
         input::{DeviceCapability, Libinput},
         rustix::fs::OFlags,
     },
@@ -39,10 +45,10 @@ use smithay::{
 };
 use sonamu_sync::TrackedEncapsulatedLock;
 use std::{
-    os::fd::{AsFd as _, AsRawFd as _},
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
+use wgpu::hal::api::Vulkan;
 
 /// Key repeat, also given to wl clients (which repeat keys themselves)
 pub const REPEAT_DELAY: Duration = Duration::from_millis(600);
@@ -69,10 +75,51 @@ struct CursorImage {
 struct DrmOutput {
     connector: connector::Handle,
     mode: Mode,
-    wgpu_data: WgpuData,
+    crtc: crtc::Handle,
+    /// Its scanout buffers
+    surface: GbmBufferedSurface<GbmAllocator<DrmDeviceFd>, ()>,
+    /// The scanout buffers, as drawn into
+    textures: Vec<(Dmabuf, wgpu::Texture)>,
     /// Its top left in the scene
     origin: [u32; 2],
+    /// Has changed since it was last drawn
+    dirty: bool,
+    /// A frame is queued, until its vblank: it is drawn again after that
+    pending: bool,
 }
+impl DrmOutput {
+    /// Draws the scene into its next buffer and queues it to be shown
+    fn draw(
+        &mut self,
+        renderer: &mut WgpuData,
+        scene: &PrimitiveScene,
+        capture: bool,
+    ) -> Result<Option<CapturedFrame>, String> {
+        let (buffer, _) = self.surface.next_buffer().map_err(|err| err.to_string())?;
+        let texture = match self.textures.iter().find(|(drawn, _)| *drawn == buffer) {
+            Some((_, texture)) => texture.clone(),
+            None => {
+                let texture = dmabuf::import(&renderer.device, &buffer, SCANOUT_USAGE)
+                    .ok_or("can't import a scanout buffer into wgpu")?;
+                self.textures.push((buffer, texture.clone()));
+                texture
+            }
+        };
+        let captured = UIDisplay::draw_to(renderer, &texture, scene, capture, self.origin);
+        // no fences yet, so it has to be drawn before it's flipped
+        let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
+        self.surface
+            .queue_buffer(None, None, ())
+            .map_err(|err| err.to_string())?;
+        self.dirty = false;
+        self.pending = true;
+        Ok(captured)
+    }
+}
+
+/// Scanout buffers are drawn into, and copied out for captures
+const SCANOUT_USAGE: wgpu::TextureUsages =
+    wgpu::TextureUsages::RENDER_ATTACHMENT.union(wgpu::TextureUsages::COPY_SRC);
 
 struct DrmDisplay {
     is_running: Arc<AtomicBool>,
@@ -82,9 +129,11 @@ struct DrmDisplay {
     loop_signal: LoopSignal,
     loop_handle: LoopHandle<'static, Self>,
 
-    /// Before `drm`, since the surfaces must be dropped first.
+    /// Before the devices, since the surfaces must be dropped first.
     /// Side by side, left to right, in connector order.
     outputs: Vec<DrmOutput>,
+    /// Draws into every output's buffers
+    renderer: WgpuData,
     device: wgpu::Device,
     queue: wgpu::Queue,
     /// The last scene, redrawn when only the pointer moves
@@ -106,20 +155,18 @@ struct DrmDisplay {
     /// The swipe going on: its fingers, how far they moved since its last step, and whether it had a step
     swipe: Option<(u32, [f64; 2], bool)>,
 
-    /// For the outputs' surfaces
-    gpu: Gpu,
-    /// Every connector ever shown, in order, since Mesa numbers their display planes that way
-    acquired: Vec<connector::Handle>,
-    /// Keeps the device open for the surfaces
-    drm: DrmDeviceFd,
+    drm_device: DrmDevice,
+    gbm: GbmDevice<DrmDeviceFd>,
+    /// What the renderer can draw into
+    formats: Vec<Format>,
     session: LibSeatSession,
     libinput: Libinput,
 }
 
 /// Like `UIDisplay::run_display`, but on the monitor directly. Returns when the display is closed.
 ///
-/// Needs a session (logind or seatd) and a Vulkan driver with `VK_EXT_acquire_drm_display` (Mesa has it).
-/// If either is missing, it logs why and returns, which ends the runner.
+/// Needs a session (logind or seatd), GBM, and wgpu on Vulkan with dmabuf import (`crate::dmabuf`).
+/// If any is missing, it logs why and returns, which ends the runner.
 // same arguments as `UIDisplay::run_display`
 #[allow(clippy::needless_pass_by_value)]
 pub fn run_drm_display(
@@ -212,6 +259,27 @@ impl DrmDisplay {
             gpu_path.display(),
             DrmNode::from_file(&drm).ok()
         );
+        // starting from every monitor off
+        let (drm_device, drm_notifier) =
+            DrmDevice::new(drm.clone(), true).map_err(|err| format!("can't use DRM: {err}"))?;
+        let gbm = GbmDevice::new(drm).map_err(|err| format!("can't use GBM: {err}"))?;
+        // SAFETY: only queries
+        let formats = unsafe { gpu.device.as_hal::<Vulkan>() }
+            .map(|hal_device| unsafe { dmabuf::modifiers(&hal_device, SCANOUT_USAGE) })
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|modifier| {
+                [Fourcc::Xrgb8888, Fourcc::Argb8888].map(|code| Format {
+                    code,
+                    modifier: modifier.into(),
+                })
+            })
+            .collect::<Vec<_>>();
+        if formats.is_empty() {
+            return Err("wgpu can't draw into dmabufs (it needs Vulkan with \
+                `VK_EXT_image_drm_format_modifier`)"
+                .to_string());
+        }
 
         // keymap from the XKB_DEFAULT_* environment variables, like smithay's seat keyboard
         let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
@@ -243,27 +311,35 @@ impl DrmDisplay {
                 SessionEvent::PauseSession => {
                     display.libinput.suspend();
                     display.stop_repeat();
+                    display.drm_device.pause();
                 }
                 SessionEvent::ActivateSession => {
                     if display.libinput.resume().is_err() {
                         log::error!("Couldn't resume libinput");
                     }
+                    // the monitors showed something else meanwhile, so from a known state
+                    if let Err(err) = display.drm_device.activate(true) {
+                        log::error!("Couldn't take the monitors back: {err}");
+                    }
+                    for output in &mut display.outputs {
+                        if let Err(err) = output.surface.surface().reset_state() {
+                            log::warn!("Couldn't reset {:?}: {err}", output.connector);
+                        }
+                        output.surface.reset_buffers();
+                        output.textures.clear();
+                        // its vblank won't come
+                        output.pending = false;
+                    }
                     // monitors may have been plugged in meanwhile
                     display.update_outputs();
-                    // the monitors showed something else meanwhile
-                    for output in &display.outputs {
-                        let WgpuData {
-                            device,
-                            surface,
-                            surface_config,
-                            ..
-                        } = &output.wgpu_data;
-                        if let Some(surface) = surface {
-                            surface.configure(device, surface_config);
-                        }
-                    }
                     display.needs_draw = true;
                 }
+            })
+            .map_err(|err| err.to_string())?;
+        handle
+            .insert_source(drm_notifier, |event, _, display: &mut Self| match event {
+                DrmEvent::VBlank(crtc) => display.vblank(crtc),
+                DrmEvent::Error(err) => log::error!("DRM error: {err}"),
             })
             .map_err(|err| err.to_string())?;
         // monitors plugged in or out
@@ -286,6 +362,11 @@ impl DrmDisplay {
             loop_signal: event_loop.get_signal(),
             loop_handle: handle,
             outputs: Vec::new(),
+            renderer: WgpuData::offscreen(
+                dmabuf::WGPU_FORMAT,
+                gpu.device.clone(),
+                gpu.queue.clone(),
+            ),
             device: gpu.device.clone(),
             queue: gpu.queue.clone(),
             scene: PrimitiveScene::new_empty(),
@@ -301,9 +382,9 @@ impl DrmDisplay {
             keyboard: xkb::State::new(&keymap),
             repeat: None,
             swipe: None,
-            gpu: gpu.clone(),
-            acquired: Vec::new(),
-            drm,
+            drm_device,
+            gbm,
+            formats,
             session,
             libinput,
         };
@@ -320,7 +401,7 @@ impl DrmDisplay {
             .send(DisplayNotification::Info(DisplayInfo {
                 scale_factor: 1.0,
                 // the first monitor's, for the clients
-                refresh_millihertz: Some(vulkan_refresh_millihertz(&first.mode)),
+                refresh_millihertz: Some(refresh_millihertz(&first.mode)),
             }))
             .unwrap();
         Ok(display)
@@ -329,20 +410,37 @@ impl DrmDisplay {
     /// Shows on the connected monitors (at startup, and when they may have changed, eg one was plugged in):
     /// keeps the ones still connected at the same mode, adds the others side by side, and tells the runner.
     fn update_outputs(&mut self) {
-        let connected = connected_outputs(&self.drm).unwrap_or_else(|err| {
+        let connected = connected_outputs(&self.drm_device).unwrap_or_else(|err| {
             log::warn!("Can't list the monitors: {err}");
             Vec::new()
         });
         let mut old = std::mem::take(&mut self.outputs);
-        // gone ones first, so a monitor with a new mode gets a new surface
-        old.retain(|output| connected.contains(&(output.connector, output.mode)));
-        for (connector, mode) in connected {
-            let output = match old.iter().position(|output| output.connector == connector) {
+        // gone ones first, so a monitor with a new mode gets a new surface (and its CRTC is free)
+        old.retain(|output| {
+            connected
+                .iter()
+                .any(|(info, mode)| (info.handle(), *mode) == (output.connector, output.mode))
+        });
+        for (info, mode) in connected {
+            let output = match old
+                .iter()
+                .position(|output| output.connector == info.handle())
+            {
                 Some(index) => old.swap_remove(index),
-                None => match self.new_output(connector, mode) {
-                    Some(output) => output,
-                    None => continue,
-                },
+                None => {
+                    let used = old
+                        .iter()
+                        .chain(&self.outputs)
+                        .map(|output| output.crtc)
+                        .collect::<Vec<_>>();
+                    match self.new_output(&info, mode, &used) {
+                        Ok(output) => output,
+                        Err(err) => {
+                            log::error!("Can't show on {:?}: {err}", info.handle());
+                            continue;
+                        }
+                    }
+                }
             };
             self.outputs.push(output);
         }
@@ -356,6 +454,7 @@ impl DrmDisplay {
             let (width, height) = output.mode.size();
             let (width, height) = (u32::from(width), u32::from(height));
             output.origin = [size.width, 0];
+            output.dirty = true;
             screens.push([size.width, 0, width, height]);
             size = DisplayContainerSize::new(size.width + width, size.height.max(height));
         }
@@ -370,73 +469,53 @@ impl DrmDisplay {
         self.needs_draw = true;
     }
 
-    /// A surface on the monitor, `None` if it can't be made
-    fn new_output(&mut self, connector: connector::Handle, mode: Mode) -> Option<DrmOutput> {
+    /// Scanout buffers on the monitor, on a CRTC that isn't `used`
+    fn new_output(
+        &mut self,
+        info: &connector::Info,
+        mode: Mode,
+        used: &[crtc::Handle],
+    ) -> Result<DrmOutput, String> {
+        let connector = info.handle();
         let (width, height) = mode.size();
-        let (width, height) = (u32::from(width), u32::from(height));
-        let refresh_millihertz = vulkan_refresh_millihertz(&mode);
         log::info!(
-            "Showing on connector {connector:?} at {width}x{height}@{refresh_millihertz}mHz"
+            "Showing on connector {connector:?} at {width}x{height}@{}mHz",
+            refresh_millihertz(&mode)
         );
-        let plane = match self
-            .acquired
+        let resources = self
+            .drm_device
+            .resource_handles()
+            .map_err(|err| err.to_string())?;
+        let crtc = info
+            .encoders()
             .iter()
-            .position(|&acquired| acquired == connector)
-        {
-            Some(plane) => plane,
-            None => {
-                self.acquired.push(connector);
-                self.acquired.len() - 1
-            }
-        };
-        // wgpu panics if Vulkan can't acquire the display, which Mesa only allows once per instance (its
-        // `wsi_AcquireDrmDisplayEXT`), so every monitor but the first fails; that fails nothing else
-        let surface = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // SAFETY: the fd is kept open (`drm`) until after the surfaces are dropped (`outputs`);
-            // the connector and mode come from the device itself
-            unsafe {
-                self.gpu
-                    .instance
-                    .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::Drm {
-                        fd: self.drm.as_fd().as_raw_fd(),
-                        // Vulkan's display plane index, not a DRM plane id.
-                        // Mesa has one plane per acquired connector, in the order they were acquired.
-                        plane: std::env::var("SONAMU_VK_DISPLAY_PLANE")
-                            .ok()
-                            .and_then(|plane| plane.parse().ok())
-                            .unwrap_or(0)
-                            + plane as u32,
-                        connector_id: connector.into(),
-                        width,
-                        height,
-                        refresh_rate: refresh_millihertz,
-                    })
-            }
-        }));
-        let surface = match surface {
-            Ok(Ok(surface)) => surface,
-            Ok(Err(err)) => {
-                log::error!("Can't make a Vulkan display surface for {connector:?}: {err}");
-                return None;
-            }
-            Err(_) => {
-                log::error!(
-                    "Can't acquire {connector:?} (Mesa only lets wgpu acquire one monitor), so it is left off"
-                );
-                return None;
-            }
-        };
-        Some(DrmOutput {
+            .filter_map(|&encoder| self.drm_device.get_encoder(encoder).ok())
+            .flat_map(|encoder| resources.filter_crtcs(encoder.possible_crtcs()))
+            .find(|crtc| !used.contains(crtc))
+            .ok_or("no free CRTC")?;
+        let surface = self
+            .drm_device
+            .create_surface(crtc, mode, &[connector])
+            .map_err(|err| err.to_string())?;
+        let surface = GbmBufferedSurface::new(
+            surface,
+            GbmAllocator::new(
+                self.gbm.clone(),
+                GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
+            ),
+            &[Fourcc::Xrgb8888, Fourcc::Argb8888],
+            self.formats.iter().copied(),
+        )
+        .map_err(|err| err.to_string())?;
+        Ok(DrmOutput {
             connector,
             mode,
-            wgpu_data: WgpuData::new(
-                surface,
-                DisplayContainerSize::new(width, height),
-                self.gpu.device.clone(),
-                self.gpu.queue.clone(),
-                &self.gpu.adapter,
-            ),
+            crtc,
+            surface,
+            textures: Vec::new(),
             origin: [0, 0],
+            dirty: true,
+            pending: false,
         })
     }
 
@@ -456,36 +535,74 @@ impl DrmDisplay {
         }
     }
 
+    /// Takes the new content, and draws it on every monitor (or after its vblank, if it is showing the last frame)
     fn draw(&mut self) {
         let new_content = self.ui_content.get_if_dirty();
         let presented = new_content.is_some();
         if let Some(scene) = new_content {
             self.scene = scene;
         }
-
-        // a capture is of the whole window, so only of a single monitor
-        let capture = self.capture && self.outputs.len() == 1;
-        let mut outputs = std::mem::take(&mut self.outputs);
-        let scene = self.scene_with_cursor();
-        let mut drawn = Err(Skipped);
-        for output in &mut outputs {
-            drawn = UIDisplay::draw(&mut output.wgpu_data, &scene, capture, output.origin);
+        for output in &mut self.outputs {
+            output.dirty = true;
         }
-        drop(scene);
-        self.outputs = outputs;
-
+        self.draw_outputs();
         if presented {
             let _ = self
                 .display_notification_queue
                 .send(DisplayNotification::Presented);
         }
-        // a skipped frame is captured on the next draw
-        if self.capture && (drawn.is_ok() || !capture) {
+    }
+
+    /// Draws the changed monitors that aren't waiting for a vblank
+    fn draw_outputs(&mut self) {
+        // on another VT; everything is drawn again when back
+        if !self.drm_device.is_active() {
+            return;
+        }
+        if !self
+            .outputs
+            .iter()
+            .any(|output| output.dirty && !output.pending)
+        {
+            return;
+        }
+        // a capture is of the whole window, so only of a single monitor
+        let capture = self.capture && self.outputs.len() == 1;
+        if self.capture && !capture {
             self.capture = false;
             let _ = self
                 .display_notification_queue
-                .send(DisplayNotification::Captured(drawn.ok().flatten()));
+                .send(DisplayNotification::Captured(None));
         }
+        let scene = self.scene_with_cursor().into_owned();
+        for output in &mut self.outputs {
+            if !output.dirty || output.pending {
+                continue;
+            }
+            match output.draw(&mut self.renderer, &scene, capture) {
+                Ok(captured) => {
+                    if capture {
+                        self.capture = false;
+                        let _ = self
+                            .display_notification_queue
+                            .send(DisplayNotification::Captured(captured));
+                    }
+                }
+                Err(err) => log::warn!("Couldn't draw on {:?}: {err}", output.connector),
+            }
+        }
+    }
+
+    /// The monitor showed its queued frame, so it can draw again
+    fn vblank(&mut self, crtc: crtc::Handle) {
+        let Some(output) = self.outputs.iter_mut().find(|output| output.crtc == crtc) else {
+            return;
+        };
+        if let Err(err) = output.surface.frame_submitted() {
+            log::warn!("Frame on {:?} failed: {err}", output.connector);
+        }
+        output.pending = false;
+        self.draw_outputs();
     }
 
     /// The scene, with the cursor drawn in (a software cursor) unless hidden
@@ -852,7 +969,7 @@ fn key_symbol(keysym: Keysym) -> Option<KeySymbol> {
 }
 
 /// The connected connectors, at their preferred modes
-fn connected_outputs(drm: &DrmDeviceFd) -> Result<Vec<(connector::Handle, Mode)>, String> {
+fn connected_outputs(drm: &DrmDevice) -> Result<Vec<(connector::Info, Mode)>, String> {
     let resources = drm
         .resource_handles()
         .map_err(|err| format!("can't read DRM resources: {err}"))?;
@@ -873,7 +990,8 @@ fn connected_outputs(drm: &DrmDeviceFd) -> Result<Vec<(connector::Handle, Mode)>
                 .iter()
                 .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
                 .or_else(|| info.modes().first())?;
-            Some((info.handle(), *mode))
+            let mode = *mode;
+            Some((info, mode))
         })
         .collect::<Vec<_>>();
     if outputs.is_empty() {
@@ -882,10 +1000,8 @@ fn connected_outputs(drm: &DrmDeviceFd) -> Result<Vec<(connector::Handle, Mode)>
     Ok(outputs)
 }
 
-/// The refresh rate the way Mesa reports it for Vulkan display modes,
-/// since wgpu picks the mode by an exact match
 #[allow(clippy::cast_sign_loss)]
-fn vulkan_refresh_millihertz(mode: &Mode) -> u32 {
+fn refresh_millihertz(mode: &Mode) -> u32 {
     let (_, _, htotal) = mode.hsync();
     let (_, _, vtotal) = mode.vsync();
     let hz = f64::from(mode.clock()) * 1000.0

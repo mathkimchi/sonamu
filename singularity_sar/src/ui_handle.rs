@@ -109,7 +109,7 @@ impl UIHandle {
 
         let mut instance_descriptor = InstanceDescriptor::new_without_display_handle();
         if on_tty {
-            // drawing to a monitor directly needs Vulkan's `VK_EXT_acquire_drm_display`
+            // drawing into the monitors' scanout buffers needs Vulkan (`sonamu_ui::dmabuf`)
             instance_descriptor.backends = wgpu::Backends::VULKAN;
         }
         let instance = wgpu::Instance::new(instance_descriptor);
