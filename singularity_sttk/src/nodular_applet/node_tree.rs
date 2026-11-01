@@ -1599,7 +1599,10 @@ impl NodeTree {
             id = self.displayed_node(*self.nodes[id].children.first()?);
         }
         let node = &self.nodes[id];
-        Some((screen_surface(node.main.as_ref()?, self.active_screen), node.size?))
+        Some((
+            screen_surface(node.main.as_ref()?, self.active_screen),
+            node.size?,
+        ))
     }
 
     /// Works out what is on screen, and resizes the shown applets to their panes.

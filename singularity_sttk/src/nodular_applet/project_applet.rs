@@ -898,7 +898,9 @@ impl StandardApplet for ProjectApplet {
             (0..tree.screen_count())
                 .map(|screen| {
                     if screen == tree.active_screen() {
-                        active.take().unwrap_or_else(|| UITree::leaf(UIElement::Nothing))
+                        active
+                            .take()
+                            .unwrap_or_else(|| UITree::leaf(UIElement::Nothing))
                     } else {
                         tree.get_screen_window(screen)
                     }
