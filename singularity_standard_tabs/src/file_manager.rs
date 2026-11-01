@@ -112,6 +112,8 @@ pub struct FileManagerApplet {
     selected: usize,
     /// First visible entry
     scroll: usize,
+    /// Only the header (toggle button and title) shows, and the document takes the width under it
+    list_collapsed: bool,
 
     documents: Vec<Document>,
     active: Option<usize>,
@@ -147,6 +149,7 @@ impl CreatableNodularApplet<PathBuf> for FileManagerApplet {
             entries: Vec::new(),
             selected: 0,
             scroll: 0,
+            list_collapsed: false,
             documents: Vec::new(),
             active: None,
             pane: Pane::Files,
@@ -234,10 +237,19 @@ impl FileManagerApplet {
         (self.size.width as f32 * LIST_SPLIT) as u32
     }
 
+    /// Left of the document body: under the list's header when it is collapsed
+    fn body_left(&self) -> u32 {
+        if self.list_collapsed {
+            0
+        } else {
+            self.list_width()
+        }
+    }
+
     #[allow(clippy::cast_sign_loss)]
     fn document_size(&self) -> DisplayContainerSize {
         DisplayContainerSize::new(
-            self.size.width.saturating_sub(self.list_width()),
+            self.size.width.saturating_sub(self.body_left()),
             self.size.height.saturating_sub(row_height() as u32),
         )
     }
@@ -255,6 +267,29 @@ impl FileManagerApplet {
         self.scroll = self
             .scroll
             .clamp((self.selected + 1).saturating_sub(rows), self.selected);
+    }
+
+    fn resize_documents(&self) {
+        let document_size = self.document_size();
+        let preview = self
+            .preview
+            .as_ref()
+            .and_then(|preview| preview.document.as_ref());
+        for document in self.documents.iter().chain(preview) {
+            document
+                .handle
+                .send_event(StandardEvent::UIEvent(UIEvent::WindowResized(
+                    document_size,
+                )));
+        }
+    }
+
+    fn toggle_list(&mut self) {
+        self.list_collapsed = !self.list_collapsed;
+        self.resize_documents();
+        if self.list_collapsed {
+            self.set_pane(Pane::Document);
+        }
     }
 
     fn select(&mut self, index: usize) {
@@ -760,20 +795,25 @@ impl FileManagerApplet {
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
         let list_width = f64::from(self.list_width());
         let [x, y] = mouse_event.position;
+        let in_header = y < f64::from(row_height());
+        let in_list = x < list_width && (in_header || !self.list_collapsed);
 
         // non-negative, since it's past the header
         #[allow(clippy::cast_sign_loss)]
-        let row = (x < list_width && y >= f64::from(row_height()))
+        let row = (in_list && !in_header)
             .then(|| ((y / f64::from(row_height())) as usize - 1) + self.scroll)
             .filter(|&index| index < self.entries.len());
         self.hovered = row;
 
-        if x >= list_width {
+        if !in_list {
             if let MouseEventKind::Button { pressed: true, .. } = mouse_event.kind {
                 self.set_pane(Pane::Document);
             }
             if let Some(document) = self.active_document() {
-                mouse_event.position = [x - list_width, y - f64::from(row_height())];
+                mouse_event.position = [
+                    x - f64::from(self.body_left()),
+                    y - f64::from(row_height()),
+                ];
                 document
                     .handle
                     .send_event(StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)));
@@ -786,6 +826,10 @@ impl FileManagerApplet {
                 button: BTN_LEFT,
                 pressed: true,
             } => {
+                if in_header && x < f64::from(LEFT_PAD + INDENT) {
+                    self.toggle_list();
+                    return;
+                }
                 self.set_pane(Pane::Files);
                 if let Some(index) = row {
                     self.select(index);
@@ -807,12 +851,32 @@ impl FileManagerApplet {
     }
 
     fn render_list(&self, width: f32) -> UITree {
-        let mut rows = vec![row(
+        let toggle = if self.list_collapsed { '▴' } else { '▾' };
+        let header = row(
             0,
             width,
             HEADER_BG,
-            text(LEFT_PAD, self.title(), self.palette.inactive, width),
-        )];
+            text(LEFT_PAD, toggle.to_string(), self.palette.fg, width),
+        );
+        let header_title = row(
+            0,
+            width,
+            Color::TRANSPARENT,
+            text(
+                LEFT_PAD + INDENT,
+                self.title(),
+                self.palette.inactive,
+                width,
+            ),
+        );
+        if self.list_collapsed {
+            return UITree::new_styled(
+                UIElement::Nothing,
+                Style::full_size(),
+                vec![header, header_title],
+            );
+        }
+        let mut rows = vec![header, header_title];
         for (row_index, (index, entry)) in self
             .entries
             .iter()
@@ -864,8 +928,8 @@ impl FileManagerApplet {
         UITree::new_styled(UIElement::Backgrounded(LIST_BG), Style::full_size(), rows)
     }
 
-    /// The open documents' names, then the active document
-    fn render_documents(&self, width: f32) -> UITree {
+    /// The open documents' names (right of `header_left`), then the active document
+    fn render_documents(&self, width: f32, header_left: f32) -> UITree {
         let header = match &self.status {
             Some(status) => vec![(status.clone(), UIElement::glyphon_attr(Color::RED))],
             None if self.documents.is_empty() => vec![(
@@ -889,10 +953,13 @@ impl FileManagerApplet {
         };
         let header = UITree::new_styled(
             UIElement::Backgrounded(HEADER_BG),
-            Style::absolute([0.0, 0.0], [width, row_height()]),
+            Style::absolute([header_left, 0.0], [width - header_left, row_height()]),
             vec![UITree::leaf_styled(
                 UIElement::Text(header),
-                Style::absolute([LEFT_PAD, text_top()], [width, row_height() - text_top()]),
+                Style::absolute(
+                    [LEFT_PAD, text_top()],
+                    [width - header_left, row_height() - text_top()],
+                ),
             )],
         );
 
@@ -924,18 +991,7 @@ impl StandardApplet for FileManagerApplet {
             StandardEvent::UIEvent(UIEvent::WindowResized(size)) => {
                 self.size = size;
                 self.clamp_scroll();
-                let document_size = self.document_size();
-                let preview = self
-                    .preview
-                    .as_ref()
-                    .and_then(|preview| preview.document.as_ref());
-                for document in self.documents.iter().chain(preview) {
-                    document
-                        .handle
-                        .send_event(StandardEvent::UIEvent(UIEvent::WindowResized(
-                            document_size,
-                        )));
-                }
+                self.resize_documents();
             }
             StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)) => self.handle_mouse(mouse_event),
             StandardEvent::UIEvent(ui_event @ UIEvent::Key { .. }) => self.handle_key(ui_event),
@@ -1026,20 +1082,26 @@ impl StandardApplet for FileManagerApplet {
 
     fn get_window_standard_applet(&self, container_size: DisplayContainerSize) -> UITree {
         let list_width = self.list_width() as f32;
-        let documents_width = container_size.width as f32 - list_width;
+        let list_height = if self.list_collapsed {
+            row_height()
+        } else {
+            container_size.height as f32
+        };
+        let body_left = self.body_left() as f32;
+        let documents_width = container_size.width as f32 - body_left;
         UITree::new_container(vec![
             UITree::new_styled(
                 UIElement::Nothing,
-                Style::absolute([0.0, 0.0], [list_width, container_size.height as f32]),
+                Style::absolute([0.0, 0.0], [list_width, list_height]),
                 vec![self.render_list(list_width)],
             ),
             UITree::new_styled(
                 UIElement::Nothing,
                 Style::absolute(
-                    [list_width, 0.0],
+                    [body_left, 0.0],
                     [documents_width, container_size.height as f32],
                 ),
-                vec![self.render_documents(documents_width)],
+                vec![self.render_documents(documents_width, list_width - body_left)],
             ),
         ])
     }
