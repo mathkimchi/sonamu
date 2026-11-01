@@ -42,3 +42,10 @@ tracing captures backtraces each frame (~4% in debug only).
   `VK_EXT_physical_device_drm` gives the render node). A dmabuf is imported as a `VkImage` on its fd and copied
   (cropped) on the GPU into its own texture. Commits with a dmabuf wait for its fence (`new_surface` blocker).
   No queue family ownership transfer: fine for uncompressed single plane modifiers on Mesa.
+
+## Full-surface triangles (#60)
+
+- Rects, images and char grids each draw one triangle over the whole surface and the fragment shader cuts out the
+  element, so every element shaded every pixel: (elements) × (surface px) per frame. A 4K monitor made frames take
+  40-80 ms (libinput warned the display thread lagged). Now each element is scissored to its visible part
+  (`draw_primitive_scene`); drawing a quad per element would also save the vertex-side waste, not done.

@@ -1410,15 +1410,28 @@ impl DrawingSharedData<'_> {
     }
 
     /// TODO: chunk consecutive elements of same type
-    /// Only the elements on the surface (eg not another monitor's)
+    /// Only the elements on the surface (eg not another monitor's), each scissored to its visible part:
+    /// the pipelines draw one triangle over the whole surface, so otherwise every element shades every pixel
     fn draw_primitive_scene(&mut self, scene: &PrimitiveScene, size: [u32; 2]) {
         let [x, y] = self.origin.map(|coord| coord as u32);
         let shown = DisplayAreaPx::new(x, y, x + size[0], y + size[1]);
         for (element, display_area_px, clip) in &scene.elements {
-            let visible = display_area_px.intersection(shown).size();
-            if visible.width > 0 && visible.height > 0 {
-                self.draw_primitive_element(element, *display_area_px, *clip);
+            let mut visible = display_area_px.intersection(shown);
+            if let Some(clip) = clip {
+                visible = visible.intersection(clip.area);
             }
+            let visible_size = visible.size();
+            if visible_size.width == 0 || visible_size.height == 0 {
+                continue;
+            }
+            let [[left, top], _] = visible.0;
+            self.render_pass.set_scissor_rect(
+                left - x,
+                top - y,
+                visible_size.width,
+                visible_size.height,
+            );
+            self.draw_primitive_element(element, *display_area_px, *clip);
         }
     }
 }
