@@ -71,6 +71,8 @@ pub struct Treeview {
     pub awaiting_wl: Vec<AwaitedWl>,
     /// Its surface is one window per screen (a container of them, in `ScreenViews` order), each shown on its screen
     pub screen_windows: bool,
+    /// With `screen_windows`, `frames_itself` for each screen's window (eg a project's overview isn't framed)
+    pub screen_frames_itself: Vec<bool>,
 }
 impl Treeview {
     /// Focus inside the root, not traversing, not saved
@@ -83,6 +85,7 @@ impl Treeview {
             saved: None,
             awaiting_wl: Vec::new(),
             screen_windows: false,
+            screen_frames_itself: Vec::new(),
         }
     }
 }

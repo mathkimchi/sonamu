@@ -69,6 +69,11 @@ pub trait StandardApplet {
         false
     }
 
+    /// With `screen_windows`, whether each screen's window frames itself (`Treeview::screen_frames_itself`)
+    fn screen_frames_itself(&self) -> Vec<bool> {
+        Vec::new()
+    }
+
     /// The applet's inner tree; its node shows it as is.
     fn get_treeview(&self) -> WorldTree<String>;
 
@@ -562,6 +567,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         saved: state.applet.save(),
                         awaiting_wl: state.applet.awaiting_wl(),
                         screen_windows: state.applet.screen_windows(),
+                        screen_frames_itself: state.applet.screen_frames_itself(),
                     },
                     &state.request_sender,
                 );

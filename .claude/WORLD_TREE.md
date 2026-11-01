@@ -149,8 +149,9 @@ Moving focus is recursive too:
   click that activated a screen reaches the right one. An applet may then publish one window per screen (a container,
   `Treeview::screen_windows`, `StandardApplet::screen_windows`), and holders draw window *i* on screen *i*
   (`screen_surface`). A project does: its tree mirrors the screens (`set_screen_count`, `activate_screen`,
-  `resize_screen`), so each screen has its own path inside it, nested projects too. Other screens show its panes,
-  never its overview.
+  `resize_screen`), so each screen has its own path inside it, nested projects too. Every screen shows what it would
+  if active (its overview where that screen's focus is at its root, `at_root_on`), so switching screens changes
+  nothing on them; `Treeview::screen_frames_itself` says which windows frame themselves.
 - Known gaps: splits (and anything inside them) and other applets look and focus the same on every screen;
   only the active screen's focus is saved in the session; no wallpaper or bar on the other screens (one wl output);
   no keybind to move between screens; monitors are always side by side, top aligned, at scale 1.

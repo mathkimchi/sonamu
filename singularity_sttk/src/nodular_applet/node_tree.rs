@@ -1184,6 +1184,25 @@ impl NodeTree {
         self.screens.len()
     }
 
+    /// The node the screen's focus is on (as of the last `update_layout` for an inactive one)
+    pub fn screen_focused_node(&self, screen: usize) -> NodeId {
+        if screen == self.active_screen {
+            return self.focused_node();
+        }
+        self.screens
+            .get(screen)
+            .map(|shown| shown.focus.0)
+            .filter(|&id| self.nodes.contains_key(id))
+            .unwrap_or(self.root)
+    }
+
+    pub fn screen_size(&self, screen: usize) -> Option<DisplayContainerSize> {
+        if screen == self.active_screen {
+            return self.latest_size;
+        }
+        self.screens.get(screen)?.size
+    }
+
     /// Whether a pane has the pointer until a button is released
     pub const fn has_pointer_grab(&self) -> bool {
         self.pointer_grab.is_some()
@@ -1194,18 +1213,17 @@ impl NodeTree {
     }
 
     /// Its main frames what it shows itself (see `StandardApplet::frames_itself`)
-    fn frames_itself(&self, id: NodeId) -> bool {
-        self.nodes[id]
-            .main
-            .as_ref()
-            .is_some_and(|main| main.get_treeview().frames_itself)
-    }
-
-    fn has_screen_windows(&self, id: NodeId) -> bool {
-        self.nodes[id]
-            .main
-            .as_ref()
-            .is_some_and(|main| main.get_treeview().screen_windows)
+    /// Its window on `screen` frames itself
+    fn frames_itself(&self, id: NodeId, screen: usize) -> bool {
+        self.nodes[id].main.as_ref().is_some_and(|main| {
+            let treeview = main.get_treeview();
+            treeview
+                .screen_frames_itself
+                .get(screen)
+                .copied()
+                .filter(|_| treeview.screen_windows)
+                .unwrap_or(treeview.frames_itself)
+        })
     }
 
     /// Whether the node is a split (eg a `SplitApplet`'s inner root)
@@ -1617,7 +1635,12 @@ impl NodeTree {
     pub fn update_layout(&mut self) {
         let mut shown = Vec::new();
         if let Some(size) = self.latest_size {
-            let panes = self.layout(self.view_root, self.focused_node(), size, true);
+            let panes = self.layout(
+                self.view_root,
+                self.focused_node(),
+                size,
+                self.active_screen,
+            );
             for pane in &panes {
                 self.resize(pane.node, pane.inner_size());
             }
@@ -1645,7 +1668,7 @@ impl NodeTree {
             let Some(size) = screen.size else {
                 continue;
             };
-            let panes = self.layout(view_root, focus, size, false);
+            let panes = self.layout(view_root, focus, size, index);
             for pane in &panes {
                 if !shown.contains(&pane.node) {
                     self.resize(pane.node, pane.inner_size());
@@ -1701,13 +1724,13 @@ impl NodeTree {
     }
 
     /// The panes showing `view_root` at `size`, with focus on `focus`
-    /// (on the `active` screen or another)
+    /// (on `screen`)
     fn layout(
         &self,
         view_root: NodeId,
         focus: NodeId,
         size: DisplayContainerSize,
-        active: bool,
+        screen: usize,
     ) -> Vec<Pane> {
         let settings = settings::get();
         let gap = settings.gap.round() as u32;
@@ -1731,8 +1754,7 @@ impl NodeTree {
             pane.framed = false;
         }
         for pane in panes.iter_mut().filter(|pane| pane.framed) {
-            // a window per screen frames itself on the other screens (eg a project shows its panes, not its overview)
-            if self.frames_itself(pane.node) || (!active && self.has_screen_windows(pane.node)) {
+            if self.frames_itself(pane.node, screen) {
                 // it frames its own content, with its own gap around it, so it takes this gap back
                 let [x, y, width, height] = pane.rect;
                 pane.rect = [

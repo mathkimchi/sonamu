@@ -530,6 +530,11 @@ impl ProjectApplet {
         !self.dissolved && self.holder.tree.focused_node() == self.holder.tree.root()
     }
 
+    /// Like `at_root`, for the screen's focus (#60)
+    fn at_root_on(&self, screen: usize) -> bool {
+        !self.dissolved && self.holder.tree.screen_focused_node(screen) == self.holder.tree.root()
+    }
+
     /// What `NEW_ROWS[index]` adds: a command hub or project in it, focused inside,
     /// or a program, whose window lands in it (focus is at its root)
     fn add_new(&mut self, index: usize) {
@@ -892,7 +897,7 @@ impl StandardApplet for ProjectApplet {
         if !self.screen_windows() {
             return active;
         }
-        // the other screens show their panes (not the overview)
+        // the other screens show what they would if active, so switching doesn't change them
         let mut active = Some(active);
         UITree::new_container(
             (0..tree.screen_count())
@@ -901,6 +906,9 @@ impl StandardApplet for ProjectApplet {
                         active
                             .take()
                             .unwrap_or_else(|| UITree::leaf(UIElement::Nothing))
+                    } else if self.at_root_on(screen) {
+                        let width = tree.screen_size(screen).map_or(0, |size| size.width);
+                        self.get_overview(width as f32)
                     } else {
                         tree.get_screen_window(screen)
                     }
@@ -911,6 +919,13 @@ impl StandardApplet for ProjectApplet {
 
     fn screen_windows(&self) -> bool {
         !self.dissolved && self.holder.tree.screen_count() > 1
+    }
+
+    /// Its panes are framed by its own tree; the overview isn't
+    fn screen_frames_itself(&self) -> Vec<bool> {
+        (0..self.holder.tree.screen_count())
+            .map(|screen| !self.at_root_on(screen))
+            .collect()
     }
 
     /// Its tree, whose root (a container) is labeled with the project's name
