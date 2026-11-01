@@ -6,6 +6,7 @@ fn with_title(title: &str) -> SavedWl {
         cwd: None,
         app_id: None,
         title: title.to_string(),
+        running: None,
     }
 }
 

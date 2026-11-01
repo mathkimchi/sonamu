@@ -51,6 +51,14 @@ Sonamu owns the session; apps' own session restore should be off.
       browser's pid. Not tested in Sonamu yet. No PWA icons yet.
     - Anything else: the saved argv. A `/nix/store/...` program is replaced by its name, minus a `.foo-wrapped` wrapper
       prefix/suffix, since the store path may be garbage collected.
+  - Programs running in a terminal (`SavedWl::running`, `session::running`): the foreground job (`tpgid` in
+    `/proc/<pid>/stat`) of the client's first child's tty, if that's not the child itself and the tty isn't the
+    client's own (Sonamu on a TTY shares its tty with its clients). Saved with its argv and cwd, for every program.
+    On restore, those in `restore_programs` (settings, matched by `base_name` of argv[0]) are run again in the terminal:
+    `<terminal> [-e] sh -c '"$@"; exec "${SHELL:-sh}"' sh <program> <args>` in the program's cwd (a shell is left once
+    it exits). foot and kitty take the command as trailing args, others get `-e` (wrong for eg wezterm). A program
+    in the setting with `args` gets those instead of its saved ones (eg `claude --continue`). Not handled: a terminal
+    whose saved argv already runs a command (the program's command is appended after it).
   - The url comes from the title (`SavedWl::url`): before its first ` | ` (firefox, via `extras/firefox`), else after
     its last ` | ` (qutebrowser), with no spaces; `about:` pages count, so they're hidden and restored too.
     So the browser has to put it there.

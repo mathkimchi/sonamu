@@ -60,6 +60,9 @@ pub struct SavedWl {
     pub cwd: Option<PathBuf>,
     pub app_id: Option<String>,
     pub title: String,
+    /// The program running in its terminal (the foreground job of its first child's tty), if any
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub running: Option<SavedRunning>,
 }
 impl SavedWl {
     pub fn url(&self) -> Option<&str> {
@@ -69,10 +72,21 @@ impl SavedWl {
     /// A Chromium web app's (PWA's) id and profile directory, from its app id
     /// `chrome-<id>-<profile directory, spaces as _>`
     pub fn web_app(&self) -> Option<(&str, String)> {
-        let (id, profile) = self.app_id.as_deref()?.strip_prefix("chrome-")?.split_once('-')?;
+        let (id, profile) = self
+            .app_id
+            .as_deref()?
+            .strip_prefix("chrome-")?
+            .split_once('-')?;
         (id.len() == 32 && id.bytes().all(|b| (b'a'..=b'p').contains(&b)))
             .then(|| (id, profile.replace('_', " ")))
     }
+}
+
+/// A program running in a terminal, to run it again in the restored terminal
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedRunning {
+    pub argv: Vec<String>,
+    pub cwd: Option<PathBuf>,
 }
 
 /// A url and the rest of the title: at the start before ` | ` (eg firefox with `extras/firefox`),

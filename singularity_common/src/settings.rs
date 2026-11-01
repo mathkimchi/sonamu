@@ -36,6 +36,8 @@ pub struct Settings {
     pub treeview: TreeviewSettings,
     /// Global shortcuts that run a shell command
     pub keybinds: Vec<Keybind>,
+    /// Programs restored running in their terminal (see `.claude/SESSIONS.md`)
+    pub restore_programs: Vec<RestoreProgram>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -48,6 +50,7 @@ impl Default for Settings {
             font_size: 46.0,
             treeview: TreeviewSettings::default(),
             keybinds: Vec::new(),
+            restore_programs: Vec::new(),
         }
     }
 }
@@ -102,6 +105,22 @@ impl Keybind {
                 thread::spawn(move || child.wait());
             }
             Err(err) => eprintln!("keybind `{}` failed: {err}", self.command),
+        }
+    }
+}
+
+/// A program (matched by its name) restored running in its terminal: with its saved args,
+/// or with these instead (eg `claude` with `--continue`)
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum RestoreProgram {
+    Name(String),
+    WithArgs { program: String, args: Vec<String> },
+}
+impl RestoreProgram {
+    pub fn program(&self) -> &str {
+        match self {
+            Self::Name(program) | Self::WithArgs { program, .. } => program,
         }
     }
 }

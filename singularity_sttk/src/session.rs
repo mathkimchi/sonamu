@@ -8,8 +8,9 @@ use crate::{
 use singularity_common::{
     sap::{
         packets::{AwaitedWl, StandardEvent},
-        session::{SavedApplet, SavedTree, SavedWl, Session, title_without_url},
+        session::{SavedApplet, SavedRunning, SavedTree, SavedWl, Session, title_without_url},
     },
+    settings::{self, RestoreProgram},
     utils::tree::world_tree::WorldTree,
 };
 use sonamu_ui::{
@@ -133,9 +134,14 @@ pub fn hibernate(saved: SavedApplet) -> NodularAppletInitializer {
 }
 
 /// Starts a hibernating wl client. Its tile stands in as "Starting ..." and awaits its toplevel.
+/// A program running in its terminal is run again if it is in `restore_programs`.
 pub fn wake(wl: &SavedWl) -> (NodularAppletInitializer, Option<AwaitedWl>) {
     let name = wl_label(wl);
-    let (label, awaiting) = match restore_command(wl).map(|mut command| command.spawn()) {
+    let mut restored = wl.clone();
+    restored.running = restored
+        .running
+        .filter(|running| restore_program(running).is_some());
+    let (label, awaiting) = match restore_command(&restored).map(|mut command| command.spawn()) {
         Some(Ok(mut child)) => {
             let awaiting = AwaitedWl {
                 pid: child.id(),
@@ -166,7 +172,7 @@ fn wl_label(wl: &SavedWl) -> String {
 }
 
 /// Browsers open the saved url in a new window (of a running instance, if any), Chromium web apps (PWAs) open by
-/// their id with the browser they ran in; other clients run as they were
+/// their id with the browser they ran in; other clients run as they were, terminals with the program running in them
 pub fn restore_command(wl: &SavedWl) -> Option<std::process::Command> {
     let argv: Vec<String> = match (wl.app_id.as_deref(), wl.url()) {
         (Some("org.qutebrowser.qutebrowser" | "qutebrowser"), url) => {
@@ -185,26 +191,67 @@ pub fn restore_command(wl: &SavedWl) -> Option<std::process::Command> {
         ],
         _ => {
             let (program, args) = wl.argv.split_first()?;
-            std::iter::once(program_name(program))
+            let argv = std::iter::once(program_name(program))
                 .chain(args.iter().cloned())
-                .collect()
+                .collect();
+            match &wl.running {
+                Some(running) => running_in_terminal(argv, running),
+                None => argv,
+            }
         }
     };
     let (program, args) = argv.split_first()?;
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut command = program_command(program, &args);
-    if let Some(cwd) = wl.cwd.as_ref().filter(|cwd| cwd.is_dir()) {
+    let cwd = wl.running.as_ref().and_then(|running| running.cwd.as_ref());
+    if let Some(cwd) = cwd.or(wl.cwd.as_ref()).filter(|cwd| cwd.is_dir()) {
         command.current_dir(cwd);
     }
     Some(command)
 }
 
-/// A Nix store path by its name, since the store path may be gone (eg garbage collected after an update),
-/// and the unwrapped binary (`.foo-wrapped`) by its wrapper's
+/// The setting for the program, if it is in `restore_programs`
+fn restore_program(running: &SavedRunning) -> Option<RestoreProgram> {
+    let name = base_name(running.argv.first()?);
+    settings::get()
+        .restore_programs
+        .into_iter()
+        .find(|program| program.program() == name)
+}
+
+/// The terminal's command line, running the program (with the setting's args, if it has them),
+/// then a shell once it exits
+fn running_in_terminal(mut argv: Vec<String>, running: &SavedRunning) -> Vec<String> {
+    let Some((program, args)) = running.argv.split_first() else {
+        return argv;
+    };
+    let args = match restore_program(running) {
+        Some(RestoreProgram::WithArgs { args, .. }) => args,
+        _ => args.to_vec(),
+    };
+    // foot and kitty take the command as their last args, most others after `-e`
+    if !argv
+        .first()
+        .is_some_and(|terminal| matches!(base_name(terminal).as_str(), "foot" | "kitty"))
+    {
+        argv.push("-e".to_string());
+    }
+    argv.extend(["sh", "-c", r#""$@"; exec "${SHELL:-sh}""#, "sh"].map(String::from));
+    argv.push(program_name(program));
+    argv.extend(args);
+    argv
+}
+
+/// A Nix store path by its name, since the store path may be gone (eg garbage collected after an update)
 fn program_name(program: &str) -> String {
     if !program.starts_with("/nix/store/") {
         return program.to_string();
     }
+    base_name(program)
+}
+
+/// Its file name, and the unwrapped binary (`.foo-wrapped`) by its wrapper's
+fn base_name(program: &str) -> String {
     let name = Path::new(program)
         .file_name()
         .map_or_else(|| program.into(), |name| name.to_string_lossy());
@@ -213,10 +260,21 @@ fn program_name(program: &str) -> String {
 }
 
 /// The wl client with this pid, as it is now: its command line from `/proc`,
-/// and its first child's working directory (eg a terminal's shell), else its own
+/// its first child's working directory (eg a terminal's shell), else its own, and the program running in its terminal
 pub fn saved_wl(pid: Option<u32>, app_id: Option<String>, title: &str) -> SavedWl {
-    let argv = pid
-        .and_then(|pid| fs::read(format!("/proc/{pid}/cmdline")).ok())
+    SavedWl {
+        argv: pid.map(command_line).unwrap_or_default(),
+        cwd: pid.and_then(|pid| {
+            fs::read_link(format!("/proc/{}/cwd", first_child(pid).unwrap_or(pid))).ok()
+        }),
+        app_id,
+        title: title.to_string(),
+        running: pid.and_then(running),
+    }
+}
+
+fn command_line(pid: u32) -> Vec<String> {
+    fs::read(format!("/proc/{pid}/cmdline"))
         .map(|cmdline| {
             cmdline
                 .split(|&byte| byte == 0)
@@ -224,23 +282,41 @@ pub fn saved_wl(pid: Option<u32>, app_id: Option<String>, title: &str) -> SavedW
                 .map(|arg| String::from_utf8_lossy(arg).into_owned())
                 .collect()
         })
-        .unwrap_or_default();
-    SavedWl {
-        argv,
-        cwd: pid.and_then(working_dir),
-        app_id,
-        title: title.to_string(),
-    }
+        .unwrap_or_default()
 }
 
-fn working_dir(pid: u32) -> Option<PathBuf> {
-    let children =
-        fs::read_to_string(format!("/proc/{pid}/task/{pid}/children")).unwrap_or_default();
-    let process = children
+fn first_child(pid: u32) -> Option<u32> {
+    fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))
+        .ok()?
         .split_whitespace()
-        .next()
-        .map_or_else(|| pid.to_string(), String::from);
-    fs::read_link(format!("/proc/{process}/cwd")).ok()
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// The foreground job of its first child's tty (eg what a terminal's shell runs), if it isn't that child
+fn running(pid: u32) -> Option<SavedRunning> {
+    let child = first_child(pid)?;
+    let (tty, job) = tty_and_foreground(child)?;
+    let (client_tty, _) = tty_and_foreground(pid)?;
+    // the child's own tty, not one it shares with the client (eg Sonamu's, when Sonamu runs on a tty)
+    if tty == 0 || tty == client_tty || job <= 0 || job == i64::from(child) {
+        return None;
+    }
+    let job = job as u32;
+    let argv = command_line(job);
+    (!argv.is_empty()).then(|| SavedRunning {
+        argv,
+        cwd: fs::read_link(format!("/proc/{job}/cwd")).ok(),
+    })
+}
+
+/// Its controlling tty and that tty's foreground process group (`tty_nr` and `tpgid` in `/proc/<pid>/stat`)
+fn tty_and_foreground(pid: u32) -> Option<(i64, i64)> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // after the command name, which may have spaces: state, ppid, pgrp, session, tty_nr, tpgid
+    let mut fields = stat.rsplit_once(')')?.1.split_whitespace().skip(4);
+    Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
 }
 
 /// Stands in for an applet being restored: a wl client starting, or one that couldn't be made.
