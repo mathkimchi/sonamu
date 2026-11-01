@@ -1053,24 +1053,27 @@ fn window_geometry(surface: &WlSurface) -> Option<Rectangle<i32, Logical>> {
 }
 
 /// Copies a cursor surface's shm buffer into a custom cursor.
-/// Its subsurfaces are ignored.
+/// Its subsurfaces are ignored, and the buffer is drawn at its own px (not rescaled).
 fn read_cursor_surface(surface: &WlSurface) -> Option<Cursor> {
-    let (buffer, hotspot) = with_states(surface, |states| {
-        let buffer = states
-            .data_map
-            .get::<RendererSurfaceStateUserData>()?
-            .lock()
-            .unwrap()
-            .buffer()?
-            .clone();
+    let (buffer, buffer_scale, hotspot) = with_states(surface, |states| {
+        let (buffer, buffer_scale) = {
+            let surface_state = states
+                .data_map
+                .get::<RendererSurfaceStateUserData>()?
+                .lock()
+                .unwrap();
+            (surface_state.buffer()?.clone(), surface_state.buffer_scale())
+        };
         let hotspot = states
             .data_map
             .get::<CursorImageSurfaceData>()?
             .lock()
             .unwrap()
             .hotspot;
-        Some((buffer, hotspot))
+        Some((buffer, buffer_scale, hotspot))
     })?;
+    // the hotspot is logical, the image is in buffer px
+    let hotspot = hotspot.upscale(buffer_scale);
 
     smithay::wayland::shm::with_buffer_contents(&buffer, |content_ptr, length, metadata| {
         // SAFETY: same as in `SmithayState::import_buffer`
