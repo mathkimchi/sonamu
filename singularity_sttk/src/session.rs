@@ -233,7 +233,7 @@ fn restore_program(running: &SavedRunning) -> Option<RestoreProgram> {
 }
 
 /// The terminal's command line, running the program (with the setting's args, if it has them),
-/// then a shell once it exits
+/// then its shell once it exits
 fn running_in_terminal(mut argv: Vec<String>, running: &SavedRunning) -> Vec<String> {
     let Some((program, args)) = running.argv.split_first() else {
         return argv;
@@ -249,7 +249,17 @@ fn running_in_terminal(mut argv: Vec<String>, running: &SavedRunning) -> Vec<Str
     {
         argv.push("-e".to_string());
     }
-    argv.extend(["sh", "-c", r#""$@"; exec "${SHELL:-sh}""#, "sh"].map(String::from));
+    let shell = running
+        .shell
+        .as_deref()
+        .map(program_name)
+        .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string()));
+    argv.extend([
+        "sh".to_string(),
+        "-c".to_string(),
+        r#""$@"; exec "$0""#.to_string(),
+        shell,
+    ]);
     argv.push(program_name(program));
     argv.extend(args);
     argv
@@ -321,6 +331,7 @@ fn running(pid: u32) -> Option<SavedRunning> {
     (!argv.is_empty()).then(|| SavedRunning {
         argv,
         cwd: fs::read_link(format!("/proc/{job}/cwd")).ok(),
+        shell: command_line(child).into_iter().next(),
     })
 }
 

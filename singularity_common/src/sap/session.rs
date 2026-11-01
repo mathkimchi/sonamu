@@ -87,6 +87,9 @@ impl SavedWl {
 pub struct SavedRunning {
     pub argv: Vec<String>,
     pub cwd: Option<PathBuf>,
+    /// The shell it ran in (the terminal's, which may not be `$SHELL`), left once it exits
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
 }
 
 /// A url and the rest of the title: at the start before ` | ` (eg firefox with `extras/firefox`),

@@ -55,8 +55,9 @@ Sonamu owns the session; apps' own session restore should be off.
     `/proc/<pid>/stat`) of the client's first child's tty, if that's not the child itself and the tty isn't the
     client's own (Sonamu on a TTY shares its tty with its clients). Saved with its argv and cwd, for every program.
     On restore, those in `restore_programs` (settings, matched by `base_name` of argv[0]) are run again in the terminal:
-    `<terminal> [-e] sh -c '"$@"; exec "${SHELL:-sh}"' sh <program> <args>` in the program's cwd (a shell is left once
-    it exits). foot and kitty take the command as trailing args, others get `-e` (wrong for eg wezterm). A program
+    `<terminal> [-e] sh -c '"$@"; exec "$0"' <shell> <program> <args>` in the program's cwd. `<shell>` is the
+    saved shell (`SavedRunning::shell`, the terminal's first child, eg nu from foot.ini; `$SHELL` may differ), left
+    once the program exits. foot and kitty take the command as trailing args, others get `-e` (wrong for eg wezterm). A program
     in the setting with `args` gets those instead of its saved ones (eg `claude --continue`). Not handled: a terminal
     whose saved argv already runs a command (the program's command is appended after it).
   - Any other running program: when the hibernating tile wakes (`session::wake`), it shows a `RestorePrompt`
