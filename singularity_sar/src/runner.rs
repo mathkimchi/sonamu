@@ -32,6 +32,8 @@ pub struct AppletRunner {
     pub(crate) smithay_state: SmithayState,
 
     window_size: DisplayContainerSize,
+    /// The monitors' areas in the window, if the display has several
+    pub(crate) display_screens: Option<Vec<[u32; 4]>>,
     /// Set by damage; the redraw happens once per event loop iteration
     pub(crate) needs_redraw: bool,
     /// What the display was last asked to do with the pointer
@@ -74,6 +76,7 @@ impl AppletRunner {
                 width: 100,
                 height: 100,
             },
+            display_screens: None,
             needs_redraw: true,
             pointer_grab: PointerGrab::None,
             loop_signal,
@@ -196,11 +199,52 @@ impl AppletRunner {
         }
     }
 
-    /// Tells the root the size of the area it's drawn in
+    /// Tells the root the size of the area it's drawn in, and the screens in it
     pub(crate) fn send_content_size(&mut self) {
         let (_, size) = self.smithay_state.content_area();
         self.root_client
             .send_event(StandardEvent::UIEvent(UIEvent::WindowResized(size)));
+        self.send_screens();
+    }
+
+    /// The monitors, else the window split into `SONAMU_SCREENS` side by side (to try several in a window)
+    pub(crate) fn update_screens(&mut self) {
+        self.smithay_state.screens = self.display_screens.clone().unwrap_or_else(|| {
+            let count = std::env::var("SONAMU_SCREENS")
+                .ok()
+                .and_then(|count| count.parse().ok())
+                .unwrap_or(1u32)
+                .max(1);
+            let DisplayContainerSize { width, height } = self.window_size;
+            (0..count)
+                .map(|index| {
+                    let x = width * index / count;
+                    [x, 0, width * (index + 1) / count - x, height]
+                })
+                .collect()
+        });
+        self.smithay_state.resize_fullscreen();
+    }
+
+    /// Tells the root the screens' parts of its area, in its coords
+    fn send_screens(&mut self) {
+        let ([left, top], size) = self.smithay_state.content_area();
+        let [left, top] = [left, top].map(|coord| coord as u32);
+        let [right, bottom] = [left + size.width, top + size.height];
+        let screens = self
+            .smithay_state
+            .screens
+            .iter()
+            .map(|&[x, y, width, height]| {
+                let [x0, y0] = [x.clamp(left, right), y.clamp(top, bottom)];
+                let [x1, y1] = [
+                    (x + width).clamp(left, right),
+                    (y + height).clamp(top, bottom),
+                ];
+                [x0 - left, y0 - top, x1 - x0, y1 - y0]
+            })
+            .collect();
+        self.root_client.send_event(StandardEvent::Screens(screens));
     }
 
     pub(crate) fn handle_ui_event(&mut self, mut event: UIEvent) {
@@ -218,11 +262,12 @@ impl AppletRunner {
             self.window_size = screen_size;
             self.smithay_state.resize_output(screen_size);
             self.smithay_state.arrange_layers();
-            self.smithay_state.resize_fullscreen();
+            self.update_screens();
 
             // the root is sent the size of its area instead
-            event = UIEvent::WindowResized(self.smithay_state.content_area().1);
+            self.send_content_size();
             self.needs_redraw = true;
+            return;
         }
 
         if let UIEvent::Mouse(mouse_event) = &mut event {
@@ -341,33 +386,35 @@ impl AppletRunner {
         // background and bottom layers, the root's content in the area left by the exclusive zones
         // (or a fullscreen toplevel over the whole window instead of them),
         // then top (unless fullscreen) and overlay layers, then what's plucked
-        let mut layers = if let Some(surface_id) = self.smithay_state.fullscreen() {
-            vec![UITree::leaf_styled(
+        // other screens still show the root
+        let mut layers =
+            if self.smithay_state.fullscreen().is_some() && self.smithay_state.screens.len() <= 1 {
+                Vec::new()
+            } else {
+                let (content_position, content_size) = self.smithay_state.content_area();
+                let mut layers = self.smithay_state.layer_surface_elements(
+                    true,
+                    &self.ui_handle.device,
+                    &self.ui_handle.queue,
+                );
+                layers.push(UITree::new_container_styled(
+                    Style::absolute(
+                        content_position.map(|coord| coord as f32),
+                        [content_size.width as f32, content_size.height as f32],
+                    ),
+                    vec![self.root_client.get_surface()],
+                ));
+                layers
+            };
+        if let (Some(surface_id), Some([x, y, width, height])) = (
+            self.smithay_state.fullscreen(),
+            self.smithay_state.fullscreen_screen(),
+        ) {
+            layers.push(UITree::leaf_styled(
                 UIElement::Subsurface(surface_id.as_u64()),
-                Style::absolute(
-                    [0.0, 0.0],
-                    [
-                        self.window_size.width as f32,
-                        self.window_size.height as f32,
-                    ],
-                ),
-            )]
-        } else {
-            let (content_position, content_size) = self.smithay_state.content_area();
-            let mut layers = self.smithay_state.layer_surface_elements(
-                true,
-                &self.ui_handle.device,
-                &self.ui_handle.queue,
-            );
-            layers.push(UITree::new_container_styled(
-                Style::absolute(
-                    content_position.map(|coord| coord as f32),
-                    [content_size.width as f32, content_size.height as f32],
-                ),
-                vec![self.root_client.get_surface()],
+                Style::absolute([x as f32, y as f32], [width as f32, height as f32]),
             ));
-            layers
-        };
+        }
         layers.extend(self.smithay_state.layer_surface_elements(
             false,
             &self.ui_handle.device,

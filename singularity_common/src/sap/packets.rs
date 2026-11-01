@@ -178,6 +178,9 @@ pub enum StandardEvent {
     Directory(Option<std::path::PathBuf>),
     /// Open an applet where focus is, like a new wl surface (eg from `sonamu-msg`)
     Open(OpenApplet),
+    /// The screens' areas (`[x, y, width, height]`) in the client's window, each showing the tree
+    /// with its own focus (#60). Only the root gets these, after each `WindowResized`.
+    Screens(Vec<[u32; 4]>),
 }
 
 /// The applet registered under `applet`, made with `args`

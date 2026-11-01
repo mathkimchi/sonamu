@@ -98,6 +98,11 @@ impl UIHandle {
                     DisplayNotification::Captured(captured) => {
                         runner.smithay_state.frames_captured(captured.as_ref());
                     }
+                    DisplayNotification::Screens(screens) => {
+                        runner.display_screens = Some(screens);
+                        runner.update_screens();
+                        runner.send_content_size();
+                    }
                 }
             })
             .unwrap();

@@ -190,6 +190,8 @@ pub struct SmithayState {
     layer_focus: Option<WlSurface>,
     /// The tile that Sonamu focus asked the keyboard to be on
     pub(crate) wl_target: Option<WlSurfaceId>,
+    /// The screens' areas (`[x, y, width, height]`, window px): the monitors', or the whole window
+    pub(crate) screens: Vec<[u32; 4]>,
     /// The fullscreen toplevel, and its tile's size to go back to.
     /// Drawn over everything but overlay layers, until it asks to stop or Sonamu focus leaves it (#121).
     fullscreen: Option<(WlSurfaceId, Size<i32, Logical>)>,
@@ -224,32 +226,51 @@ impl SmithayState {
             .find_map(|(id, registered)| (registered == surface).then_some(id))
     }
 
-    /// The whole output (the Sonamu window), in logical units
-    fn output_size(&self) -> Option<Size<i32, Logical>> {
-        let mode = self.output.current_mode()?;
-        Some(self.to_logical(DisplayContainerSize::new(
-            mode.size.w.cast_unsigned(),
-            mode.size.h.cast_unsigned(),
-        )))
+    /// The screen the tile is on: the one with its center (else the first)
+    fn screen_of_tile(&self, surface_id: WlSurfaceId) -> [u32; 4] {
+        let center = self.tile_areas.get(&surface_id).map(
+            |DisplayAreaPx([[left, top], [right, bottom]])| {
+                [(left + right) / 2, (top + bottom) / 2]
+            },
+        );
+        self.screens
+            .iter()
+            .copied()
+            .find(|&[x, y, width, height]| {
+                center.is_some_and(|[center_x, center_y]| {
+                    (x..x + width).contains(&center_x) && (y..y + height).contains(&center_y)
+                })
+            })
+            .or_else(|| self.screens.first().copied())
+            .unwrap_or_default()
+    }
+
+    /// In logical units
+    fn screen_size(&self, [_, _, width, height]: [u32; 4]) -> Size<i32, Logical> {
+        self.to_logical(DisplayContainerSize::new(width, height))
     }
 
     pub fn fullscreen(&self) -> Option<WlSurfaceId> {
         self.fullscreen.map(|(surface_id, _)| surface_id)
     }
 
-    /// Keeps the fullscreen toplevel at the window's size
+    /// The area of the screen the fullscreen toplevel covers
+    pub fn fullscreen_screen(&self) -> Option<[u32; 4]> {
+        Some(self.screen_of_tile(self.fullscreen()?))
+    }
+
+    /// Keeps the fullscreen toplevel at its screen's size
     pub fn resize_fullscreen(&self) {
-        let Some(toplevel) = self
-            .fullscreen()
-            .and_then(|surface_id| self.surfaces.get(surface_id))
-            .and_then(|surface| self.toplevel_of(surface))
-        else {
+        let (Some(toplevel), Some(screen)) = (
+            self.fullscreen()
+                .and_then(|surface_id| self.surfaces.get(surface_id))
+                .and_then(|surface| self.toplevel_of(surface)),
+            self.fullscreen_screen(),
+        ) else {
             return;
         };
-        if let Some(size) = self.output_size() {
-            toplevel.with_pending_state(|state| state.size = Some(size));
-            toplevel.send_configure();
-        }
+        toplevel.with_pending_state(|state| state.size = Some(self.screen_size(screen)));
+        toplevel.send_configure();
     }
 
     pub fn flush_clients(&mut self) {
@@ -712,6 +733,7 @@ impl SmithayState {
             usable_area: Rectangle::default(),
             layer_focus: None,
             wl_target: None,
+            screens: Vec::new(),
             fullscreen: None,
             pointer_on_layer: false,
             layer_buttons_down: 0,
@@ -2017,16 +2039,14 @@ impl AppletRunner {
         }
     }
 
-    /// Makes the toplevel fullscreen at the window's size (ending any other's), and focuses its tile
+    /// Makes the toplevel fullscreen at its screen's size (ending any other's), and focuses its tile
     fn set_fullscreen(&mut self, toplevel: &ToplevelSurface) {
         let state = &mut self.smithay_state;
-        let (Some(surface_id), Some(size)) = (
-            state.surface_id_of(toplevel.wl_surface()),
-            state.output_size(),
-        ) else {
+        let Some(surface_id) = state.surface_id_of(toplevel.wl_surface()) else {
             toplevel.send_configure();
             return;
         };
+        let size = state.screen_size(state.screen_of_tile(surface_id));
         if state.fullscreen() != Some(surface_id) {
             self.unset_fullscreen();
             let state = &mut self.smithay_state;
@@ -2076,16 +2096,23 @@ impl AppletRunner {
         self.send_wl_mouse(location, focus, kind, time_msec);
     }
 
-    /// Sends the mouse event (in window px) to the fullscreen toplevel, which is over the root.
-    /// Returns false if there is none.
-    pub(crate) fn fullscreen_mouse(&mut self, event: MouseEvent) -> bool {
-        let Some(surface) = self
-            .smithay_state
-            .fullscreen()
-            .and_then(|surface_id| self.smithay_state.surfaces.get(surface_id).cloned())
-        else {
+    /// Sends the mouse event (in window px) to the fullscreen toplevel, which is over the root on its screen.
+    /// Returns false if there is none, or the pointer is on another screen.
+    pub(crate) fn fullscreen_mouse(&mut self, mut event: MouseEvent) -> bool {
+        let (Some(surface), Some([x, y, width, height])) = (
+            self.smithay_state
+                .fullscreen()
+                .and_then(|surface_id| self.smithay_state.surfaces.get(surface_id).cloned()),
+            self.smithay_state.fullscreen_screen(),
+        ) else {
             return false;
         };
+        let [x, y, width, height] = [x, y, width, height].map(f64::from);
+        let [pointer_x, pointer_y] = event.position;
+        if !((x..x + width).contains(&pointer_x) && (y..y + height).contains(&pointer_y)) {
+            return false;
+        }
+        event.position = [pointer_x - x, pointer_y - y];
         self.tile_mouse(&surface, event);
         true
     }

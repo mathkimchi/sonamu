@@ -246,7 +246,7 @@ impl winit::application::ApplicationHandler for UIDisplay {
                     if let Some(winit_data) = &mut self.winit_data
                         // a skipped frame is captured on the next draw
                         && let Ok(captured) =
-                            Self::draw(&mut winit_data.wgpu_data, &content, self.capture)
+                            Self::draw(&mut winit_data.wgpu_data, &content, self.capture, [0, 0])
                         && std::mem::take(&mut self.capture)
                     {
                         self.display_notification_queue

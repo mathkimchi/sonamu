@@ -434,6 +434,7 @@ impl RootNodeApplet {
             StandardEvent::ToggleCollapsed(path) => self.holder.toggle_collapsed(&path),
             StandardEvent::NodeAction(path, action) => self.holder.node_action(&path, action),
             StandardEvent::Capturing(_) => {}
+            StandardEvent::Screens(_) => {}
             // it reads the settings when it draws
             StandardEvent::SettingsChanged(_) => self.surface.damage(),
             // its tree is in the runner's directory

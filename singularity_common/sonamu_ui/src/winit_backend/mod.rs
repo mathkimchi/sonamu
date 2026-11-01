@@ -275,6 +275,9 @@ pub enum DisplayNotification {
     RelativeMotion([f64; 2]),
     /// For a `DisplayRequest::Capture`; `None` if the frame couldn't be copied
     Captured(Option<CapturedFrame>),
+    /// The monitors' areas in the window (`[x, y, width, height]`, px), when there are several in one window.
+    /// Not sent when the window is one screen (eg in a window).
+    Screens(Vec<[u32; 4]>),
 }
 /// A drawn frame, copied out of the display
 #[derive(Debug, Clone)]

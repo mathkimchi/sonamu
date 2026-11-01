@@ -60,11 +60,12 @@ pub(super) struct ClipInstance {
     size: [f32; 2],
     radius: f32,
 }
-impl From<Option<Clip>> for ClipInstance {
-    fn from(clip: Option<Clip>) -> Self {
+impl ClipInstance {
+    /// `origin`: the surface's top left in scene px (see `DrawingSharedData::origin`)
+    fn new(clip: Option<Clip>, [x, y]: [f32; 2]) -> Self {
         match clip {
             Some(Clip { area, radius }) => Self {
-                origin: [area.0[0][0] as f32, area.0[0][1] as f32],
+                origin: [area.0[0][0] as f32 - x, area.0[0][1] as f32 - y],
                 size: [area.size().width as f32, area.size().height as f32],
                 radius,
             },
@@ -210,14 +211,15 @@ impl ImageInstance {
         area: DisplayAreaPx,
         clip: Option<Clip>,
     ) {
+        let [x, y] = drawing_shared_data.origin;
         let instances = vec![Self {
             // this currently takes in top left
-            origin: [area.0[0][0] as f32, area.0[0][1] as f32],
+            origin: [area.0[0][0] as f32 - x, area.0[0][1] as f32 - y],
             size: [
                 (area.0[1][0] - area.0[0][0]) as f32,
                 (area.0[1][1] - area.0[0][1]) as f32,
             ],
-            clip: clip.into(),
+            clip: ClipInstance::new(clip, drawing_shared_data.origin),
         }];
 
         let instance_buffer =
@@ -677,6 +679,8 @@ pub(super) struct DrawingSharedData<'a> {
     queue: &'a wgpu::Queue,
     // surface: &'a wgpu::Surface<'static>,
     _surface_config: &'a SurfaceConfiguration,
+    /// The surface's top left in scene px, for showing part of a larger scene (eg one monitor of several)
+    origin: [f32; 2],
 }
 
 /// Text and font size (bits)
@@ -801,6 +805,14 @@ impl ImageCache {
 }
 
 impl DrawingSharedData<'_> {
+    /// The area's top left on the surface
+    fn shift(&self, area: DisplayAreaPx) -> [f32; 2] {
+        [
+            area.0[0][0] as f32 - self.origin[0],
+            area.0[0][1] as f32 - self.origin[1],
+        ]
+    }
+
     fn draw_rect(
         &mut self,
         round_rect: &RoundRect,
@@ -815,10 +827,7 @@ impl DrawingSharedData<'_> {
 
         let instances = vec![RoundRectInstance {
             // this currently takes in top left
-            origin: [
-                display_area_px.0[0][0] as f32,
-                display_area_px.0[0][1] as f32,
-            ],
+            origin: self.shift(display_area_px),
             size: [
                 display_area_px.size().width as f32,
                 display_area_px.size().height as f32,
@@ -828,7 +837,7 @@ impl DrawingSharedData<'_> {
             // main_color: inner_color.0.map(|c| f32::from(c) / f32::from(u8::MAX)),
             main_color: round_rect.main_color,
             border_color: round_rect.border_color,
-            clip: clip.into(),
+            clip: ClipInstance::new(clip, self.origin),
         }];
 
         let instance_buffer = self
@@ -857,12 +866,13 @@ impl DrawingSharedData<'_> {
         // dt.fill(&path, &Source::Solid(color.into()), &DrawOptions::new());
     }
 
-    fn display_area_to_text_bounds(display_area_px: DisplayAreaPx) -> glyphon::TextBounds {
+    fn display_area_to_text_bounds(&self, display_area_px: DisplayAreaPx) -> glyphon::TextBounds {
+        let [x, y] = self.origin.map(|coord| coord as i32);
         glyphon::TextBounds {
-            left: display_area_px.0[0][0] as i32,
-            top: display_area_px.0[0][1] as i32,
-            right: display_area_px.0[1][0] as i32,
-            bottom: display_area_px.0[1][1] as i32,
+            left: display_area_px.0[0][0] as i32 - x,
+            top: display_area_px.0[0][1] as i32 - y,
+            right: display_area_px.0[1][0] as i32 - x,
+            bottom: display_area_px.0[1][1] as i32 - y,
         }
     }
     fn draw_text_with_glyphon(
@@ -876,6 +886,8 @@ impl DrawingSharedData<'_> {
         let bounds = clip.map_or(display_area_px, |clip| {
             clip.area.intersection(display_area_px)
         });
+        let bounds = self.display_area_to_text_bounds(bounds);
+        let [left, top] = self.shift(display_area_px);
         let text_buffer = self.text_cache.get(self.font_system, text);
 
         let mut text_renderer =
@@ -890,10 +902,10 @@ impl DrawingSharedData<'_> {
                 self.viewport,
                 [glyphon::TextArea {
                     buffer: text_buffer,
-                    left: display_area_px.0[0][0] as f32,
-                    top: display_area_px.0[0][1] as f32,
+                    left,
+                    top,
                     scale,
-                    bounds: Self::display_area_to_text_bounds(bounds),
+                    bounds,
                     default_color: glyphon::Color::rgb(255, 255, 255),
                     custom_glyphs: &[],
                 }],
@@ -1027,16 +1039,13 @@ impl DrawingSharedData<'_> {
             // );
             let instances = vec![CharGridInstance {
                 // this currently takes in top left
-                origin: [
-                    display_area_px.0[0][0] as f32,
-                    display_area_px.0[0][1] as f32,
-                ],
+                origin: self.shift(display_area_px),
                 size: [
                     display_area_px.size().width as f32,
                     display_area_px.size().height as f32,
                 ],
                 grid_size: [width, height],
-                clip: clip.into(),
+                clip: ClipInstance::new(clip, self.origin),
             }];
 
             let instance_buffer =
@@ -1495,13 +1504,15 @@ impl FrameCopy {
 }
 
 impl UIDisplay {
-    /// With `capture`, also copies the frame out (`Ok(None)` if it couldn't be)
+    /// With `capture`, also copies the frame out (`Ok(None)` if it couldn't be).
+    /// `origin`: the scene px drawn at the surface's top left
     ///
     /// REVIEW: move somewhere else?
     pub(super) fn draw(
         wgpu_data: &mut WgpuData,
         content: &PrimitiveScene,
         capture: bool,
+        origin: [u32; 2],
     ) -> Result<Option<CapturedFrame>, Skipped> {
         let WgpuData {
             // window,
@@ -1607,6 +1618,7 @@ impl UIDisplay {
                 device,
                 queue,
                 _surface_config: surface_config,
+                origin: origin.map(|coord| coord as f32),
                 // text_renderer,
                 // text_buffer,
             };

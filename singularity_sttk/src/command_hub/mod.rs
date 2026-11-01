@@ -549,6 +549,7 @@ impl StandardApplet for CommandHubApplet {
             // doesn't show wl surfaces (only the root gets these)
             StandardEvent::WlSurfaceRegistered(_)
             | StandardEvent::Capturing(_)
+            | StandardEvent::Screens(_)
             | StandardEvent::Open(_) => {}
         }
     }
