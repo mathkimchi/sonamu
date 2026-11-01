@@ -227,6 +227,29 @@ impl SmithayState {
     ) {
         self.tile_areas.clear();
         self.tile_areas.extend(tile_areas);
+
+        // hidden toplevels may stop rendering (eg videos in an inactive node, #136)
+        for toplevel in self.xdg_shell_state.toplevel_surfaces() {
+            let Some(surface_id) = self
+                .surfaces
+                .iter()
+                .find_map(|(id, surface)| (surface == toplevel.wl_surface()).then_some(id))
+            else {
+                continue;
+            };
+            let suspended = !self.tile_areas.contains_key(&surface_id);
+            toplevel.with_pending_state(|state| {
+                use wayland_protocols::xdg::shell::server::xdg_toplevel::State;
+                if suspended {
+                    state.states.set(State::Suspended);
+                } else {
+                    state.states.unset(State::Suspended);
+                }
+            });
+            if toplevel.is_initial_configure_sent() {
+                toplevel.send_pending_configure();
+            }
+        }
     }
 
     /// Same as anvil: keeps the popup inside the output (the Sonamu window).
@@ -286,7 +309,7 @@ impl SmithayState {
 
     /// Called after a frame is presented: sends frame callbacks (so clients render at the display's pace)
     /// and presentation feedback.
-    /// TODO: skip surfaces that aren't visible (and discard their presentation feedback)
+    /// Tiles that weren't drawn keep their callbacks until they are, so hidden clients stop rendering (#136).
     pub fn frame_presented(&mut self) {
         self.presented_frames += 1;
         let presentation = Presentation {
@@ -309,7 +332,9 @@ impl SmithayState {
         }
         for root in self
             .surfaces
-            .values()
+            .iter()
+            .filter(|(surface_id, _)| self.tile_areas.contains_key(surface_id))
+            .map(|(_, surface)| surface)
             .chain(self.layer_surfaces.iter().map(LayerSurface::wl_surface))
         {
             send_frames_surface_tree(root, &presentation);

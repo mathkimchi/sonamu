@@ -30,3 +30,8 @@ Not done: skipping off-screen rows.
 
 Other notes: `atlas.trim()` is never called (glyphs never evicted, atlas only grows); wgpu-core's debug lock
 tracing captures backtraces each frame (~4% in debug only).
+
+## Videos (#136)
+
+- Hidden tiles (not in the last redraw's `tile_areas`) get no frame callbacks and are set `Suspended`, so
+  clients in inactive nodes stop rendering.
