@@ -139,9 +139,9 @@ Moving focus is recursive too:
   (nodes' `FocusIndex`, `view_root`, `panes`, ...); the others are kept in `screens` and swapped in by
   `activate_screen`, which puts focus back on the node it was left on (`NodeTree::activate_screen`).
 - An inactive screen shows the panes toward its focus (`displayed_node_toward`), with no focus border, and the
-  treeview only if pinned. The pointer moving onto a screen makes it active (not during a drag).
+  treeview only if pinned. A click on a screen makes it active (not during a drag); until then the pointer is ignored there (no hover or scrolling), and a fullscreen toplevel there lets the click through to the root.
 - An applet shown on several screens is sized to the active screen's pane (else the first), and drawn as is on the others.
-- A fullscreen toplevel covers only its screen, and stays while focus goes to another screen with the pointer.
+- A fullscreen toplevel covers only its screen, and stays while focus goes to another screen by a click there.
 - The one wl output is the **main (first) screen** only: layer surfaces (dms' bar and wallpaper) are laid out there
   and only shrink its area; the root covers the whole window. Screen capture is of the main screen.
 - **Inside applets**: every `NodeTree` sends its mains `StandardEvent::ScreenViews { sizes, active }` (their size on

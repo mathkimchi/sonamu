@@ -544,7 +544,7 @@ impl RootNodeApplet {
     }
 
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
-        // the screen under the pointer becomes active, unless a drag is going on
+        // another screen becomes active when clicked (not during a drag); until then it ignores the pointer
         let [pointer_x, pointer_y] = mouse_event.position;
         if !self.treeview_pointer.is_pressed()
             && !self.holder.tree.has_pointer_grab()
@@ -552,7 +552,14 @@ impl RootNodeApplet {
                 let [x, y, width, height] = screen.rect.map(f64::from);
                 (x..x + width).contains(&pointer_x) && (y..y + height).contains(&pointer_y)
             })
+            && index != self.holder.tree.active_screen()
         {
+            if !matches!(
+                mouse_event.kind,
+                MouseEventKind::Button { pressed: true, .. }
+            ) {
+                return;
+            }
             self.activate_screen(index);
         }
         // in the active screen's coords

@@ -269,17 +269,21 @@ impl AppletRunner {
         }
 
         if let UIEvent::Mouse(mouse_event) = &mut event {
-            let was_on_fullscreen = self.on_fullscreen_screen(self.pointer_position);
             self.pointer_position = mouse_event.position;
             // what's plucked follows the pointer
             if self.plucked.is_some() {
                 self.needs_redraw = true;
             }
             // layer surfaces are above (or beside) the root
-            if self.layer_mouse(mouse_event)
-                || (self.fullscreen_mouse(*mouse_event)
-                    // but the root still sees the pointer coming onto the screen, to make it active (#60)
-                    && (was_on_fullscreen || mouse_event.kind != MouseEventKind::Motion))
+            // a click on the fullscreen toplevel's screen while another screen has the keyboard goes to the root,
+            // which makes that screen active (#60)
+            let activates = matches!(
+                mouse_event.kind,
+                MouseEventKind::Button { pressed: true, .. }
+            ) && self.smithay_state.fullscreen().is_some()
+                && self.smithay_state.wl_target != self.smithay_state.fullscreen()
+                && self.on_fullscreen_screen(mouse_event.position);
+            if self.layer_mouse(mouse_event) || (!activates && self.fullscreen_mouse(*mouse_event))
             {
                 return;
             }
