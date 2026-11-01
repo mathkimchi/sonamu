@@ -1410,9 +1410,15 @@ impl DrawingSharedData<'_> {
     }
 
     /// TODO: chunk consecutive elements of same type
-    fn draw_primitive_scene(&mut self, scene: &PrimitiveScene) {
+    /// Only the elements on the surface (eg not another monitor's)
+    fn draw_primitive_scene(&mut self, scene: &PrimitiveScene, size: [u32; 2]) {
+        let [x, y] = self.origin.map(|coord| coord as u32);
+        let shown = DisplayAreaPx::new(x, y, x + size[0], y + size[1]);
         for (element, display_area_px, clip) in &scene.elements {
-            self.draw_primitive_element(element, *display_area_px, *clip);
+            let visible = display_area_px.intersection(shown).size();
+            if visible.width > 0 && visible.height > 0 {
+                self.draw_primitive_element(element, *display_area_px, *clip);
+            }
         }
     }
 }
@@ -1642,7 +1648,7 @@ impl UIDisplay {
                 // text_buffer,
             };
 
-            drawing_shared_data.draw_primitive_scene(content);
+            drawing_shared_data.draw_primitive_scene(content, [texture.width(), texture.height()]);
         }
         text_cache.end_frame();
         image_cache.end_frame();
