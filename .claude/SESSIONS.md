@@ -58,7 +58,9 @@ Sonamu owns the session; apps' own session restore should be off.
     `<terminal> [-e] sh -c '"$@"; exec "$0"' <shell> <program> <args>` in the program's cwd. `<shell>` is the
     saved shell (`SavedRunning::shell`, the terminal's first child, eg nu from foot.ini; `$SHELL` may differ), left
     once the program exits. A restored terminal still running its program is saved through the wrapper
-    (`sh -c` has no job control, so the program stays in the wrapper's process group): its first child, and `$0` as the shell. foot and kitty take the command as trailing args, others get `-e` (wrong for eg wezterm). A program
+    (`sh -c` has no job control, so the program stays in the wrapper's process group): its first child, and `$0` as the shell. A restored terminal's own argv has the wrapper too (`foot sh -c ... nu hx f`),
+    so restoring strips it (`wrapper_start`, and a `-e` before it) before adding the new one; a saved program's argv
+    is cut there too (sessions saved before the fix had it nested: hx took `-c` as its config file, claude got `sh` as a prompt). foot and kitty take the command as trailing args, others get `-e` (wrong for eg wezterm). A program
     in the setting with `args` gets those instead of its saved ones (eg `claude --continue`). Not handled: a terminal
     whose saved argv already runs a command (the program's command is appended after it).
   - Any other running program: when the hibernating tile wakes (`session::wake`), it shows a `RestorePrompt`

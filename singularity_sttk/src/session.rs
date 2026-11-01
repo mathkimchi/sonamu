@@ -204,9 +204,16 @@ pub fn restore_command(wl: &SavedWl) -> Option<std::process::Command> {
         ],
         _ => {
             let (program, args) = wl.argv.split_first()?;
-            let argv = std::iter::once(program_name(program))
+            let mut argv: Vec<String> = std::iter::once(program_name(program))
                 .chain(args.iter().cloned())
                 .collect();
+            // restored before, so it would run the program again even if it has exited since
+            if let Some(start) = wrapper_start(&argv) {
+                argv.truncate(start);
+                if argv.last().is_some_and(|arg| arg == "-e") {
+                    argv.pop();
+                }
+            }
             match &wl.running {
                 Some(running) => running_in_terminal(argv, running),
                 None => argv,
@@ -235,7 +242,9 @@ fn restore_program(running: &SavedRunning) -> Option<RestoreProgram> {
 /// The terminal's command line, running the program (with the setting's args, if it has them),
 /// then its shell once it exits
 fn running_in_terminal(mut argv: Vec<String>, running: &SavedRunning) -> Vec<String> {
-    let Some((program, args)) = running.argv.split_first() else {
+    // saved before restored terminals' wrappers were left out of their command line
+    let saved = &running.argv[..wrapper_start(&running.argv).unwrap_or(running.argv.len())];
+    let Some((program, args)) = saved.split_first() else {
         return argv;
     };
     let args = match restore_program(running) {
@@ -315,6 +324,12 @@ fn first_child(pid: u32) -> Option<u32> {
 
 /// Runs a restored program (`"$@"`), then its shell (`$0`), as `sh -c WRAPPER <shell> <program> <args>`
 const WRAPPER: &str = r#""$@"; exec "$0""#;
+
+/// Where `WRAPPER` starts in a command line (`sh -c WRAPPER ...`), if it has it
+fn wrapper_start(argv: &[String]) -> Option<usize> {
+    argv.windows(3)
+        .position(|window| window[0] == "sh" && window[1] == "-c" && window[2] == WRAPPER)
+}
 
 /// The foreground job of its first child's tty (eg what a terminal's shell runs), if it isn't that child,
 /// or the program a restored terminal's `WRAPPER` runs
