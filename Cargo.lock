@@ -3112,7 +3112,9 @@ dependencies = [
 name = "singularity_sar"
 version = "0.1.0"
 dependencies = [
+ "ash",
  "calloop",
+ "libc",
  "pollster",
  "singularity_common",
  "slotmap",

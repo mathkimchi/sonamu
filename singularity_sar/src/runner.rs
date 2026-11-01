@@ -53,7 +53,7 @@ impl AppletRunner {
         loop_signal: LoopSignal,
         root_applet_initializer: Box<dyn RawClientInitializer>,
         is_keybind: fn(&UIEvent) -> bool,
-        smithay_state: SmithayState,
+        mut smithay_state: SmithayState,
         on_tty: bool,
     ) -> Self {
         let root_client = ClientHandle::spawn_new_client(
@@ -62,8 +62,10 @@ impl AppletRunner {
             |request, runner: &mut Self| runner.handle_client_request(request),
         );
 
+        let ui_handle = UIHandle::init_ui(PrimitiveScene::new_empty(), event_loop, on_tty);
+        smithay_state.init_dmabuf(&ui_handle.device);
         Self {
-            ui_handle: UIHandle::init_ui(PrimitiveScene::new_empty(), event_loop, on_tty),
+            ui_handle,
             smithay_state,
             root_client,
             // subsurfaces: SlotMap::with_key(),

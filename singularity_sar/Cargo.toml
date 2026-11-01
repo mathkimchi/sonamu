@@ -19,6 +19,9 @@ calloop = { workspace = true }
 pollster.workspace = true
 
 wgpu.workspace = true
+# same as wgpu-hal's, to import dmabufs
+ash = "0.38"
+libc.workspace = true
 
 # TODO: put this behind a feature
 smithay.workspace = true

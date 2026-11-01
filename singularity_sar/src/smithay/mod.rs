@@ -1,4 +1,5 @@
 mod capture;
+pub(crate) mod dmabuf;
 mod layer_shell;
 
 use crate::runner::AppletRunner;
@@ -7,6 +8,7 @@ use singularity_common::sap::packets::{
     NewWlSurface, StandardEvent, WlSurfaceEvent, WlSurfaceId, WlSurfaceRequest,
 };
 use slotmap::{SecondaryMap, SlotMap};
+use smithay::backend::allocator::Buffer as _;
 use smithay::{
     backend::{
         input::{Axis, AxisSource, ButtonState, InputTime, KeyState, Keycode},
@@ -47,9 +49,9 @@ use smithay::{
     wayland::{
         buffer::BufferHandler,
         compositor::{
-            CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
-            SurfaceData, TraversalAction, send_surface_state, with_states,
-            with_surface_tree_downward, with_surface_tree_upward,
+            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+            SurfaceAttributes, SurfaceData, TraversalAction, add_blocker, add_pre_commit_hook,
+            send_surface_state, with_states, with_surface_tree_downward, with_surface_tree_upward,
         },
         cursor_shape::CursorShapeManagerState,
         fractional_scale::{
@@ -152,6 +154,9 @@ pub struct SmithayState {
     _pointer_constraints_state: PointerConstraintsState,
     _relative_pointer_state: RelativePointerManagerState,
     capture: capture::CaptureState,
+    dmabuf: dmabuf::DmabufImport,
+    /// For waiting on clients' GPU work before applying their commits
+    event_handle: LoopHandle<'static, AppletRunner>,
     /// The last surface the pointer was sent to and its origin, for relative motion
     pointer_focus: Option<(WlSurface, Point<f64, Logical>)>,
     /// From the last redraw, in Sonamu window px
@@ -221,6 +226,11 @@ impl SmithayState {
             .iter()
             .find(|toplevel| toplevel.wl_surface() == surface)
             .cloned()
+    }
+
+    /// Advertises dmabufs to clients if `device` can import them
+    pub fn init_dmabuf(&mut self, device: &wgpu::Device) {
+        self.dmabuf.init(&self.display_handle, device);
     }
 
     /// Where each wl toplevel's tile was laid out in the last redraw
@@ -503,7 +513,7 @@ impl SmithayState {
             .to_i32_round()
     }
 
-    pub fn new(event_handle: &LoopHandle<AppletRunner>) -> Self {
+    pub fn new(event_handle: &LoopHandle<'static, AppletRunner>) -> Self {
         let start_time = std::time::Instant::now();
 
         let display: Display<AppletRunner> = Display::new().unwrap();
@@ -638,6 +648,8 @@ impl SmithayState {
             _pointer_constraints_state: pointer_constraints_state,
             _relative_pointer_state: relative_pointer_state,
             capture,
+            dmabuf: dmabuf::DmabufImport::default(),
+            event_handle: event_handle.clone(),
             pointer_focus: None,
             tile_areas: HashMap::new(),
             lock_end_position: None,
@@ -963,23 +975,7 @@ impl SmithayState {
                         // may mutate the pool concurrently, so don't hold this anywhere.
                         let data = unsafe { std::slice::from_raw_parts(content_ptr, length) };
 
-                        // crop to `src`, kept inside the buffer
-                        let left = (src.loc.x.floor() as i32).clamp(0, metadata.width);
-                        let top = (src.loc.y.floor() as i32).clamp(0, metadata.height);
-                        let right =
-                            ((src.loc.x + src.size.w).ceil() as i32).clamp(left, metadata.width);
-                        let bottom =
-                            ((src.loc.y + src.size.h).ceil() as i32).clamp(top, metadata.height);
-                        if right == left || bottom == top {
-                            return None;
-                        }
-
-                        let texture_size = wgpu::Extent3d {
-                            width: (right - left).cast_unsigned(),
-                            height: (bottom - top).cast_unsigned(),
-                            // All textures are stored as 3D
-                            depth_or_array_layers: 1,
-                        };
+                        let (left, top, texture_size) = crop(src, metadata.width, metadata.height)?;
 
                         use smithay::reexports::wayland_server::protocol::wl_shm::Format;
                         let format = match metadata.format {
@@ -1025,8 +1021,9 @@ impl SmithayState {
                             wgpu::TexelCopyBufferLayout {
                                 // both supported formats are 4 bytes per pixel
                                 offset: u64::from(
-                                    (metadata.offset + top * metadata.stride + left * 4)
-                                        .cast_unsigned(),
+                                    metadata.offset.cast_unsigned()
+                                        + top * metadata.stride.cast_unsigned()
+                                        + left * 4,
                                 ),
                                 bytes_per_row: Some(metadata.stride.cast_unsigned()),
                                 rows_per_image: Some(texture_size.height),
@@ -1040,6 +1037,41 @@ impl SmithayState {
                 .ok()
                 .flatten()
             }
+            Some(BufferType::Dma) => {
+                let dmabuf = smithay::wayland::dmabuf::get_dmabuf(wl_buffer).ok()?;
+                let size = dmabuf.size();
+                let (left, top, texture_size) = crop(src, size.w, size.h)?;
+                let imported = dmabuf::import(device, dmabuf)?;
+
+                // a copy, so the client can reuse the buffer once it's released
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    size: texture_size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: dmabuf::WGPU_FORMAT,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    label: Some("wayland_dmabuf_texture"),
+                    view_formats: &[],
+                });
+                let mut encoder = device.create_command_encoder(&Default::default());
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &imported,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d {
+                            x: left,
+                            y: top,
+                            z: 0,
+                        },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    texture.as_image_copy(),
+                    texture_size,
+                );
+                queue.submit([encoder.finish()]);
+                Some(texture.create_view(&TextureViewDescriptor::default()))
+            }
             // not advertised, so clients shouldn't send these; draw nothing instead of panicking
             unsupported => {
                 dbg!("Unsupported buffer type:", unsupported);
@@ -1051,6 +1083,31 @@ impl SmithayState {
 
 /// NOTE: Disclosure: from by GitHub Copilot
 /// Fixes the Alacritty problem.
+/// `src` kept inside a `width`x`height` buffer, as its top-left and size; `None` if empty
+fn crop(
+    src: Rectangle<f64, BufferCoords>,
+    width: i32,
+    height: i32,
+) -> Option<(u32, u32, wgpu::Extent3d)> {
+    let left = (src.loc.x.floor() as i32).clamp(0, width);
+    let top = (src.loc.y.floor() as i32).clamp(0, height);
+    let right = ((src.loc.x + src.size.w).ceil() as i32).clamp(left, width);
+    let bottom = ((src.loc.y + src.size.h).ceil() as i32).clamp(top, height);
+    if right == left || bottom == top {
+        return None;
+    }
+    Some((
+        left.cast_unsigned(),
+        top.cast_unsigned(),
+        wgpu::Extent3d {
+            width: (right - left).cast_unsigned(),
+            height: (bottom - top).cast_unsigned(),
+            // All textures are stored as 3D
+            depth_or_array_layers: 1,
+        },
+    ))
+}
+
 /// A surface drawn as part of a toplevel
 struct Layer {
     surface: WlSurface,
@@ -1366,6 +1423,48 @@ impl SeatHandler for AppletRunner {
 impl CompositorHandler for AppletRunner {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.smithay_state.compositor_state
+    }
+
+    /// Like niri: a commit with a dmabuf waits until the client's GPU work on it is done
+    fn new_surface(&mut self, surface: &WlSurface) {
+        add_pre_commit_hook::<Self, _>(surface, |runner, _, surface| {
+            let dmabuf = with_states(surface, |states| {
+                match states
+                    .cached_state
+                    .get::<SurfaceAttributes>()
+                    .pending()
+                    .buffer
+                    .as_ref()
+                {
+                    Some(BufferAssignment::NewBuffer(buffer)) => {
+                        smithay::wayland::dmabuf::get_dmabuf(buffer).cloned().ok()
+                    }
+                    _ => None,
+                }
+            });
+            let Some((blocker, source)) =
+                dmabuf.and_then(|dmabuf| dmabuf.generate_blocker(calloop::Interest::READ).ok())
+            else {
+                return;
+            };
+            let Some(client) = surface.client() else {
+                return;
+            };
+            let inserted =
+                runner
+                    .smithay_state
+                    .event_handle
+                    .insert_source(source, move |_, _, runner| {
+                        let display_handle = runner.smithay_state.display_handle.clone();
+                        runner
+                            .client_compositor_state(&client)
+                            .blocker_cleared(runner, &display_handle);
+                        Ok(())
+                    });
+            if inserted.is_ok() {
+                add_blocker(surface, blocker);
+            }
+        });
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {

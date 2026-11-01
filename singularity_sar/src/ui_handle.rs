@@ -25,6 +25,36 @@ pub(crate) struct UIHandle {
     pub queue: wgpu::Queue,
 }
 impl UIHandle {
+    /// On Vulkan, with the extensions for importing clients' dmabufs when supported
+    fn request_device(
+        adapter: &wgpu::Adapter,
+        desc: &wgpu::DeviceDescriptor,
+    ) -> (wgpu::Device, wgpu::Queue) {
+        use wgpu::hal::api::Vulkan;
+        // SAFETY: the callback only adds supported extensions
+        let hal_device = unsafe { adapter.as_hal::<Vulkan>() }.and_then(|hal_adapter| {
+            let extensions = crate::smithay::dmabuf::device_extensions(&hal_adapter)?;
+            unsafe {
+                hal_adapter.open_with_callback(
+                    desc.required_features,
+                    &desc.required_limits,
+                    &desc.memory_hints,
+                    Some(Box::new(move |args| args.extensions.extend(extensions))),
+                )
+            }
+            .inspect_err(|err| eprintln!("Failed to open Vulkan for dmabufs: {err}"))
+            .ok()
+        });
+        match hal_device {
+            // SAFETY: opened from this adapter with `desc`'s features and limits
+            Some(hal_device) => unsafe {
+                adapter.create_device_from_hal::<Vulkan>(hal_device, desc)
+            },
+            None => pollster::block_on(adapter.request_device(desc)),
+        }
+        .unwrap()
+    }
+
     /// `on_tty`: on the monitor directly, rather than in a window
     pub fn init_ui(
         initial_content: PrimitiveScene,
@@ -84,21 +114,23 @@ impl UIHandle {
             force_fallback_adapter: false,
         }))
         .unwrap();
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: None,
-            required_features: wgpu::Features::empty(),
-            experimental_features: wgpu::ExperimentalFeatures::disabled(),
-            // WebGL doesn't support all of wgpu's features, so if
-            // we're building for the web we'll have to disable some.
-            required_limits: if cfg!(target_arch = "wasm32") {
-                wgpu::Limits::downlevel_webgl2_defaults()
-            } else {
-                wgpu::Limits::default()
+        let (device, queue) = Self::request_device(
+            &adapter,
+            &wgpu::DeviceDescriptor {
+                label: None,
+                required_features: wgpu::Features::empty(),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                // WebGL doesn't support all of wgpu's features, so if
+                // we're building for the web we'll have to disable some.
+                required_limits: if cfg!(target_arch = "wasm32") {
+                    wgpu::Limits::downlevel_webgl2_defaults()
+                } else {
+                    wgpu::Limits::default()
+                },
+                memory_hints: wgpu::MemoryHints::default(),
+                trace: wgpu::Trace::Off, // Trace path
             },
-            memory_hints: wgpu::MemoryHints::default(),
-            trace: wgpu::Trace::Off, // Trace path
-        }))
-        .unwrap();
+        );
 
         let (proxy_tx, proxy_rx) = mpsc::channel();
         {

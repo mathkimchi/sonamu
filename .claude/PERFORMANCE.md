@@ -37,3 +37,8 @@ tracing captures backtraces each frame (~4% in debug only).
   clients in inactive nodes stop rendering.
 - Each surface keeps its last texture (`TextureCache` in its data map), keyed by buffer, smithay commit counter
   and crop, so a redraw re-uploads only surfaces that committed. Still a full upload per commit (no damage).
+- linux-dmabuf (`smithay/dmabuf.rs`): on Vulkan, the device is opened with `VK_EXT_image_drm_format_modifier`
+  (`UIHandle::request_device`), and ARGB/XRGB8888 with single plane modifiers are advertised (with feedback when
+  `VK_EXT_physical_device_drm` gives the render node). A dmabuf is imported as a `VkImage` on its fd and copied
+  (cropped) on the GPU into its own texture. Commits with a dmabuf wait for its fence (`new_surface` blocker).
+  No queue family ownership transfer: fine for uncompressed single plane modifiers on Mesa.
