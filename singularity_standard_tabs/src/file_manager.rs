@@ -33,7 +33,7 @@ use singularity_sttk::{
 use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
-    ui_element::{Style, UIElement, UITree, font_size},
+    ui_element::{Cursor, CursorIcon, Style, UIElement, UITree, font_size},
     ui_event::{KeyModifiers, KeySymbol, KeyTrait, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::{
@@ -856,7 +856,18 @@ impl FileManagerApplet {
             0,
             width,
             HEADER_BG,
-            text(LEFT_PAD, toggle.to_string(), self.palette.fg, width),
+            // the clickable area (`handle_mouse`)
+            UITree::new_styled(
+                UIElement::Nothing,
+                Style::absolute([0.0, 0.0], [LEFT_PAD + INDENT, row_height()]),
+                vec![text(
+                    LEFT_PAD,
+                    toggle.to_string(),
+                    self.palette.fg,
+                    LEFT_PAD + INDENT,
+                )],
+            )
+            .with_cursor(Some(Cursor::Named(CursorIcon::Pointer))),
         );
         let header_title = row(
             0,
