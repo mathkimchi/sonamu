@@ -97,6 +97,8 @@ is replaced by that pane (it sends `Unwrap`). Saved as the `split` spawner with 
   render targets (`sonamu_ui::dmabuf::import`, cached per buffer in `DrmOutput::textures`), drawn by one shared
   offscreen `WgpuData` (`UIDisplay::draw_to`, with the monitor's `origin`), then queued; the next frame waits for its
   vblank (`DrmEvent::VBlank` → `frame_submitted`). No fences yet: it waits for the GPU (`device.poll`) before each flip.
+  `Presented` (clients' frame callbacks) goes out once new content is drawn, so clients draw at the monitors' rate;
+  each monitor only draws the elements on it.
   Formats: XRGB/ARGB8888 with the single plane modifiers Vulkan can draw into and copy from.
   Earlier it presented through wgpu's `SurfaceTargetUnsafe::Drm` (Vulkan `VK_EXT_acquire_drm_display`), but Mesa
   allows that acquire once per Vulkan instance and wgpu acquires (and panics) for every surface, so only one monitor

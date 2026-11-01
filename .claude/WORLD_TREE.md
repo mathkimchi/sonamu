@@ -142,10 +142,12 @@ Moving focus is recursive too:
   treeview only if pinned. The pointer moving onto a screen makes it active (not during a drag).
 - An applet shown on several screens is sized to the active screen's pane (else the first), and drawn as is on the others.
 - A fullscreen toplevel covers only its screen, and stays while focus goes to another screen with the pointer.
-- Known gaps: focus *inside* an applet (eg a project) is the applet's own, so it is shared by screens showing it;
-  only the active screen's focus is saved in the session; one wl output and layer-shell area spans every screen
-  (so dms' bar spans them all); no keybind to move between screens; screen capture is off with several monitors;
-  monitors are always side by side, top aligned, at scale 1.
+- The one wl output is the **main (first) screen** only: layer surfaces (dms' bar and wallpaper) are laid out there
+  and only shrink its area; the root covers the whole window. Screen capture is of the main screen.
+- Known gaps: focus *inside* an applet (eg a project) is the applet's own, and it draws one surface, so screens
+  showing the same project show the same thing (eg a session whose root's main is a project shows it on every screen);
+  only the active screen's focus is saved in the session; no wallpaper or bar on the other screens (one wl output);
+  no keybind to move between screens; monitors are always side by side, top aligned, at scale 1.
 
 ## What a client publishes (`Treeview`, `sap::packets`)
 
