@@ -258,7 +258,9 @@ impl DrmDisplay {
                             surface_config,
                             ..
                         } = &output.wgpu_data;
-                        surface.configure(device, surface_config);
+                        if let Some(surface) = surface {
+                            surface.configure(device, surface_config);
+                        }
                     }
                     display.needs_draw = true;
                 }

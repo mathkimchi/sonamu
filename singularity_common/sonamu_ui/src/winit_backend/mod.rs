@@ -34,7 +34,9 @@ pub const FRAME_DELTA_SECONDS: f32 = 1. / FRAME_RATE;
 struct WgpuData {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    surface: wgpu::Surface<'static>,
+    /// `None` when drawing into textures instead (`UIDisplay::draw_to`, eg DRM's scanout buffers)
+    surface: Option<wgpu::Surface<'static>>,
+    /// Its format is the one drawn in
     surface_config: SurfaceConfiguration,
 
     // for glyphon font demo
@@ -96,7 +98,31 @@ impl WgpuData {
         };
 
         surface.configure(&device, &surface_config);
+        Self::with_config(Some(surface), surface_config, device, queue)
+    }
 
+    /// For drawing into textures of `format` (`UIDisplay::draw_to`)
+    fn offscreen(format: TextureFormat, device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        let surface_config = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: 1,
+            height: 1,
+            present_mode: PresentMode::Fifo,
+            alpha_mode: CompositeAlphaMode::Auto,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        Self::with_config(None, surface_config, device, queue)
+    }
+
+    fn with_config(
+        surface: Option<wgpu::Surface<'static>>,
+        surface_config: SurfaceConfiguration,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    ) -> Self {
+        let swapchain_format = surface_config.format;
         // Set up text renderer
         let font_system = FontSystem::new();
         let text_cache = rendering::TextCache::new(&font_system);

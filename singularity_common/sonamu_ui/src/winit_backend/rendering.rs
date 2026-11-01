@@ -1514,30 +1514,9 @@ impl UIDisplay {
         capture: bool,
         origin: [u32; 2],
     ) -> Result<Option<CapturedFrame>, Skipped> {
-        let WgpuData {
-            // window,
-            device,
-            queue,
-            surface,
-            surface_config,
-            font_system,
-            swash_cache,
-            viewport,
-            atlas,
-            text_cache,
-            image_cache,
-            // text_renderer,
-            // text_buffer,
-            rectangle_renderer,
-            image_renderer,
-            char_grid_renderer,
-            vertex_buffer,
-            // index_buffer,
-            // instance_buffer,
-            // instances,
-            ..
-        } = wgpu_data;
-
+        let Some(surface) = &wgpu_data.surface else {
+            return Err(Skipped);
+        };
         let output = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(output) => output,
             wgpu::CurrentSurfaceTexture::Suboptimal(output) => {
@@ -1551,7 +1530,7 @@ impl UIDisplay {
                 return Err(Skipped);
             }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                surface.configure(device, surface_config);
+                surface.configure(&wgpu_data.device, &wgpu_data.surface_config);
                 return Err(Skipped);
             }
             wgpu::CurrentSurfaceTexture::Validation => {
@@ -1559,9 +1538,49 @@ impl UIDisplay {
                 return Err(Skipped);
             }
         };
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let copy = Self::render(wgpu_data, &output.texture, content, capture, origin);
+        output.present();
+        Ok(copy.and_then(|copy| copy.finish(&wgpu_data.device)))
+    }
+
+    /// Like `draw`, into `texture` (of the format `wgpu_data` draws in). It is drawn once the GPU gets to it,
+    /// so wait for the queue before showing it elsewhere.
+    pub(super) fn draw_to(
+        wgpu_data: &mut WgpuData,
+        texture: &wgpu::Texture,
+        content: &PrimitiveScene,
+        capture: bool,
+        origin: [u32; 2],
+    ) -> Option<CapturedFrame> {
+        let copy = Self::render(wgpu_data, texture, content, capture, origin);
+        copy.and_then(|copy| copy.finish(&wgpu_data.device))
+    }
+
+    /// Draws into `texture` and submits it, copying it out if `capture`
+    fn render(
+        wgpu_data: &mut WgpuData,
+        texture: &wgpu::Texture,
+        content: &PrimitiveScene,
+        capture: bool,
+        origin: [u32; 2],
+    ) -> Option<FrameCopy> {
+        let WgpuData {
+            device,
+            queue,
+            surface_config,
+            font_system,
+            swash_cache,
+            viewport,
+            atlas,
+            text_cache,
+            image_cache,
+            rectangle_renderer,
+            image_renderer,
+            char_grid_renderer,
+            vertex_buffer,
+            ..
+        } = wgpu_data;
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Render Encoder"),
@@ -1597,8 +1616,8 @@ impl UIDisplay {
             viewport.update(
                 queue,
                 glyphon::Resolution {
-                    width: surface_config.width,
-                    height: surface_config.height,
+                    width: texture.width(),
+                    height: texture.height(),
                 },
             );
 
@@ -1631,11 +1650,9 @@ impl UIDisplay {
         atlas.trim();
 
         let copy = capture
-            .then(|| FrameCopy::start(device, &mut encoder, &output.texture))
+            .then(|| FrameCopy::start(device, &mut encoder, texture))
             .flatten();
         queue.submit(iter::once(encoder.finish()));
-        output.present();
-        let captured = copy.and_then(|copy| copy.finish(device));
 
         // let stride = self.width as i32 * 4;
 
@@ -1697,7 +1714,7 @@ impl UIDisplay {
         //     .expect("buffer attach");
         // self.window.commit();
 
-        Ok(captured)
+        copy
     }
 }
 

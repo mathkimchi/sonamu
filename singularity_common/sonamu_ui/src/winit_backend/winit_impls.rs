@@ -142,7 +142,9 @@ impl winit::application::ApplicationHandler for UIDisplay {
             winit::event::WindowEvent::SurfaceResized(size) => {
                 surface_config.width = size.width;
                 surface_config.height = size.height;
-                surface.configure(device, surface_config);
+                if let Some(surface) = surface {
+                    surface.configure(device, surface_config);
+                }
 
                 self.event_queue
                     .send(UIEvent::WindowResized(DisplayContainerSize::new(
