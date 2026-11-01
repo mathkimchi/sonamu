@@ -27,11 +27,11 @@ use smithay::{
         },
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
-        udev::{all_gpus, primary_gpu},
+        udev::{UdevBackend, UdevEvent, all_gpus, primary_gpu},
     },
     input::keyboard::{Keycode, Keysym, xkb},
     reexports::{
-        drm::control::{Device as _, ModeTypeFlags, connector},
+        drm::control::{Device as _, Mode, ModeTypeFlags, connector},
         input::{DeviceCapability, Libinput},
         rustix::fs::OFlags,
     },
@@ -67,6 +67,8 @@ struct CursorImage {
 
 /// A monitor, showing its part of the scene
 struct DrmOutput {
+    connector: connector::Handle,
+    mode: Mode,
     wgpu_data: WgpuData,
     /// Its top left in the scene
     origin: [u32; 2],
@@ -104,8 +106,12 @@ struct DrmDisplay {
     /// The swipe going on: its fingers, how far they moved since its last step, and whether it had a step
     swipe: Option<(u32, [f64; 2], bool)>,
 
-    /// Keeps the device open for the surface
-    _drm: DrmDeviceFd,
+    /// For the outputs' surfaces
+    gpu: Gpu,
+    /// Every connector ever shown, in order, since Mesa numbers their display planes that way
+    acquired: Vec<connector::Handle>,
+    /// Keeps the device open for the surfaces
+    drm: DrmDeviceFd,
     session: LibSeatSession,
     libinput: Libinput,
 }
@@ -207,63 +213,6 @@ impl DrmDisplay {
             DrmNode::from_file(&drm).ok()
         );
 
-        let mut outputs = Vec::new();
-        let mut screens = Vec::new();
-        let mut size = DisplayContainerSize::new(0, 0);
-        // the first output's, for the clients
-        let mut refresh = None;
-        for (connector, mode) in connected_outputs(&drm)? {
-            let (width, height) = mode.size();
-            let (width, height) = (u32::from(width), u32::from(height));
-            let refresh_millihertz = vulkan_refresh_millihertz(&mode);
-            log::info!(
-                "Showing on connector {connector:?} at {width}x{height}@{refresh_millihertz}mHz"
-            );
-            // SAFETY: the fd is kept open (`_drm`) until after the surfaces are dropped (`outputs`);
-            // the connector and mode come from the device itself
-            let surface = unsafe {
-                gpu.instance
-                    .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::Drm {
-                        fd: drm.as_fd().as_raw_fd(),
-                        // Vulkan's display plane index, not a DRM plane id.
-                        // Mesa has one plane per acquired connector, in the order they were acquired.
-                        plane: std::env::var("SONAMU_VK_DISPLAY_PLANE")
-                            .ok()
-                            .and_then(|plane| plane.parse().ok())
-                            .unwrap_or(0)
-                            + outputs.len() as u32,
-                        connector_id: connector.into(),
-                        width,
-                        height,
-                        refresh_rate: refresh_millihertz,
-                    })
-            };
-            let surface = match surface {
-                Ok(surface) => surface,
-                Err(err) => {
-                    log::error!("Can't make a Vulkan display surface for {connector:?}: {err}");
-                    continue;
-                }
-            };
-            let wgpu_data = WgpuData::new(
-                surface,
-                DisplayContainerSize::new(width, height),
-                gpu.device.clone(),
-                gpu.queue.clone(),
-                &gpu.adapter,
-            );
-            screens.push([size.width, 0, width, height]);
-            outputs.push(DrmOutput {
-                wgpu_data,
-                origin: [size.width, 0],
-            });
-            size = DisplayContainerSize::new(size.width + width, size.height.max(height));
-            refresh.get_or_insert(refresh_millihertz);
-        }
-        let Some(refresh_millihertz) = refresh else {
-            return Err("can't show on any monitor".to_string());
-        };
-
         // keymap from the XKB_DEFAULT_* environment variables, like smithay's seat keyboard
         let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
         let keymap = xkb::Keymap::new_from_names(
@@ -299,6 +248,8 @@ impl DrmDisplay {
                     if display.libinput.resume().is_err() {
                         log::error!("Couldn't resume libinput");
                     }
+                    // monitors may have been plugged in meanwhile
+                    display.update_outputs();
                     // the monitors showed something else meanwhile
                     for output in &display.outputs {
                         let WgpuData {
@@ -313,35 +264,33 @@ impl DrmDisplay {
                 }
             })
             .map_err(|err| err.to_string())?;
+        // monitors plugged in or out
+        handle
+            .insert_source(
+                UdevBackend::new(&seat).map_err(|err| format!("can't watch udev: {err}"))?,
+                |event, _, display: &mut Self| {
+                    if let UdevEvent::Changed { .. } | UdevEvent::Added { .. } = event {
+                        display.update_outputs();
+                    }
+                },
+            )
+            .map_err(|err| err.to_string())?;
 
-        event_queue.send(UIEvent::WindowResized(size)).unwrap();
-        display_notification_queue
-            .send(DisplayNotification::Info(DisplayInfo {
-                scale_factor: 1.0,
-                refresh_millihertz: Some(refresh_millihertz),
-            }))
-            .unwrap();
-        if screens.len() > 1 {
-            display_notification_queue
-                .send(DisplayNotification::Screens(screens))
-                .unwrap();
-        }
-
-        Ok(Self {
+        let mut display = Self {
             is_running,
             event_queue,
             display_notification_queue,
             ui_content,
             loop_signal: event_loop.get_signal(),
             loop_handle: handle,
-            outputs,
+            outputs: Vec::new(),
             device: gpu.device.clone(),
             queue: gpu.queue.clone(),
             scene: PrimitiveScene::new_empty(),
             needs_draw: true,
             capture: false,
-            size,
-            pointer: [f64::from(size.width) / 2.0, f64::from(size.height) / 2.0],
+            size: DisplayContainerSize::new(0, 0),
+            pointer: [0.0, 0.0],
             pointer_grab: PointerGrab::None,
             cursor_theme: xcursor::CursorTheme::load(
                 &std::env::var("XCURSOR_THEME").unwrap_or_else(|_| "default".to_string()),
@@ -350,9 +299,130 @@ impl DrmDisplay {
             keyboard: xkb::State::new(&keymap),
             repeat: None,
             swipe: None,
-            _drm: drm,
+            gpu: gpu.clone(),
+            acquired: Vec::new(),
+            drm,
             session,
             libinput,
+        };
+        display.update_outputs();
+        let Some(first) = display.outputs.first() else {
+            return Err("can't show on any monitor".to_string());
+        };
+        display.pointer = [
+            f64::from(display.size.width) / 2.0,
+            f64::from(display.size.height) / 2.0,
+        ];
+        display
+            .display_notification_queue
+            .send(DisplayNotification::Info(DisplayInfo {
+                scale_factor: 1.0,
+                // the first monitor's, for the clients
+                refresh_millihertz: Some(vulkan_refresh_millihertz(&first.mode)),
+            }))
+            .unwrap();
+        Ok(display)
+    }
+
+    /// Shows on the connected monitors (at startup, and when they may have changed, eg one was plugged in):
+    /// keeps the ones still connected at the same mode, adds the others side by side, and tells the runner.
+    fn update_outputs(&mut self) {
+        let connected = connected_outputs(&self.drm).unwrap_or_else(|err| {
+            log::warn!("Can't list the monitors: {err}");
+            Vec::new()
+        });
+        let mut old = std::mem::take(&mut self.outputs);
+        // gone ones first, so a monitor with a new mode gets a new surface
+        old.retain(|output| connected.contains(&(output.connector, output.mode)));
+        for (connector, mode) in connected {
+            let output = match old.iter().position(|output| output.connector == connector) {
+                Some(index) => old.swap_remove(index),
+                None => match self.new_output(connector, mode) {
+                    Some(output) => output,
+                    None => continue,
+                },
+            };
+            self.outputs.push(output);
+        }
+        if self.outputs.is_empty() {
+            return;
+        }
+
+        let mut size = DisplayContainerSize::new(0, 0);
+        let mut screens = Vec::new();
+        for output in &mut self.outputs {
+            let (width, height) = output.mode.size();
+            let (width, height) = (u32::from(width), u32::from(height));
+            output.origin = [size.width, 0];
+            screens.push([size.width, 0, width, height]);
+            size = DisplayContainerSize::new(size.width + width, size.height.max(height));
+        }
+        if size != self.size {
+            self.size = size;
+            self.pointer = self.clamp_to_screen(self.pointer);
+            self.send(UIEvent::WindowResized(size));
+        }
+        let _ = self
+            .display_notification_queue
+            .send(DisplayNotification::Screens(screens));
+        self.needs_draw = true;
+    }
+
+    /// A surface on the monitor, `None` if it can't be made
+    fn new_output(&mut self, connector: connector::Handle, mode: Mode) -> Option<DrmOutput> {
+        let (width, height) = mode.size();
+        let (width, height) = (u32::from(width), u32::from(height));
+        let refresh_millihertz = vulkan_refresh_millihertz(&mode);
+        log::info!(
+            "Showing on connector {connector:?} at {width}x{height}@{refresh_millihertz}mHz"
+        );
+        let plane = match self
+            .acquired
+            .iter()
+            .position(|&acquired| acquired == connector)
+        {
+            Some(plane) => plane,
+            None => {
+                self.acquired.push(connector);
+                self.acquired.len() - 1
+            }
+        };
+        // SAFETY: the fd is kept open (`drm`) until after the surfaces are dropped (`outputs`);
+        // the connector and mode come from the device itself
+        let surface = unsafe {
+            self.gpu
+                .instance
+                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::Drm {
+                    fd: self.drm.as_fd().as_raw_fd(),
+                    // Vulkan's display plane index, not a DRM plane id.
+                    // Mesa has one plane per acquired connector, in the order they were acquired.
+                    plane: std::env::var("SONAMU_VK_DISPLAY_PLANE")
+                        .ok()
+                        .and_then(|plane| plane.parse().ok())
+                        .unwrap_or(0)
+                        + plane as u32,
+                    connector_id: connector.into(),
+                    width,
+                    height,
+                    refresh_rate: refresh_millihertz,
+                })
+        };
+        let surface = surface
+            .inspect_err(|err| {
+                log::error!("Can't make a Vulkan display surface for {connector:?}: {err}");
+            })
+            .ok()?;
+        Some(DrmOutput {
+            connector,
+            mode,
+            wgpu_data: WgpuData::new(
+                surface,
+                DisplayContainerSize::new(width, height),
+                self.gpu.device.clone(),
+                self.gpu.queue.clone(),
+                &self.gpu.adapter,
+            ),
+            origin: [0, 0],
         })
     }
 
@@ -768,9 +838,7 @@ fn key_symbol(keysym: Keysym) -> Option<KeySymbol> {
 }
 
 /// The connected connectors, at their preferred modes
-fn connected_outputs(
-    drm: &DrmDeviceFd,
-) -> Result<Vec<(connector::Handle, smithay::reexports::drm::control::Mode)>, String> {
+fn connected_outputs(drm: &DrmDeviceFd) -> Result<Vec<(connector::Handle, Mode)>, String> {
     let resources = drm
         .resource_handles()
         .map_err(|err| format!("can't read DRM resources: {err}"))?;
@@ -780,6 +848,12 @@ fn connected_outputs(
         .filter_map(|&handle| drm.get_connector(handle, true).ok())
         .filter(|info| info.state() == connector::State::Connected)
         .filter_map(|info| {
+            if info.modes().is_empty() {
+                log::warn!(
+                    "Connector {:?} is connected but has no modes",
+                    info.handle()
+                );
+            }
             let mode = info
                 .modes()
                 .iter()
@@ -797,7 +871,7 @@ fn connected_outputs(
 /// The refresh rate the way Mesa reports it for Vulkan display modes,
 /// since wgpu picks the mode by an exact match
 #[allow(clippy::cast_sign_loss)]
-fn vulkan_refresh_millihertz(mode: &smithay::reexports::drm::control::Mode) -> u32 {
+fn vulkan_refresh_millihertz(mode: &Mode) -> u32 {
     let (_, _, htotal) = mode.hsync();
     let (_, _, vtotal) = mode.vsync();
     let hz = f64::from(mode.clock()) * 1000.0

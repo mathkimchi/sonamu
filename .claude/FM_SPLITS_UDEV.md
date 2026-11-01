@@ -106,6 +106,10 @@ is replaced by that pane (it sends `Unwrap`). Saved as the `split` spawner with 
   Monitors: every connected connector at its preferred mode, side by side left to right (#60), each its own surface
   drawing its part of the one scene (`UIDisplay::draw`'s `origin`). Vulkan display plane index = the output's index
   (Mesa numbers planes by its acquired connectors, in order), offset by `SONAMU_VK_DISPLAY_PLANE`.
+  Rescanned on udev changes (`update_outputs`; hotplug) and on VT switch back: new monitors are added, gone ones
+  dropped, and the runner gets `WindowResized` + `Screens` again. A connector only has modes once probed, which needs
+  DRM master; smithay's "Unable to become drm master" warning is spurious with logind (the kernel refuses
+  `SET_MASTER` from a non-opener without `CAP_SYS_ADMIN` even when the fd already is master).
   wgpu matches the mode by exact refresh rate, so it's computed the way Mesa does (`vulkan_refresh_millihertz`).
 - Input: libinput (smithay's `LibinputInputBackend`) on the display thread, translated to the same `UIEvent`s as winit:
   xkb keymap from `XKB_DEFAULT_*`, key symbols from the keysym (so Ctrl+W is still `w`, not a control char),
