@@ -1561,7 +1561,10 @@ impl NodeTree {
                 continue;
             }
             match (node.layout, node.focus) {
-                (Layout::Single, FocusIndex::Child(index)) => id = node.children[index],
+                // the focus is on this node itself (its own `focus` may point to another screen's)
+                (Layout::Single, FocusIndex::Child(index)) if id != focus => {
+                    id = node.children[index];
+                }
                 // a container has nothing of its own to show
                 (Layout::Single, _) if node.main.is_none() && !node.children.is_empty() => {
                     id = node.children[node.last_child.min(node.children.len() - 1)];
