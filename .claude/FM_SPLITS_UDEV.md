@@ -106,6 +106,10 @@ is replaced by that pane (it sends `Unwrap`). Saved as the `split` spawner with 
   Monitors: every connected connector at its preferred mode, side by side left to right (#60), each its own surface
   drawing its part of the one scene (`UIDisplay::draw`'s `origin`). Vulkan display plane index = the output's index
   (Mesa numbers planes by its acquired connectors, in order), offset by `SONAMU_VK_DISPLAY_PLANE`.
+  **Only one monitor actually works on the TTY so far**: Mesa allows `vkAcquireDrmDisplayEXT` once per instance (later
+  displays are driven through that fd without one), but wgpu-hal's `create_surface_from_drm` acquires every time and
+  `.expect`s it, so the second monitor panics (caught in `new_output`, logged, and left off). Fix: patch wgpu-hal to
+  skip/tolerate the acquire once acquired (or a wgpu API to wrap a raw `VkSurfaceKHR`, which doesn't exist in 29).
   Rescanned on udev changes (`update_outputs`; hotplug) and on VT switch back: new monitors are added, gone ones
   dropped, and the runner gets `WindowResized` + `Screens` again. A connector only has modes once probed, which needs
   DRM master; smithay's "Unable to become drm master" warning is spurious with logind (the kernel refuses

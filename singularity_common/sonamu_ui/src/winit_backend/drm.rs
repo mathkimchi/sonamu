@@ -387,31 +387,43 @@ impl DrmDisplay {
                 self.acquired.len() - 1
             }
         };
-        // SAFETY: the fd is kept open (`drm`) until after the surfaces are dropped (`outputs`);
-        // the connector and mode come from the device itself
-        let surface = unsafe {
-            self.gpu
-                .instance
-                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::Drm {
-                    fd: self.drm.as_fd().as_raw_fd(),
-                    // Vulkan's display plane index, not a DRM plane id.
-                    // Mesa has one plane per acquired connector, in the order they were acquired.
-                    plane: std::env::var("SONAMU_VK_DISPLAY_PLANE")
-                        .ok()
-                        .and_then(|plane| plane.parse().ok())
-                        .unwrap_or(0)
-                        + plane as u32,
-                    connector_id: connector.into(),
-                    width,
-                    height,
-                    refresh_rate: refresh_millihertz,
-                })
-        };
-        let surface = surface
-            .inspect_err(|err| {
+        // wgpu panics if Vulkan can't acquire the display, which Mesa only allows once per instance (its
+        // `wsi_AcquireDrmDisplayEXT`), so every monitor but the first fails; that fails nothing else
+        let surface = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // SAFETY: the fd is kept open (`drm`) until after the surfaces are dropped (`outputs`);
+            // the connector and mode come from the device itself
+            unsafe {
+                self.gpu
+                    .instance
+                    .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::Drm {
+                        fd: self.drm.as_fd().as_raw_fd(),
+                        // Vulkan's display plane index, not a DRM plane id.
+                        // Mesa has one plane per acquired connector, in the order they were acquired.
+                        plane: std::env::var("SONAMU_VK_DISPLAY_PLANE")
+                            .ok()
+                            .and_then(|plane| plane.parse().ok())
+                            .unwrap_or(0)
+                            + plane as u32,
+                        connector_id: connector.into(),
+                        width,
+                        height,
+                        refresh_rate: refresh_millihertz,
+                    })
+            }
+        }));
+        let surface = match surface {
+            Ok(Ok(surface)) => surface,
+            Ok(Err(err)) => {
                 log::error!("Can't make a Vulkan display surface for {connector:?}: {err}");
-            })
-            .ok()?;
+                return None;
+            }
+            Err(_) => {
+                log::error!(
+                    "Can't acquire {connector:?} (Mesa only lets wgpu acquire one monitor), so it is left off"
+                );
+                return None;
+            }
+        };
         Some(DrmOutput {
             connector,
             mode,
