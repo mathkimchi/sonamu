@@ -84,23 +84,21 @@ impl SmithayState {
     }
 }
 
-/// Into the frame's shm buffer, at its top-left
+/// Into the frame's shm buffer, at its top-left (cropped to it)
 fn copy_into(frame: &Frame, captured: &CapturedFrame) -> Result<(), CaptureFailureReason> {
     with_buffer_contents_mut(&frame.buffer(), |content_ptr, length, metadata| {
         // SAFETY: same as in `SmithayState::import_buffer`
         let pool = unsafe { std::slice::from_raw_parts_mut(content_ptr, length) };
 
+        // only the output's part: with several screens, the main one, at the top left
+        let width = captured.width.min(metadata.width.cast_unsigned()) as usize;
+        let height = captured.height.min(metadata.height.cast_unsigned()) as usize;
         let row_len = captured.width as usize * 4;
-        if metadata.width.cast_unsigned() < captured.width
-            || metadata.height.cast_unsigned() < captured.height
-        {
-            return Err(CaptureFailureReason::BufferConstraints);
-        }
-        for (y, row) in captured.bgra.chunks_exact(row_len).enumerate() {
+        for (y, row) in captured.bgra.chunks_exact(row_len).take(height).enumerate() {
             let start = (metadata.offset + metadata.stride * y as i32).cast_unsigned() as usize;
-            pool.get_mut(start..start + row_len)
+            pool.get_mut(start..start + width * 4)
                 .ok_or(CaptureFailureReason::BufferConstraints)?
-                .copy_from_slice(row);
+                .copy_from_slice(&row[..width * 4]);
         }
         Ok(())
     })

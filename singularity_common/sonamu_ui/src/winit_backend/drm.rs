@@ -563,19 +563,13 @@ impl DrmDisplay {
         {
             return;
         }
-        // a capture is of the whole window, so only of a single monitor
-        let capture = self.capture && self.outputs.len() == 1;
-        if self.capture && !capture {
-            self.capture = false;
-            let _ = self
-                .display_notification_queue
-                .send(DisplayNotification::Captured(None));
-        }
         let scene = self.scene_with_cursor().into_owned();
-        for output in &mut self.outputs {
+        for (index, output) in self.outputs.iter_mut().enumerate() {
             if !output.dirty || output.pending {
                 continue;
             }
+            // a capture is of the wl output, ie the main (first) monitor
+            let capture = self.capture && index == 0;
             match output.draw(&mut self.renderer, &scene, capture) {
                 Ok(captured) => {
                     if capture {
