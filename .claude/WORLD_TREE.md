@@ -144,8 +144,14 @@ Moving focus is recursive too:
 - A fullscreen toplevel covers only its screen, and stays while focus goes to another screen with the pointer.
 - The one wl output is the **main (first) screen** only: layer surfaces (dms' bar and wallpaper) are laid out there
   and only shrink its area; the root covers the whole window. Screen capture is of the main screen.
-- Known gaps: focus *inside* an applet (eg a project) is the applet's own, and it draws one surface, so screens
-  showing the same project show the same thing (eg a session whose root's main is a project shows it on every screen);
+- **Inside applets**: every `NodeTree` sends its mains `StandardEvent::ScreenViews { sizes, active }` (their size on
+  each screen, `None` where not shown, and the active screen) when it changes, right away on `activate_screen` so the
+  click that activated a screen reaches the right one. An applet may then publish one window per screen (a container,
+  `Treeview::screen_windows`, `StandardApplet::screen_windows`), and holders draw window *i* on screen *i*
+  (`screen_surface`). A project does: its tree mirrors the screens (`set_screen_count`, `activate_screen`,
+  `resize_screen`), so each screen has its own path inside it, nested projects too. Other screens show its panes,
+  never its overview.
+- Known gaps: splits (and anything inside them) and other applets look and focus the same on every screen;
   only the active screen's focus is saved in the session; no wallpaper or bar on the other screens (one wl output);
   no keybind to move between screens; monitors are always side by side, top aligned, at scale 1.
 
