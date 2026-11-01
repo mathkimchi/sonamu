@@ -139,6 +139,8 @@ struct DrmDisplay {
     /// The last scene, redrawn when only the pointer moves
     scene: PrimitiveScene,
     needs_draw: bool,
+    /// New content not drawn yet: clients are told it was presented once it is, so they draw at the monitors' rate
+    unpresented: bool,
     /// The next draw is sent back (`DisplayRequest::Capture`)
     capture: bool,
     /// Every output's area
@@ -371,6 +373,7 @@ impl DrmDisplay {
             queue: gpu.queue.clone(),
             scene: PrimitiveScene::new_empty(),
             needs_draw: true,
+            unpresented: false,
             capture: false,
             size: DisplayContainerSize::new(0, 0),
             pointer: [0.0, 0.0],
@@ -537,20 +540,14 @@ impl DrmDisplay {
 
     /// Takes the new content, and draws it on every monitor (or after its vblank, if it is showing the last frame)
     fn draw(&mut self) {
-        let new_content = self.ui_content.get_if_dirty();
-        let presented = new_content.is_some();
-        if let Some(scene) = new_content {
+        if let Some(scene) = self.ui_content.get_if_dirty() {
             self.scene = scene;
+            self.unpresented = true;
         }
         for output in &mut self.outputs {
             output.dirty = true;
         }
         self.draw_outputs();
-        if presented {
-            let _ = self
-                .display_notification_queue
-                .send(DisplayNotification::Presented);
-        }
     }
 
     /// Draws the changed monitors that aren't waiting for a vblank
@@ -590,6 +587,11 @@ impl DrmDisplay {
                 }
                 Err(err) => log::warn!("Couldn't draw on {:?}: {err}", output.connector),
             }
+        }
+        if std::mem::take(&mut self.unpresented) {
+            let _ = self
+                .display_notification_queue
+                .send(DisplayNotification::Presented);
         }
     }
 
