@@ -30,6 +30,8 @@ image = { workspace = true }
 glyphon = "^0.11"
 wgpu.workspace = true
 smithay.workspace = true
+# importing dmabufs into wgpu
+ash = "0.38"
 # pollster.workspace = true
 bytemuck = { version = "^1.25.0", features = ["derive"] }
 ttf-parser = "0.18"                                       # is what msdf uses
