@@ -178,9 +178,9 @@ pub enum Answer<T> {
 #[derive(Clone)]
 pub struct AppletWaker(Sender<()>);
 impl AppletWaker {
-    pub fn wake(&self) {
-        // the applet may have ended
-        let _ = self.0.send(());
+    /// `false` if the applet has ended
+    pub fn wake(&self) -> bool {
+        self.0.send(()).is_ok()
     }
 }
 

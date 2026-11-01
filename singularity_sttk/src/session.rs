@@ -254,12 +254,8 @@ fn running_in_terminal(mut argv: Vec<String>, running: &SavedRunning) -> Vec<Str
         .as_deref()
         .map(program_name)
         .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string()));
-    argv.extend([
-        "sh".to_string(),
-        "-c".to_string(),
-        r#""$@"; exec "$0""#.to_string(),
-        shell,
-    ]);
+    argv.extend(["sh", "-c", WRAPPER].map(String::from));
+    argv.push(shell);
     argv.push(program_name(program));
     argv.extend(args);
     argv
@@ -317,9 +313,25 @@ fn first_child(pid: u32) -> Option<u32> {
         .ok()
 }
 
-/// The foreground job of its first child's tty (eg what a terminal's shell runs), if it isn't that child
+/// Runs a restored program (`"$@"`), then its shell (`$0`), as `sh -c WRAPPER <shell> <program> <args>`
+const WRAPPER: &str = r#""$@"; exec "$0""#;
+
+/// The foreground job of its first child's tty (eg what a terminal's shell runs), if it isn't that child,
+/// or the program a restored terminal's `WRAPPER` runs
 fn running(pid: u32) -> Option<SavedRunning> {
     let child = first_child(pid)?;
+    // its program is in its process group (`sh -c` has no job control)
+    if let [_, flag, script, shell, ..] = command_line(child).as_slice()
+        && flag == "-c"
+        && script == WRAPPER
+    {
+        let program = first_child(child)?;
+        return Some(SavedRunning {
+            argv: command_line(program),
+            cwd: fs::read_link(format!("/proc/{program}/cwd")).ok(),
+            shell: Some(shell.clone()),
+        });
+    }
     let (tty, job) = tty_and_foreground(child)?;
     let (client_tty, _) = tty_and_foreground(pid)?;
     // the child's own tty, not one it shares with the client (eg Sonamu's, when Sonamu runs on a tty)

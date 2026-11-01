@@ -16,6 +16,7 @@ use sonamu_ui::{
     ui_element::{UIElement, UITree},
     ui_event::UIEvent,
 };
+use std::time::Duration;
 
 /// Shows a wl surface (a wl client's toplevel) and forwards input to it.
 ///
@@ -30,18 +31,41 @@ pub struct WlSurfaceApplet {
     /// Of the client, to save how to start it again
     pid: Option<u32>,
     app_id: Option<String>,
+    /// Read from `/proc` on each title change and every 2 s, published only when it changes
+    saved: SavedApplet,
 }
 impl CreatableNodularApplet<NewWlSurface> for WlSurfaceApplet {
     fn new(surface: NewWlSurface, hook: AppletContext) -> Self {
         hook.listen_wl_surface(surface.wl_event_queue);
-        Self {
+        // eg a program started in a terminal, which may not change the title (or only before it starts)
+        if surface.pid.is_some() {
+            let waker = hook.waker();
+            std::thread::spawn(move || {
+                while waker.wake() {
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            });
+        }
+        let mut applet = Self {
             surface_id: surface.surface_id,
             wl_request_queue: surface.wl_request_queue,
             hook,
             title: String::new(),
             pid: surface.pid,
             app_id: surface.app_id,
-        }
+            saved: SavedApplet::Wl(session::saved_wl(None, None, "")),
+        };
+        applet.saved = applet.read_saved();
+        applet
+    }
+}
+impl WlSurfaceApplet {
+    fn read_saved(&self) -> SavedApplet {
+        SavedApplet::Wl(session::saved_wl(
+            self.pid,
+            self.app_id.clone(),
+            &self.title,
+        ))
     }
 }
 impl StandardApplet for WlSurfaceApplet {
@@ -78,6 +102,7 @@ impl StandardApplet for WlSurfaceApplet {
             WlSurfaceEvent::Destroyed => self.hook.close(),
             WlSurfaceEvent::Title(title) => {
                 self.title = title;
+                self.saved = self.read_saved();
                 self.hook.damage_treeview();
             }
         }
@@ -103,12 +128,16 @@ impl StandardApplet for WlSurfaceApplet {
         })
     }
 
-    /// Read from `/proc` on each publish (eg a title change), so the saved working directory may lag behind
     fn save(&self) -> Option<SavedApplet> {
-        Some(SavedApplet::Wl(session::saved_wl(
-            self.pid,
-            self.app_id.clone(),
-            &self.title,
-        )))
+        Some(self.saved.clone())
+    }
+
+    /// Every 2 s, to read `/proc` again
+    fn wake(&mut self) {
+        let saved = self.read_saved();
+        if saved != self.saved {
+            self.saved = saved;
+            self.hook.damage_treeview();
+        }
     }
 }

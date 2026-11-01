@@ -57,7 +57,8 @@ Sonamu owns the session; apps' own session restore should be off.
     On restore, those in `restore_programs` (settings, matched by `base_name` of argv[0]) are run again in the terminal:
     `<terminal> [-e] sh -c '"$@"; exec "$0"' <shell> <program> <args>` in the program's cwd. `<shell>` is the
     saved shell (`SavedRunning::shell`, the terminal's first child, eg nu from foot.ini; `$SHELL` may differ), left
-    once the program exits. foot and kitty take the command as trailing args, others get `-e` (wrong for eg wezterm). A program
+    once the program exits. A restored terminal still running its program is saved through the wrapper
+    (`sh -c` has no job control, so the program stays in the wrapper's process group): its first child, and `$0` as the shell. foot and kitty take the command as trailing args, others get `-e` (wrong for eg wezterm). A program
     in the setting with `args` gets those instead of its saved ones (eg `claude --continue`). Not handled: a terminal
     whose saved argv already runs a command (the program's command is appended after it).
   - Any other running program: when the hibernating tile wakes (`session::wake`), it shows a `RestorePrompt`
@@ -131,7 +132,7 @@ User-facing setup (incl. NixOS / Home Manager) is in `docs/persistent_apps.md`.
   (`surface_tree_layers` now uses `with_surface_tree_upward`). `surface_under` now respects input regions, since
   Firefox's content subsurfaces have empty ones and its root takes the clicks.
 - Every toplevel is a tile, so dialogs are saved and restored as windows too (no `xdg_toplevel.parent` check).
-- A wl tile's saved cwd only updates when it publishes (eg a title change).
+- A wl tile re-reads `/proc` on each title change and every 2 s (a thread waking it, `WlSurfaceApplet::wake`), and republishes only if its saved form changed. Needed since nu (osc2) sets the title just before starting a program, so the read on that title change missed it, and hx/typst never change it.
 - A placeholder for a client that never opens a window stays "Starting ..." forever (Ctrl+W drops it). No timeout.
 - Not saved: the view root (Super+V), collapsed nodes, the file manager's active document, unsaved editor buffers.
 - Killed with SIGKILL / crash: up to 2 s of changes are lost.
