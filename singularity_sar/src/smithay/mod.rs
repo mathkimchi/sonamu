@@ -324,7 +324,7 @@ impl SmithayState {
         }
     }
 
-    /// Same as anvil: keeps the popup inside the output (the Sonamu window).
+    /// Same as anvil: keeps the popup inside its tile's screen (or a layer surface's, inside the output).
     /// Falls back to the toplevel's tile if the tile hasn't been laid out yet.
     fn unconstrain_popup(&self, popup: &PopupSurface) {
         let kind = PopupKind::Xdg(popup.clone());
@@ -332,20 +332,23 @@ impl SmithayState {
             return;
         };
 
-        // the output, relative to the tile
+        // the tile's screen, relative to the tile
         let output_in_tile = self
             .surfaces
             .iter()
             .find_map(|(surface_id, surface)| (*surface == root).then_some(surface_id))
-            .and_then(|surface_id| self.tile_areas.get(&surface_id))
-            .zip(self.output.current_mode())
-            .map(|(DisplayAreaPx([[left, top], _]), mode)| {
-                Rectangle::new(
-                    Point::<f64, Physical>::from((-f64::from(*left), -f64::from(*top)))
-                        .to_logical(self.scale)
-                        .to_i32_round(),
-                    mode.size.to_f64().to_logical(self.scale).to_i32_round(),
-                )
+            .and_then(|surface_id| {
+                let DisplayAreaPx([[left, top], _]) = self.tile_areas.get(&surface_id)?;
+                let [x, y, width, height] = self.screen_of_tile(surface_id);
+                Some(Rectangle::new(
+                    Point::<f64, Physical>::from((
+                        f64::from(x) - f64::from(*left),
+                        f64::from(y) - f64::from(*top),
+                    ))
+                    .to_logical(self.scale)
+                    .to_i32_round(),
+                    self.screen_size([x, y, width, height]),
+                ))
             });
         let tile = || {
             self.xdg_shell_state

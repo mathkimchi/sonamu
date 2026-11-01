@@ -199,11 +199,10 @@ impl AppletRunner {
         }
     }
 
-    /// Tells the root the size of the area it's drawn in, and the screens in it
+    /// Tells the root its size (the whole window), and the screens in it
     pub(crate) fn send_content_size(&mut self) {
-        let (_, size) = self.smithay_state.content_area();
         self.root_client
-            .send_event(StandardEvent::UIEvent(UIEvent::WindowResized(size)));
+            .send_event(StandardEvent::UIEvent(UIEvent::WindowResized(self.window_size)));
         self.send_screens();
     }
 
@@ -223,27 +222,30 @@ impl AppletRunner {
                 })
                 .collect()
         });
+        // the wl output is only the main screen, so layer surfaces (eg dms' bar) are only there
+        let [_, _, width, height] = self.smithay_state.screens[0];
+        self.smithay_state
+            .resize_output(DisplayContainerSize::new(width, height));
+        self.smithay_state.arrange_layers();
         self.smithay_state.resize_fullscreen();
     }
 
-    /// Tells the root the screens' parts of its area, in its coords
+    /// Tells the root the screens' areas: the main one less the layer surfaces' exclusive zones (it has the wl output)
     fn send_screens(&mut self) {
         let ([left, top], size) = self.smithay_state.content_area();
-        let [left, top] = [left, top].map(|coord| coord as u32);
-        let [right, bottom] = [left + size.width, top + size.height];
-        let screens = self
-            .smithay_state
-            .screens
-            .iter()
-            .map(|&[x, y, width, height]| {
-                let [x0, y0] = [x.clamp(left, right), y.clamp(top, bottom)];
-                let [x1, y1] = [
-                    (x + width).clamp(left, right),
-                    (y + height).clamp(top, bottom),
-                ];
-                [x0 - left, y0 - top, x1 - x0, y1 - y0]
-            })
-            .collect();
+        let mut screens = self.smithay_state.screens.clone();
+        // none before the first `WindowResized`
+        if screens.is_empty() {
+            return;
+        }
+        // the output's origin is the main screen's
+        let [x, y, ..] = screens[0];
+        screens[0] = [
+            x + left as u32,
+            y + top as u32,
+            size.width,
+            size.height,
+        ];
         self.root_client.send_event(StandardEvent::Screens(screens));
     }
 
@@ -260,11 +262,7 @@ impl AppletRunner {
 
         if let UIEvent::WindowResized(screen_size) = event {
             self.window_size = screen_size;
-            self.smithay_state.resize_output(screen_size);
-            self.smithay_state.arrange_layers();
             self.update_screens();
-
-            // the root is sent the size of its area instead
             self.send_content_size();
             self.needs_redraw = true;
             return;
@@ -285,10 +283,6 @@ impl AppletRunner {
             {
                 return;
             }
-            // the root's area is offset by the exclusive zones
-            let [left, top] = self.smithay_state.content_area().0;
-            mouse_event.position[0] -= left;
-            mouse_event.position[1] -= top;
         }
 
         // a layer surface with the keyboard (eg a launcher) gets the keys
@@ -396,16 +390,19 @@ impl AppletRunner {
             if self.smithay_state.fullscreen().is_some() && self.smithay_state.screens.len() <= 1 {
                 Vec::new()
             } else {
-                let (content_position, content_size) = self.smithay_state.content_area();
                 let mut layers = self.smithay_state.layer_surface_elements(
                     true,
                     &self.ui_handle.device,
                     &self.ui_handle.queue,
                 );
+                // over the whole window; its screens leave the exclusive zones free
                 layers.push(UITree::new_container_styled(
                     Style::absolute(
-                        content_position.map(|coord| coord as f32),
-                        [content_size.width as f32, content_size.height as f32],
+                        [0.0, 0.0],
+                        [
+                            self.window_size.width as f32,
+                            self.window_size.height as f32,
+                        ],
                     ),
                     vec![self.root_client.get_surface()],
                 ));
