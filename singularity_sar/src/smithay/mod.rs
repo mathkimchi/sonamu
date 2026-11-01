@@ -12,7 +12,10 @@ use smithay::{
         input::{Axis, AxisSource, ButtonState, InputTime, KeyState, Keycode},
         renderer::{
             BufferType, buffer_type,
-            utils::{Buffer, RendererSurfaceStateUserData, SurfaceView, on_commit_buffer_handler},
+            utils::{
+                Buffer, CommitCounter, RendererSurfaceStateUserData, SurfaceView,
+                on_commit_buffer_handler,
+            },
         },
     },
     desktop::{
@@ -761,6 +764,7 @@ impl SmithayState {
                         surface_state.view()?,
                         surface_state.buffer()?.clone(),
                         surface_state.buffer_scale(),
+                        surface_state.current_commit(),
                     ))
                 })
         };
@@ -776,11 +780,12 @@ impl SmithayState {
                 None => TraversalAction::SkipChildren,
             },
             |surface, states, &location| {
-                if let Some((view, buffer, buffer_scale)) = view(states) {
+                if let Some((view, buffer, buffer_scale, commit)) = view(states) {
                     layers.push(Layer {
                         surface: surface.clone(),
                         buffer,
                         buffer_scale,
+                        commit,
                         location: location + view.offset,
                         view,
                         in_root_tree: false,
@@ -850,7 +855,7 @@ impl SmithayState {
                     Transform::Normal,
                     &layer.view.src.size,
                 );
-                let texture = Self::import_buffer(&layer.buffer, src, device, queue)?;
+                let texture = Self::cached_texture(&layer, src, device, queue)?;
                 Some(UITree::leaf_styled(
                     UIElement::Texture(texture),
                     Style::absolute(
@@ -915,6 +920,26 @@ impl SmithayState {
                     })
             })
             .map(|layer| (layer.surface, layer.location.to_f64()))
+    }
+
+    /// The layer's texture, imported again only after a commit or a new crop (#136)
+    fn cached_texture(
+        layer: &Layer,
+        src: Rectangle<f64, BufferCoords>,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Option<TextureView> {
+        let key = ((*layer.buffer).clone(), layer.commit, src);
+        with_states(&layer.surface, |states| {
+            let cache = states.data_map.get_or_insert(TextureCache::default);
+            let mut cache = cache.0.lock().unwrap();
+            if let Some((_, texture)) = cache.as_ref().filter(|(cached, _)| *cached == key) {
+                return Some(texture.clone());
+            }
+            let texture = Self::import_buffer(&layer.buffer, src, device, queue)?;
+            *cache = Some((key, texture.clone()));
+            Some(texture)
+        })
     }
 
     /// Only the `src` part of the buffer is imported (viewporter crop).
@@ -1031,6 +1056,8 @@ struct Layer {
     surface: WlSurface,
     buffer: Buffer,
     buffer_scale: i32,
+    /// Of the buffer's damage, to reuse its texture
+    commit: CommitCounter,
     /// Offset from the root
     location: Point<i32, Logical>,
     /// The crop (`src`) and drawn size (`dst`), from viewporter or the buffer
@@ -1038,6 +1065,16 @@ struct Layer {
     /// Part of the root's surface tree (not a popup)
     in_root_tree: bool,
 }
+
+/// A surface's last imported texture, by the buffer, commit and crop it was imported for
+/// (a new buffer committed without damage doesn't change the commit counter)
+type TextureKey = (
+    smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer,
+    CommitCounter,
+    Rectangle<f64, BufferCoords>,
+);
+#[derive(Default)]
+struct TextureCache(std::sync::Mutex<Option<(TextureKey, TextureView)>>);
 
 impl Layer {
     /// Crops the layer to `clip` (same coordinates as `location`).

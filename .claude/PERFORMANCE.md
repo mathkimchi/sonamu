@@ -35,3 +35,5 @@ tracing captures backtraces each frame (~4% in debug only).
 
 - Hidden tiles (not in the last redraw's `tile_areas`) get no frame callbacks and are set `Suspended`, so
   clients in inactive nodes stop rendering.
+- Each surface keeps its last texture (`TextureCache` in its data map), keyed by buffer, smithay commit counter
+  and crop, so a redraw re-uploads only surfaces that committed. Still a full upload per commit (no damage).
