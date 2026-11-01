@@ -1333,6 +1333,25 @@ impl CompositorHandler for AppletRunner {
             });
         }
 
+        // the cursor's hotspot moves against its attach offset, like anvil
+        if matches!(&self.smithay_state.cursor_status, CursorImageStatus::Surface(cursor) if cursor == surface)
+        {
+            with_states(surface, |states| {
+                let Some(cursor) = states.data_map.get::<CursorImageSurfaceData>() else {
+                    return;
+                };
+                if let Some(delta) = states
+                    .cached_state
+                    .get::<SurfaceAttributes>()
+                    .current()
+                    .buffer_delta
+                    .take()
+                {
+                    cursor.lock().unwrap().hotspot -= delta;
+                }
+            });
+        }
+
         self.smithay_state.popup_manager.commit(surface);
         if let Some(PopupKind::Xdg(popup)) = self.smithay_state.popup_manager.find_popup(surface)
             && !popup.is_initial_configure_sent()
