@@ -177,6 +177,8 @@ impl StandardApplet for SplitApplet {
             | StandardEvent::NodeAction(..) => {}
             // only the root gets these
             StandardEvent::Capturing(_) | StandardEvent::Screens(_) => {}
+            // shown the same on every screen
+            StandardEvent::ScreenViews { .. } => {}
         }
     }
 

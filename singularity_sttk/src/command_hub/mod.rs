@@ -550,6 +550,7 @@ impl StandardApplet for CommandHubApplet {
             StandardEvent::WlSurfaceRegistered(_)
             | StandardEvent::Capturing(_)
             | StandardEvent::Screens(_)
+            | StandardEvent::ScreenViews { .. }
             | StandardEvent::Open(_) => {}
         }
     }

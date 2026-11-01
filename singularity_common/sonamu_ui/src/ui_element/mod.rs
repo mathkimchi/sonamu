@@ -556,6 +556,11 @@ impl UITree {
         Self::new_styled(node, style, Vec::new())
     }
 
+    #[must_use]
+    pub fn into_children(self) -> Vec<Self> {
+        self.children
+    }
+
     pub fn add_child(&mut self, child: Self) {
         self.children.push(child);
     }

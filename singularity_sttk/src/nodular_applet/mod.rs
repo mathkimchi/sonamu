@@ -60,7 +60,14 @@ pub trait StandardApplet {
     fn handle_standard_event(&mut self, standard_event: StandardEvent);
 
     /// Called when the surface is damaged (`AppletContext::damage_window`) or resized
+    /// (or told of the screens, `StandardEvent::ScreenViews`).
+    /// With `screen_windows`, a container of one window per screen.
     fn get_window_standard_applet(&self, container_size: DisplayContainerSize) -> UITree;
+
+    /// Whether its window is one per screen (`Treeview::screen_windows`, #60)
+    fn screen_windows(&self) -> bool {
+        false
+    }
 
     /// The applet's inner tree; its node shows it as is.
     fn get_treeview(&self) -> WorldTree<String>;
@@ -478,6 +485,10 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         state.size = size;
                         state.surface.damage();
                     }
+                    if let StandardEvent::ScreenViews { .. } = event {
+                        state.surface.damage();
+                        state.treeview.damage();
+                    }
                     state.applet.handle_standard_event(event);
                 }
                 // the node dropped this applet's `ClientHandle`
@@ -550,6 +561,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         frames_itself: state.applet.frames_itself(),
                         saved: state.applet.save(),
                         awaiting_wl: state.applet.awaiting_wl(),
+                        screen_windows: state.applet.screen_windows(),
                     },
                     &state.request_sender,
                 );

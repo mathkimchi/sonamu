@@ -64,6 +64,8 @@ struct Node {
     inactive: bool,
     /// A restored wl client not started yet, or a deactivated applet (its main stands in); started when focused
     hibernated: Option<SavedApplet>,
+    /// The last `StandardEvent::ScreenViews` sent to its main: its size on each screen, and the active one
+    screen_views: Option<(Vec<Option<DisplayContainerSize>>, usize)>,
 }
 impl Node {
     const fn new(main: Option<ClientHandle>, layout: Layout, parent: Option<NodeId>) -> Self {
@@ -80,6 +82,7 @@ impl Node {
             awaiting: None,
             inactive: false,
             hibernated: None,
+            screen_views: None,
         }
     }
 
@@ -510,6 +513,7 @@ impl NodeTree {
         node.main = Some(main);
         // so the new applet gets its size
         node.size = None;
+        node.screen_views = None;
         self.send_initial_size(id);
         self.damaged = true;
     }
@@ -950,6 +954,7 @@ impl NodeTree {
         node.inner_wl_focus = None;
         // so the new applet gets its size
         node.size = None;
+        node.screen_views = None;
         self.send_initial_size(id);
         if self.focused_node() == id
             && let Some(parent) = self.nodes[id].parent
@@ -1122,14 +1127,19 @@ impl NodeTree {
         self.damaged = true;
     }
 
-    /// The screen's size, `WindowResized` for the active one
-    pub fn resize_screen(&mut self, screen: usize, size: DisplayContainerSize) {
+    /// The screen's size (`None`: not shown), `WindowResized` for the active one
+    pub fn resize_screen(&mut self, screen: usize, size: Option<DisplayContainerSize>) {
         if screen == self.active_screen {
-            self.handle_event(StandardEvent::UIEvent(UIEvent::WindowResized(size)));
+            if let Some(size) = size {
+                self.handle_event(StandardEvent::UIEvent(UIEvent::WindowResized(size)));
+            }
         } else if let Some(screen) = self.screens.get_mut(screen)
-            && screen.size != Some(size)
+            && screen.size != size
         {
-            screen.size = Some(size);
+            screen.size = size;
+            if size.is_none() {
+                screen.panes.clear();
+            }
             self.damaged = true;
         }
     }
@@ -1166,6 +1176,12 @@ impl NodeTree {
             self.wake_focused();
         }
         self.damaged = true;
+        // now, so the applets get the events that follow on the screen too (eg the click that activated it)
+        self.send_screen_views();
+    }
+
+    pub fn screen_count(&self) -> usize {
+        self.screens.len()
     }
 
     /// Whether a pane has the pointer until a button is released
@@ -1255,6 +1271,7 @@ impl NodeTree {
         node.inactive = false;
         // so the new applet gets its size
         node.size = None;
+        node.screen_views = None;
         self.send_initial_size(id);
         self.damaged = true;
     }
@@ -1582,7 +1599,7 @@ impl NodeTree {
             id = self.displayed_node(*self.nodes[id].children.first()?);
         }
         let node = &self.nodes[id];
-        Some((node.main.as_ref()?.get_surface(), node.size?))
+        Some((screen_surface(node.main.as_ref()?, self.active_screen), node.size?))
     }
 
     /// Works out what is on screen, and resizes the shown applets to their panes.
@@ -1631,6 +1648,45 @@ impl NodeTree {
                 screen.focus = (focus, false);
             }
             screen.panes = panes;
+        }
+        self.send_screen_views();
+    }
+
+    /// Tells every main its size on each screen and the active screen, when that changed (#60).
+    /// Not with a single screen, unless they were told of several before.
+    fn send_screen_views(&mut self) {
+        let count = self.screens.len();
+        let mut sizes: HashMap<NodeId, Vec<Option<DisplayContainerSize>>> = HashMap::new();
+        for (index, screen) in self.screens.iter().enumerate() {
+            let panes = if index == self.active_screen {
+                &self.panes
+            } else {
+                &screen.panes
+            };
+            for pane in panes {
+                sizes.entry(pane.node).or_insert_with(|| vec![None; count])[index] =
+                    Some(pane.inner_size());
+            }
+        }
+        let active = self.active_screen;
+        for (id, node) in &mut self.nodes {
+            let Some(main) = &node.main else {
+                continue;
+            };
+            if count == 1 && node.screen_views.is_none() {
+                continue;
+            }
+            let views = (
+                sizes.remove(&id).unwrap_or_else(|| vec![None; count]),
+                active,
+            );
+            if node.screen_views.as_ref() != Some(&views) {
+                main.send_event(StandardEvent::ScreenViews {
+                    sizes: views.0.clone(),
+                    active,
+                });
+                node.screen_views = Some(views);
+            }
         }
     }
 
@@ -1716,7 +1772,7 @@ impl NodeTree {
 
     /// Every pane, bordered unless it is the only one; the focused one's border shows whether focus is inside it
     pub fn get_window(&self) -> UITree {
-        self.window(&self.panes, Some(self.focused_node()))
+        self.window(&self.panes, Some(self.focused_node()), self.active_screen)
     }
 
     /// Like `get_window`, for the screen (an inactive one shows no focus)
@@ -1726,11 +1782,12 @@ impl NodeTree {
         }
         self.screens.get(screen).map_or_else(
             || UITree::leaf(UIElement::Nothing),
-            |screen| self.window(&screen.panes, None),
+            |shown| self.window(&shown.panes, None, screen),
         )
     }
 
-    fn window(&self, panes: &[Pane], focused: Option<NodeId>) -> UITree {
+    /// The panes on `screen`
+    fn window(&self, panes: &[Pane], focused: Option<NodeId>, screen: usize) -> UITree {
         let settings = settings::get();
         let panes = panes
             .iter()
@@ -1744,7 +1801,7 @@ impl NodeTree {
                 };
                 let surface = node.main.as_ref().map_or_else(
                     || UITree::leaf(UIElement::Nothing),
-                    ClientHandle::get_surface,
+                    |main| screen_surface(main, screen),
                 );
                 let [x, y, width, height] = pane.rect.map(|value| value as f32);
                 UITree::new_styled(
@@ -2087,3 +2144,16 @@ fn has_inner_elements(treeview: &WorldTree<String>) -> bool {
 //         }
 //     };
 // }
+
+/// What the client shows on `screen`: its window for it, if it has one per screen (`Treeview::screen_windows`)
+fn screen_surface(main: &ClientHandle, screen: usize) -> UITree {
+    let surface = main.get_surface();
+    if !main.get_treeview().screen_windows {
+        return surface;
+    }
+    surface
+        .into_children()
+        .into_iter()
+        .nth(screen)
+        .unwrap_or_else(|| UITree::leaf(UIElement::Nothing))
+}

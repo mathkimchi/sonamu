@@ -262,7 +262,10 @@ impl RootNodeApplet {
                 treeview_area(&settings, size, self.treeview_pinned, self.treeview_pinned);
             self.holder.tree.resize_screen(
                 index,
-                DisplayContainerSize::new(applet_area(treeview_area, size)[1], height),
+                Some(DisplayContainerSize::new(
+                    applet_area(treeview_area, size)[1],
+                    height,
+                )),
             );
         }
     }
@@ -489,6 +492,8 @@ impl RootNodeApplet {
             StandardEvent::NodeAction(path, action) => self.holder.node_action(&path, action),
             StandardEvent::Capturing(_) => {}
             StandardEvent::Screens(rects) => self.set_screens(rects),
+            // it has the screens itself
+            StandardEvent::ScreenViews { .. } => {}
             // it reads the settings when it draws
             StandardEvent::SettingsChanged(_) => self.surface.damage(),
             // its tree is in the runner's directory

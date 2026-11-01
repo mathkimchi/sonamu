@@ -851,6 +851,17 @@ impl StandardApplet for ProjectApplet {
             }
             // it has its own directory
             StandardEvent::Directory(_) => {}
+            // its tree shows each screen its own focus, like the root's
+            StandardEvent::ScreenViews { sizes, active } => {
+                let tree = &mut self.holder.tree;
+                tree.set_screen_count(sizes.len());
+                tree.activate_screen(active);
+                for (index, size) in sizes.into_iter().enumerate() {
+                    if index != active {
+                        tree.resize_screen(index, size);
+                    }
+                }
+            }
             // handled by the applet's client
             StandardEvent::CloseRequest
             | StandardEvent::Deactivate
@@ -872,10 +883,32 @@ impl StandardApplet for ProjectApplet {
         if self.dissolved {
             return UITree::leaf(UIElement::Nothing);
         }
-        if self.at_root() {
-            return self.get_overview(container_size.width as f32);
+        let tree = &self.holder.tree;
+        let active = if self.at_root() {
+            self.get_overview(container_size.width as f32)
+        } else {
+            tree.get_window()
+        };
+        if !self.screen_windows() {
+            return active;
         }
-        self.holder.tree.get_window()
+        // the other screens show their panes (not the overview)
+        let mut active = Some(active);
+        UITree::new_container(
+            (0..tree.screen_count())
+                .map(|screen| {
+                    if screen == tree.active_screen() {
+                        active.take().unwrap_or_else(|| UITree::leaf(UIElement::Nothing))
+                    } else {
+                        tree.get_screen_window(screen)
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    fn screen_windows(&self) -> bool {
+        !self.dissolved && self.holder.tree.screen_count() > 1
     }
 
     /// Its tree, whose root (a container) is labeled with the project's name

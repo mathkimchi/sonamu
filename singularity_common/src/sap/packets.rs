@@ -69,6 +69,8 @@ pub struct Treeview {
     pub saved: Option<SavedApplet>,
     /// Restored wl clients inside the client whose tiles wait for their toplevel (eg in a project)
     pub awaiting_wl: Vec<AwaitedWl>,
+    /// Its surface is one window per screen (a container of them, in `ScreenViews` order), each shown on its screen
+    pub screen_windows: bool,
 }
 impl Treeview {
     /// Focus inside the root, not traversing, not saved
@@ -80,6 +82,7 @@ impl Treeview {
             frames_itself: false,
             saved: None,
             awaiting_wl: Vec::new(),
+            screen_windows: false,
         }
     }
 }
@@ -181,6 +184,12 @@ pub enum StandardEvent {
     /// The screens' areas (`[x, y, width, height]`) in the client's window, each showing the tree
     /// with its own focus (#60). Only the root gets these, after each `WindowResized`.
     Screens(Vec<[u32; 4]>),
+    /// The size the client is shown at on each screen (`None` where it isn't), and which screen is active (#60),
+    /// when either changes. A client can show each screen its own window (`Treeview::screen_windows`).
+    ScreenViews {
+        sizes: Vec<Option<DisplayContainerSize>>,
+        active: usize,
+    },
 }
 
 /// The applet registered under `applet`, made with `args`
