@@ -189,8 +189,9 @@ The holder converts them:
     inner tree (`NodeTree::deactivate_all`: wl tiles get `CloseRequest`, native mains `Deactivate`, recursively);
     the file manager closes its wl documents and deactivates the others. Restored wl clients inside come back
     hibernated, but the file manager's wl documents start right away. Starting placeholders and applets without a
-    saved form (eg the help) can't be deactivated. The node's own (outer) children are left alone. Not saved: a
-    deactivated native applet is restored active on the next start.
+    saved form (eg the help) can't be deactivated. The node's own (outer) children are left alone.
+    Stand-ins are `session::hibernate`, labeled from the saved form. `NodeTree::focus_path` wakes the node before
+    passing the rest of the path in, so the woken applet gets it.
 - `Focus(path)` puts focus *at* the path: a path ending on an element selects it (the applet's selector),
   a longer one goes inside it.
 

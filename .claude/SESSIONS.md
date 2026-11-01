@@ -25,7 +25,10 @@ Sonamu owns the session; apps' own session restore should be off.
 - **Writing** (`RootNodeApplet::save_session`): every 2 s if changed, and before quitting. Atomic (temp + rename).
   Path: `$SONAMU_SESSION` (set but empty: no session), else `$XDG_STATE_HOME/sonamu/session.json`
   (`~/.local/state/sonamu/session.json`). An unparsable file is moved to `.json.bad`.
-- **Restoring** (`NodeTree::restore`, `session::restore`): on start, if there's a session, `root_initializer` is ignored.
+- **Restoring** (`NodeTree::restore`, `session::restore`): every restored node (wl or native, also inside projects
+  and splits) starts hibernating (`session::hibernate`, "<label> (inactive)") and is made when focused, so only the
+  saved focus chain starts (`focus_path` wakes each node on it). Visible split panes other than the focused one stay
+  inactive. The file manager's documents are made with it (not hibernated). On start, if there's a session, `root_initializer` is ignored.
   Spawners are looked up on the applet's own thread (`AppletContext::find_applet_spawner`).
   Missing ones become a `RestoringApplet` placeholder ("Couldn't restore ...") that stays saved as it was until Ctrl+W.
 - **Wl clients**:

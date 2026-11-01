@@ -354,13 +354,11 @@ impl NodeTree {
         id
     }
 
-    /// Makes the saved node and its descendants under `parent` (not added to its children)
+    /// Makes the saved node and its descendants under `parent` (not added to its children),
+    /// all hibernating until focused
     fn restore_subtree(&mut self, parent: Option<NodeId>, saved: SavedTree) -> NodeId {
-        let hibernated = saved
-            .main
-            .clone()
-            .filter(|main| matches!(main, SavedApplet::Wl(_)));
-        let main = saved.main.map(session::restore);
+        let hibernated = saved.main.clone();
+        let main = saved.main.map(session::hibernate);
         let spawn_client = &self.spawn_client;
         let id = self.nodes.insert_with_key(|id| Node {
             inactive: hibernated.is_some(),
@@ -814,10 +812,14 @@ impl NodeTree {
         };
         self.focus_node(id);
         let inner = path.0.get(1..).unwrap_or_default();
-        if inner.is_empty() {
-            self.nodes[id].focus = FocusIndex::Focusing;
+        self.nodes[id].focus = if inner.is_empty() {
+            FocusIndex::Focusing
         } else {
-            self.nodes[id].focus = FocusIndex::Inner;
+            FocusIndex::Inner
+        };
+        // so the path inside goes to the woken applet
+        self.wake_focused();
+        if !inner.is_empty() {
             self.send_event(id, StandardEvent::Focus(WorldTreePath(inner.into())));
         }
     }
@@ -917,13 +919,7 @@ impl NodeTree {
             }
             None => return,
         };
-        let initializer = match &stand_in {
-            SavedApplet::Wl(_) => session::restore(stand_in.clone()),
-            SavedApplet::Spawner { .. } => {
-                session::inactive(stand_in.clone(), treeview.tree.get_root_value())
-            }
-        };
-        let main = (self.spawn_client)(id, initializer);
+        let main = (self.spawn_client)(id, session::hibernate(stand_in.clone()));
         let node = &mut self.nodes[id];
         node.main = Some(main);
         node.hibernated = Some(stand_in);

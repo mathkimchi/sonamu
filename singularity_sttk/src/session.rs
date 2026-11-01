@@ -88,7 +88,7 @@ pub fn saved_with_inner(name: &str, args: Vec<String>, inner: SavedTree) -> Save
     }
 }
 
-/// Makes the saved applet again. A wl client isn't started: its tile hibernates until `wake`.
+/// Makes the saved applet again. A wl client isn't started: its tile hibernates (`hibernate`) until `wake`.
 pub fn restore(saved: SavedApplet) -> NodularAppletInitializer {
     match &saved {
         SavedApplet::Spawner { name, args, inner } => {
@@ -111,15 +111,24 @@ pub fn restore(saved: SavedApplet) -> NodularAppletInitializer {
             });
             initializer
         }
-        SavedApplet::Wl(wl) => {
-            let label = format!("{} (inactive)", wl_label(wl));
-            RestoringApplet::initializer(saved, label)
-        }
+        SavedApplet::Wl(_) => hibernate(saved),
     }
 }
 
-/// Stands in for a deactivated native applet, saved as it was, until it is restored (`restore`)
-pub fn inactive(saved: SavedApplet, label: &str) -> NodularAppletInitializer {
+/// Stands in for an applet that isn't running (restored or deactivated), saved as it was, until it is woken.
+/// Labeled by a project's name, else the file it shows (its last arg), else its spawner's name.
+pub fn hibernate(saved: SavedApplet) -> NodularAppletInitializer {
+    let label = match &saved {
+        SavedApplet::Wl(wl) => wl_label(wl),
+        SavedApplet::Spawner { name, args, inner } => inner
+            .as_ref()
+            .and_then(|inner| inner.label.clone())
+            .or_else(|| {
+                let file_name = Path::new(args.last()?).file_name()?;
+                Some(file_name.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| name.clone()),
+    };
     RestoringApplet::initializer(saved, format!("{label} (inactive)"))
 }
 
