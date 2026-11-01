@@ -218,6 +218,7 @@ impl AppletRunner {
             self.window_size = screen_size;
             self.smithay_state.resize_output(screen_size);
             self.smithay_state.arrange_layers();
+            self.smithay_state.resize_fullscreen();
 
             // the root is sent the size of its area instead
             event = UIEvent::WindowResized(self.smithay_state.content_area().1);
@@ -231,7 +232,7 @@ impl AppletRunner {
                 self.needs_redraw = true;
             }
             // layer surfaces are above (or beside) the root
-            if self.layer_mouse(mouse_event) {
+            if self.layer_mouse(mouse_event) || self.fullscreen_mouse(*mouse_event) {
                 return;
             }
             // the root's area is offset by the exclusive zones
@@ -337,21 +338,36 @@ impl AppletRunner {
     }
 
     fn redraw_ui(&mut self) {
-        // background and bottom layers, the root's content in the area left by the exclusive zones,
-        // then top and overlay layers, then what's plucked
-        let (content_position, content_size) = self.smithay_state.content_area();
-        let mut layers = self.smithay_state.layer_surface_elements(
-            true,
-            &self.ui_handle.device,
-            &self.ui_handle.queue,
-        );
-        layers.push(UITree::new_container_styled(
-            Style::absolute(
-                content_position.map(|coord| coord as f32),
-                [content_size.width as f32, content_size.height as f32],
-            ),
-            vec![self.root_client.get_surface()],
-        ));
+        // background and bottom layers, the root's content in the area left by the exclusive zones
+        // (or a fullscreen toplevel over the whole window instead of them),
+        // then top (unless fullscreen) and overlay layers, then what's plucked
+        let mut layers = if let Some(surface_id) = self.smithay_state.fullscreen() {
+            vec![UITree::leaf_styled(
+                UIElement::Subsurface(surface_id.as_u64()),
+                Style::absolute(
+                    [0.0, 0.0],
+                    [
+                        self.window_size.width as f32,
+                        self.window_size.height as f32,
+                    ],
+                ),
+            )]
+        } else {
+            let (content_position, content_size) = self.smithay_state.content_area();
+            let mut layers = self.smithay_state.layer_surface_elements(
+                true,
+                &self.ui_handle.device,
+                &self.ui_handle.queue,
+            );
+            layers.push(UITree::new_container_styled(
+                Style::absolute(
+                    content_position.map(|coord| coord as f32),
+                    [content_size.width as f32, content_size.height as f32],
+                ),
+                vec![self.root_client.get_surface()],
+            ));
+            layers
+        };
         layers.extend(self.smithay_state.layer_surface_elements(
             false,
             &self.ui_handle.device,

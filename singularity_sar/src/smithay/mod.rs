@@ -37,10 +37,11 @@ use smithay::{
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind as PresentationFeedbackKind,
     reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
+    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     reexports::wayland_server::{
         Client, Display, DisplayHandle, Resource as _,
         backend::ClientData,
-        protocol::{wl_seat::WlSeat, wl_surface::WlSurface},
+        protocol::{wl_output::WlOutput, wl_seat::WlSeat, wl_surface::WlSurface},
     },
     utils::{
         Buffer as BufferCoords, Clock, Logical, Monotonic, Physical, Point, Rectangle,
@@ -189,6 +190,9 @@ pub struct SmithayState {
     layer_focus: Option<WlSurface>,
     /// The tile that Sonamu focus asked the keyboard to be on
     pub(crate) wl_target: Option<WlSurfaceId>,
+    /// The fullscreen toplevel, and its tile's size to go back to.
+    /// Drawn over everything but overlay layers, until it asks to stop or Sonamu focus leaves it (#121).
+    fullscreen: Option<(WlSurfaceId, Size<i32, Logical>)>,
     /// The pointer is on a layer surface, or a button pressed on one is still held
     pointer_on_layer: bool,
     layer_buttons_down: u32,
@@ -211,6 +215,40 @@ impl SmithayState {
         if let Some(queue) = self.wl_event_queues.get(surface_id) {
             // the applet may be gone
             let _ = queue.send(event);
+        }
+    }
+
+    fn surface_id_of(&self, surface: &WlSurface) -> Option<WlSurfaceId> {
+        self.surfaces
+            .iter()
+            .find_map(|(id, registered)| (registered == surface).then_some(id))
+    }
+
+    /// The whole output (the Sonamu window), in logical units
+    fn output_size(&self) -> Option<Size<i32, Logical>> {
+        let mode = self.output.current_mode()?;
+        Some(self.to_logical(DisplayContainerSize::new(
+            mode.size.w.cast_unsigned(),
+            mode.size.h.cast_unsigned(),
+        )))
+    }
+
+    pub fn fullscreen(&self) -> Option<WlSurfaceId> {
+        self.fullscreen.map(|(surface_id, _)| surface_id)
+    }
+
+    /// Keeps the fullscreen toplevel at the window's size
+    pub fn resize_fullscreen(&self) {
+        let Some(toplevel) = self
+            .fullscreen()
+            .and_then(|surface_id| self.surfaces.get(surface_id))
+            .and_then(|surface| self.toplevel_of(surface))
+        else {
+            return;
+        };
+        if let Some(size) = self.output_size() {
+            toplevel.with_pending_state(|state| state.size = Some(size));
+            toplevel.send_configure();
         }
     }
 
@@ -388,6 +426,13 @@ impl SmithayState {
             .change_current_state(None, None, Some(Scale::Fractional(self.scale)), None);
 
         if old_scale != self.scale {
+            if let Some((_, size)) = &mut self.fullscreen {
+                *size = size
+                    .to_f64()
+                    .to_physical(old_scale)
+                    .to_logical(self.scale)
+                    .to_i32_round();
+            }
             for toplevel in self.xdg_shell_state.toplevel_surfaces() {
                 // same px size, in the new logical units
                 toplevel.with_pending_state(|state| {
@@ -667,6 +712,7 @@ impl SmithayState {
             usable_area: Rectangle::default(),
             layer_focus: None,
             wl_target: None,
+            fullscreen: None,
             pointer_on_layer: false,
             layer_buttons_down: 0,
             wl_request_queue,
@@ -712,22 +758,24 @@ impl SmithayState {
                             };
 
                             let size = state.smithay_state.to_logical(new_size);
-                            toplevel.with_pending_state(|toplevel_state| {
-                                toplevel_state.size = Some(size);
-                            });
-                            toplevel.send_configure();
+                            // kept for when it stops being fullscreen
+                            match &mut state.smithay_state.fullscreen {
+                                Some((surface_id, tile_size))
+                                    if *surface_id == target_surface_id =>
+                                {
+                                    *tile_size = size;
+                                }
+                                _ => {
+                                    toplevel.with_pending_state(|toplevel_state| {
+                                        toplevel_state.size = Some(size);
+                                    });
+                                    toplevel.send_configure();
+                                }
+                            }
                         }
-                        WlSurfaceRequest::Mouse(MouseEvent {
-                            position,
-                            kind,
-                            time_msec,
-                        }) => {
-                            // Motion first so the pointer is focused on the surface under it.
-                            // `position` is already relative to the tile, which is where the root is drawn
-                            let location = Point::<f64, Physical>::from((position[0], position[1]))
-                                .to_logical(state.smithay_state.scale);
-                            let focus = SmithayState::surface_under(&target_surface, location);
-                            state.send_wl_mouse(location, focus, kind, time_msec);
+                        // `position` is already relative to the tile
+                        WlSurfaceRequest::Mouse(mouse_event) => {
+                            state.tile_mouse(&target_surface, mouse_event);
                         }
                     }
 
@@ -1541,6 +1589,34 @@ impl ShmHandler for AppletRunner {
     }
 }
 
+/// Like niri for tiled windows: tells CSD clients (eg GTK) to drop shadows and rounded corners
+const TILED: [xdg_toplevel::State; 4] = [
+    xdg_toplevel::State::TiledLeft,
+    xdg_toplevel::State::TiledRight,
+    xdg_toplevel::State::TiledTop,
+    xdg_toplevel::State::TiledBottom,
+];
+
+/// Tells the toplevel it is fullscreen, or tiled, at `size`
+fn configure_fullscreen(toplevel: &ToplevelSurface, fullscreen: bool, size: Size<i32, Logical>) {
+    toplevel.with_pending_state(|state| {
+        state.size = Some(size);
+        if fullscreen {
+            state.states.set(xdg_toplevel::State::Fullscreen);
+        } else {
+            state.states.unset(xdg_toplevel::State::Fullscreen);
+        }
+        for tiled in TILED {
+            if fullscreen {
+                state.states.unset(tiled);
+            } else {
+                state.states.set(tiled);
+            }
+        }
+    });
+    toplevel.send_configure();
+}
+
 impl XdgShellHandler for AppletRunner {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
         &mut self.smithay_state.xdg_shell_state
@@ -1549,17 +1625,14 @@ impl XdgShellHandler for AppletRunner {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         dbg!("Handling new toplevel surface");
         surface.with_pending_state(|state| {
-            use wayland_protocols::xdg::shell::server::xdg_toplevel::State;
             state.size = Some((800, 600).into());
-            // like niri for tiled windows: tells CSD clients (eg GTK) to drop shadows and rounded corners
-            for tiled in [
-                State::TiledLeft,
-                State::TiledRight,
-                State::TiledTop,
-                State::TiledBottom,
-            ] {
+            for tiled in TILED {
                 state.states.set(tiled);
             }
+            // else clients may hide their fullscreen buttons
+            state
+                .capabilities
+                .set(xdg_toplevel::WmCapabilities::Fullscreen);
         });
         surface.send_configure();
         self.smithay_state.output.enter(surface.wl_surface());
@@ -1596,6 +1669,20 @@ impl XdgShellHandler for AppletRunner {
         }
     }
 
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {
+        // there is only one output
+        self.set_fullscreen(&surface);
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        let surface_id = self.smithay_state.surface_id_of(surface.wl_surface());
+        if surface_id.is_some() && surface_id == self.smithay_state.fullscreen() {
+            self.unset_fullscreen();
+        } else {
+            surface.send_configure();
+        }
+    }
+
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         // Without this the slotmap keeps a dead `WlSurface` forever
         let wl_surface = surface.wl_surface();
@@ -1608,6 +1695,9 @@ impl XdgShellHandler for AppletRunner {
             return;
         };
         self.smithay_state.surfaces.remove(surface_id);
+        if self.smithay_state.fullscreen() == Some(surface_id) {
+            self.smithay_state.fullscreen = None;
+        }
         let wl_event_queue = self.smithay_state.wl_event_queues.remove(surface_id);
         // the root never heard of it
         if let Some(index) = self
@@ -1868,6 +1958,12 @@ impl AppletRunner {
     /// Follows Sonamu focus; `None` (or a stale id) clears keyboard focus
     pub(crate) fn focus_wl_keyboard(&mut self, surface_id: Option<WlSurfaceId>) {
         self.smithay_state.wl_target = surface_id;
+        // Sonamu focus left the fullscreen tile (eg traversing, so the treeview shows)
+        if self.smithay_state.fullscreen().is_some()
+            && self.smithay_state.fullscreen() != surface_id
+        {
+            self.unset_fullscreen();
+        }
         // a layer surface that has the keyboard keeps it
         if let Some(layer) = self.smithay_state.keyboard_layer() {
             self.focus_wl_keyboard_on(layer);
@@ -1919,6 +2015,79 @@ impl AppletRunner {
         if !focus_in_toplevel {
             keyboard.set_focus(self, Some(toplevel), SERIAL_COUNTER.next_serial());
         }
+    }
+
+    /// Makes the toplevel fullscreen at the window's size (ending any other's), and focuses its tile
+    fn set_fullscreen(&mut self, toplevel: &ToplevelSurface) {
+        let state = &mut self.smithay_state;
+        let (Some(surface_id), Some(size)) = (
+            state.surface_id_of(toplevel.wl_surface()),
+            state.output_size(),
+        ) else {
+            toplevel.send_configure();
+            return;
+        };
+        if state.fullscreen() != Some(surface_id) {
+            self.unset_fullscreen();
+            let state = &mut self.smithay_state;
+            // the tile's size, from its last configure
+            let tile_size = toplevel
+                .with_pending_state(|state| state.size)
+                .unwrap_or(size);
+            state.fullscreen = Some((surface_id, tile_size));
+            if state.wl_target != Some(surface_id) {
+                state.send_wl_event(surface_id, WlSurfaceEvent::Focus);
+            }
+        }
+        configure_fullscreen(toplevel, true, size);
+        self.needs_redraw = true;
+    }
+
+    /// The fullscreen toplevel goes back to its tile
+    fn unset_fullscreen(&mut self) {
+        let state = &mut self.smithay_state;
+        let Some((surface_id, tile_size)) = state.fullscreen.take() else {
+            return;
+        };
+        if let Some(toplevel) = state
+            .surfaces
+            .get(surface_id)
+            .and_then(|surface| state.toplevel_of(surface))
+        {
+            configure_fullscreen(&toplevel, false, tile_size);
+        }
+        self.needs_redraw = true;
+    }
+
+    /// Sends the mouse event (in px from the tile's corner) to the toplevel's surface under it
+    fn tile_mouse(
+        &mut self,
+        toplevel: &WlSurface,
+        MouseEvent {
+            position,
+            kind,
+            time_msec,
+        }: MouseEvent,
+    ) {
+        // Motion first so the pointer is focused on the surface under it
+        let location = Point::<f64, Physical>::from((position[0], position[1]))
+            .to_logical(self.smithay_state.scale);
+        let focus = SmithayState::surface_under(toplevel, location);
+        self.send_wl_mouse(location, focus, kind, time_msec);
+    }
+
+    /// Sends the mouse event (in window px) to the fullscreen toplevel, which is over the root.
+    /// Returns false if there is none.
+    pub(crate) fn fullscreen_mouse(&mut self, event: MouseEvent) -> bool {
+        let Some(surface) = self
+            .smithay_state
+            .fullscreen()
+            .and_then(|surface_id| self.smithay_state.surfaces.get(surface_id).cloned())
+        else {
+            return false;
+        };
+        self.tile_mouse(&surface, event);
+        true
     }
 
     /// Moves the pointer to `location` (focused on `focus` and its origin, same coordinates), then sends the event

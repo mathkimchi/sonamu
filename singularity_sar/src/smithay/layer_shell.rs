@@ -209,6 +209,8 @@ impl SmithayState {
             .rev()
             .filter(|placement| {
                 matches!(placement.layer, Layer::Background | Layer::Bottom) == below
+                    // under the fullscreen toplevel
+                    && !(self.fullscreen.is_some() && placement.layer == Layer::Top)
             })
             .map(|placement| {
                 let layers = Self::layer_tree_layers(placement);
@@ -248,6 +250,10 @@ impl SmithayState {
         let in_content = self.usable_area.to_f64().contains(point);
         self.layer_placements.iter().find_map(|placement| {
             if in_content && matches!(placement.layer, Layer::Background | Layer::Bottom) {
+                return None;
+            }
+            // only overlay layers are over a fullscreen toplevel
+            if self.fullscreen.is_some() && placement.layer != Layer::Overlay {
                 return None;
             }
             Self::layer_tree_layers(placement)
