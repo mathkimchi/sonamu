@@ -132,6 +132,21 @@ Moving focus is recursive too:
   and from then on keys go to its main, which moves focus inside its own world.
 - `Inner` + `Parent`/`PrevLayer` (from the main) makes the node `Focusing` again: the inner root is the node's own row.
 
+## Screens (#60)
+
+- The root's tree is shown on every screen (`StandardEvent::Screens`), each with its own focus, view root
+  (`NodeTree`) and view layer and treeview state (`RootNodeApplet`). The **active** screen's are the usual fields
+  (nodes' `FocusIndex`, `view_root`, `panes`, ...); the others are kept in `screens` and swapped in by
+  `activate_screen`, which puts focus back on the node it was left on (`NodeTree::activate_screen`).
+- An inactive screen shows the panes toward its focus (`displayed_node_toward`), with no focus border, and the
+  treeview only if pinned. The pointer moving onto a screen makes it active (not during a drag).
+- An applet shown on several screens is sized to the active screen's pane (else the first), and drawn as is on the others.
+- A fullscreen toplevel covers only its screen, and stays while focus goes to another screen with the pointer.
+- Known gaps: focus *inside* an applet (eg a project) is the applet's own, so it is shared by screens showing it;
+  only the active screen's focus is saved in the session; one wl output and layer-shell area spans every screen
+  (so dms' bar spans them all); no keybind to move between screens; screen capture is off with several monitors;
+  monitors are always side by side, top aligned, at scale 1.
+
 ## What a client publishes (`Treeview`, `sap::packets`)
 
 Every client publishes, through its treeview `SharedState`:

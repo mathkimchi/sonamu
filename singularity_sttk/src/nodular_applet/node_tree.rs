@@ -213,6 +213,21 @@ pub struct NodeTree {
     /// Only its subtree is shown (panes and treeview), as if it were the root.
     /// Focus always stays inside it: when focus leaves, it widens to the ancestor that has the focus.
     view_root: NodeId,
+
+    /// Every screen showing the tree, each with its own focus and view root (#60); only the root's has several.
+    /// The active one's are the fields above (`latest_size`, `panes`, `view_root` and the nodes' focus),
+    /// so its entry is stale.
+    screens: Vec<Screen>,
+    active_screen: usize,
+}
+
+/// A screen showing the tree, as it was left when another became active
+struct Screen {
+    size: Option<DisplayContainerSize>,
+    panes: Vec<Pane>,
+    /// The focused node, and whether focus is inside its main
+    focus: (NodeId, bool),
+    view_root: NodeId,
 }
 
 /// A node shown on screen, at `rect` (`[x, y, width, height]`, border included) of the tree's area
@@ -291,9 +306,17 @@ impl NodeTree {
             escaped: None,
             keybind_request: None,
             view_root: NodeId::default(),
+            screens: Vec::new(),
+            active_screen: 0,
         };
         tree.root = insert_root(&mut tree);
         tree.view_root = tree.root;
+        tree.screens.push(Screen {
+            size: None,
+            panes: Vec::new(),
+            focus: (tree.root, false),
+            view_root: tree.root,
+        });
         tree
     }
 
@@ -1034,16 +1057,120 @@ impl NodeTree {
         }
     }
 
-    /// The view root's path in the node tree
-    pub fn view_root_path(&self) -> TreeNodePath {
-        self.path_of(self.view_root)
+    /// The screen's view root (as of the last `update_layout` for an inactive one)
+    fn screen_view_root(&self, screen: usize) -> NodeId {
+        if screen == self.active_screen {
+            return self.view_root;
+        }
+        self.screens
+            .get(screen)
+            .map(|screen| screen.view_root)
+            .filter(|&id| self.nodes.contains_key(id))
+            .unwrap_or(self.root)
+    }
+
+    /// The screen's view root's path in the node tree
+    pub fn view_root_path(&self, screen: usize) -> TreeNodePath {
+        self.path_of(self.screen_view_root(screen))
             .unwrap_or_else(TreeNodePath::new_root)
     }
 
-    /// The view root's parent: its path and label
-    pub fn view_parent(&self) -> Option<(TreeNodePath, String)> {
-        let parent = self.nodes[self.view_root].parent?;
+    /// The screen's view root's parent: its path and label
+    pub fn view_parent(&self, screen: usize) -> Option<(TreeNodePath, String)> {
+        let parent = self.nodes[self.screen_view_root(screen)].parent?;
         Some((self.path_of(parent)?, self.label(parent)))
+    }
+
+    /// Where the screen's focus is: `get_focus_path` for the active one,
+    /// else the node it was left on (and its main's root, if inside it)
+    pub fn screen_focus_path(&self, screen: usize) -> WorldTreePath {
+        if screen == self.active_screen {
+            return self.get_focus_path();
+        }
+        let Some(&Screen {
+            focus: (id, inner), ..
+        }) = self.screens.get(screen)
+        else {
+            return WorldTreePath::new_into();
+        };
+        let mut path = vec![self.path_of(id).unwrap_or_else(TreeNodePath::new_root)];
+        if inner {
+            path.push(TreeNodePath::new_root());
+        }
+        WorldTreePath(path.into_boxed_slice())
+    }
+
+    pub const fn active_screen(&self) -> usize {
+        self.active_screen
+    }
+
+    /// Adds or removes screens; new ones start with the active one's focus and view root
+    pub fn set_screen_count(&mut self, count: usize) {
+        let count = count.max(1);
+        if self.active_screen >= count {
+            self.activate_screen(count - 1);
+        }
+        let focused = self.focused_node();
+        let focus = (focused, self.is_inner(focused));
+        let view_root = self.view_root;
+        self.screens.resize_with(count, || Screen {
+            size: None,
+            panes: Vec::new(),
+            focus,
+            view_root,
+        });
+        self.damaged = true;
+    }
+
+    /// The screen's size, `WindowResized` for the active one
+    pub fn resize_screen(&mut self, screen: usize, size: DisplayContainerSize) {
+        if screen == self.active_screen {
+            self.handle_event(StandardEvent::UIEvent(UIEvent::WindowResized(size)));
+        } else if let Some(screen) = self.screens.get_mut(screen)
+            && screen.size != Some(size)
+        {
+            screen.size = Some(size);
+            self.damaged = true;
+        }
+    }
+
+    /// Keys and the treeview go to the screen from now on: focus goes back where it was left on it
+    /// (inside an applet, where the applet's own focus is now)
+    pub fn activate_screen(&mut self, screen: usize) {
+        if screen == self.active_screen || screen >= self.screens.len() {
+            return;
+        }
+        let focused = self.focused_node();
+        let left = Screen {
+            size: self.latest_size,
+            panes: std::mem::take(&mut self.panes),
+            focus: (focused, self.is_inner(focused)),
+            view_root: self.view_root,
+        };
+        let Screen {
+            size,
+            panes,
+            focus: (id, inner),
+            view_root,
+        } = std::mem::replace(&mut self.screens[screen], left);
+        self.screens.swap(screen, self.active_screen);
+        self.active_screen = screen;
+        self.latest_size = size;
+        self.panes = panes;
+        self.pointer_grab = None;
+        self.view_root = Some(view_root)
+            .filter(|&id| self.nodes.contains_key(id))
+            .unwrap_or(self.root);
+        if self.contains(self.view_root, id) {
+            self.focus(id, inner && self.has_main(id));
+            self.wake_focused();
+        }
+        self.damaged = true;
+    }
+
+    /// Whether a pane has the pointer until a button is released
+    pub const fn has_pointer_grab(&self) -> bool {
+        self.pointer_grab.is_some()
     }
 
     pub fn children(&self, id: NodeId) -> &[NodeId] {
@@ -1415,9 +1542,24 @@ impl NodeTree {
     }
 
     /// The node `id` shows: following focused children, but stopping at splits, which show every pane
-    fn displayed_node(&self, mut id: NodeId) -> NodeId {
+    fn displayed_node(&self, id: NodeId) -> NodeId {
+        self.displayed_node_toward(id, self.focused_node())
+    }
+
+    /// Like `displayed_node`, but following the children `focus` is under
+    /// (another screen's focus, which the nodes' own focus doesn't point to)
+    fn displayed_node_toward(&self, mut id: NodeId, focus: NodeId) -> NodeId {
         loop {
             let node = &self.nodes[id];
+            if matches!(node.layout, Layout::Single)
+                && let Some(&child) = node
+                    .children
+                    .iter()
+                    .find(|&&child| self.contains(child, focus))
+            {
+                id = child;
+                continue;
+            }
             match (node.layout, node.focus) {
                 (Layout::Single, FocusIndex::Child(index)) => id = node.children[index],
                 // a container has nothing of its own to show
@@ -1440,17 +1582,64 @@ impl NodeTree {
         Some((node.main.as_ref()?.get_surface(), node.size?))
     }
 
-    /// Works out what is on screen, and resizes the shown applets to their panes
+    /// Works out what is on screen, and resizes the shown applets to their panes.
+    /// An applet on several screens gets the active one's pane, else the first one's.
     pub fn update_layout(&mut self) {
-        let Some(size) = self.latest_size else {
-            return;
-        };
+        let mut shown = Vec::new();
+        if let Some(size) = self.latest_size {
+            let panes = self.layout(self.view_root, self.focused_node(), size);
+            for pane in &panes {
+                self.resize(pane.node, pane.inner_size());
+            }
+            if self
+                .pointer_grab
+                .is_some_and(|id| !panes.iter().any(|pane| pane.node == id))
+            {
+                self.pointer_grab = None;
+            }
+            shown.extend(panes.iter().map(|pane| pane.node));
+            self.panes = panes;
+        }
+        for index in 0..self.screens.len() {
+            if index == self.active_screen {
+                continue;
+            }
+            // its nodes may have gone meanwhile
+            let screen = &self.screens[index];
+            let view_root = Some(screen.view_root)
+                .filter(|&id| self.nodes.contains_key(id))
+                .unwrap_or(self.root);
+            let focus = Some(screen.focus.0)
+                .filter(|&id| self.contains(view_root, id))
+                .unwrap_or(view_root);
+            let Some(size) = screen.size else {
+                continue;
+            };
+            let panes = self.layout(view_root, focus, size);
+            for pane in &panes {
+                if !shown.contains(&pane.node) {
+                    self.resize(pane.node, pane.inner_size());
+                    shown.push(pane.node);
+                }
+            }
+            let screen = &mut self.screens[index];
+            screen.view_root = view_root;
+            if screen.focus.0 != focus {
+                screen.focus = (focus, false);
+            }
+            screen.panes = panes;
+        }
+    }
+
+    /// The panes showing `view_root` at `size`, with focus on `focus`
+    fn layout(&self, view_root: NodeId, focus: NodeId, size: DisplayContainerSize) -> Vec<Pane> {
         let settings = settings::get();
         let gap = settings.gap.round() as u32;
         let border = settings.border.width.round() as u32;
         let mut panes = Vec::new();
         self.push_panes(
-            self.view_root,
+            view_root,
+            focus,
             [
                 gap,
                 gap,
@@ -1479,27 +1668,19 @@ impl NodeTree {
                 pane.framed = false;
             }
         }
-        for pane in &panes {
-            self.resize(pane.node, pane.inner_size());
-        }
-        if self
-            .pointer_grab
-            .is_some_and(|id| !panes.iter().any(|pane| pane.node == id))
-        {
-            self.pointer_grab = None;
-        }
-        self.panes = panes;
+        panes
     }
 
     /// Splits leave `gap` between their children
     fn push_panes(
         &self,
         id: NodeId,
+        focus: NodeId,
         rect: [u32; 4],
         [gap, border]: [u32; 2],
         panes: &mut Vec<Pane>,
     ) {
-        let id = self.displayed_node(id);
+        let id = self.displayed_node_toward(id, focus);
         let node = &self.nodes[id];
         let Layout::Split(axis) = node.layout else {
             panes.push(Pane {
@@ -1526,21 +1707,35 @@ impl NodeTree {
                 Axis::Horizontal => [x + start, y, end - start, height],
                 Axis::Vertical => [x, y + start, width, end - start],
             };
-            self.push_panes(child, child_rect, [gap, border], panes);
+            self.push_panes(child, focus, child_rect, [gap, border], panes);
         }
     }
 
     /// Every pane, bordered unless it is the only one; the focused one's border shows whether focus is inside it
     pub fn get_window(&self) -> UITree {
-        let focused = self.focused_node();
+        self.window(&self.panes, Some(self.focused_node()))
+    }
+
+    /// Like `get_window`, for the screen (an inactive one shows no focus)
+    pub fn get_screen_window(&self, screen: usize) -> UITree {
+        if screen == self.active_screen {
+            return self.get_window();
+        }
+        self.screens.get(screen).map_or_else(
+            || UITree::leaf(UIElement::Nothing),
+            |screen| self.window(&screen.panes, None),
+        )
+    }
+
+    fn window(&self, panes: &[Pane], focused: Option<NodeId>) -> UITree {
         let settings = settings::get();
-        let panes = self
-            .panes
+        let panes = panes
             .iter()
+            .filter(|pane| self.nodes.contains_key(pane.node))
             .map(|pane| {
                 let node = &self.nodes[pane.node];
                 let border = match node.focus {
-                    _ if pane.node != focused => settings.border.unfocused,
+                    _ if Some(pane.node) != focused => settings.border.unfocused,
                     FocusIndex::Inner => settings.border.focused,
                     _ => settings.palette.accent,
                 };
@@ -1565,9 +1760,9 @@ impl NodeTree {
         UITree::new_container(panes)
     }
 
-    /// The view root's subtree; its root is at `view_root_path`
-    pub fn get_view_treeview(&self) -> WorldTree<String> {
-        self.get_treeview_of(self.view_root)
+    /// The screen's view root's subtree; its root is at `view_root_path`
+    pub fn get_view_treeview(&self, screen: usize) -> WorldTree<String> {
+        self.get_treeview_of(self.screen_view_root(screen))
     }
 
     pub fn get_treeview(&self) -> WorldTree<String> {

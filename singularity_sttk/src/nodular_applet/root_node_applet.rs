@@ -72,6 +72,18 @@ pub struct RootNodeApplet {
     session_path: Option<PathBuf>,
     /// The last one written, so unchanged ones aren't written again
     saved_session: Option<Session>,
+    /// Every screen (#60), each with its own focus (see `NodeTree::activate_screen`).
+    /// The active one's view is the fields above (`latest_size`, `view_layer`, `treeview_pointer`).
+    screens: Vec<Screen>,
+}
+
+/// A screen, in the root's area. While inactive it keeps its view, and shows the treeview only if pinned.
+#[derive(Default)]
+struct Screen {
+    /// `[x, y, width, height]`
+    rect: [u32; 4],
+    view_layer: Option<WorldTreePath>,
+    treeview_pointer: TreeviewPointer,
 }
 
 /// Where the treeview is
@@ -97,50 +109,17 @@ impl RootNodeApplet {
     /// Where the treeview is drawn (`[x, y, width, height]`, frame included), and how;
     /// `None` while hidden
     fn treeview_area(&self, settings: &Settings) -> Option<([u32; 4], TreeviewPlace)> {
-        if !self.treeview_shown {
-            return None;
-        }
-        let DisplayContainerSize { width, height } = self.latest_size;
-        let side = settings.treeview.side;
-        let column = width * settings.treeview.width.min(100) / 100;
-        let column_x = match side {
-            TreeviewSide::Left => 0,
-            TreeviewSide::Right => width - column,
-        };
-        if self.treeview_pinned {
-            return Some(([column_x, 0, column, height], TreeviewPlace::Column(side)));
-        }
-        let area = match settings.treeview.floating {
-            TreeviewFloating::Center => {
-                let [w, h] = settings.treeview.floating_size;
-                let [w, h] = [width * w.min(100) / 100, height * h.min(100) / 100];
-                [(width - w) / 2, (height - h) / 2, w, h]
-            }
-            // in the column's place, with the gap all around
-            TreeviewFloating::Side => {
-                let gap = settings.gap.round() as u32;
-                [
-                    column_x + gap,
-                    gap,
-                    column.saturating_sub(2 * gap),
-                    height.saturating_sub(2 * gap),
-                ]
-            }
-        };
-        Some((area, TreeviewPlace::Floating))
+        treeview_area(
+            settings,
+            self.latest_size,
+            self.treeview_shown,
+            self.treeview_pinned,
+        )
     }
 
     /// The applets' area's left edge and width: beside a treeview column, else everything
     fn applet_area(&self, settings: &Settings) -> [u32; 2] {
-        match self.treeview_area(settings) {
-            Some(([_, _, width, _], TreeviewPlace::Column(TreeviewSide::Left))) => {
-                [width, self.latest_size.width - width]
-            }
-            Some(([_, _, width, _], TreeviewPlace::Column(TreeviewSide::Right))) => {
-                [0, self.latest_size.width - width]
-            }
-            Some((_, TreeviewPlace::Floating)) | None => [0, self.latest_size.width],
-        }
+        applet_area(self.treeview_area(settings), self.latest_size)
     }
 
     fn inner_applet_size(&self) -> DisplayContainerSize {
@@ -172,42 +151,120 @@ impl RootNodeApplet {
                     self.inner_applet_size(),
                 )));
         }
+        self.resize_inactive_screens();
     }
 
-    /// Publishes the window if damaged and the runner read the last one
+    /// Publishes the window (every screen) if damaged and the runner read the last one
     fn flush_surface(&mut self) {
         let settings = settings::get();
-        let treeview_area = self.treeview_area(&settings);
-        let applet_area = self.applet_area(&settings);
-        let height = self.latest_size.height;
+        let shown = self.treeview_shown;
         let pinned = self.treeview_pinned;
         let Self {
             holder,
             treeview_pointer,
             view_layer,
+            screens,
             ..
         } = self;
+        let active = holder.tree.active_screen();
         self.surface.flush(
             || {
-                let [left, width] = applet_area.map(|length| length as f32);
-                let tree = UITree::new_container_styled(
-                    Style::absolute([left, 0.0], [width, height as f32]),
-                    vec![holder.tree.get_window()],
-                );
-                let mut window = vec![tree];
-                if let Some(area) = treeview_area {
-                    window.push(Self::get_treeview(
-                        &holder.tree,
-                        view_layer.as_ref(),
-                        treeview_pointer,
-                        area,
-                        pinned,
-                    ));
-                }
-                UITree::new_container(window)
+                let screens = screens.iter_mut().enumerate().map(|(index, screen)| {
+                    let [x, y, width, height] = screen.rect;
+                    let size = DisplayContainerSize::new(width, height);
+                    // the active one's view is the root's own
+                    let (shown, view_layer, treeview_pointer) = if index == active {
+                        (shown, &*view_layer, &mut *treeview_pointer)
+                    } else {
+                        (pinned, &screen.view_layer, &mut screen.treeview_pointer)
+                    };
+                    let treeview_area = treeview_area(&settings, size, shown, pinned);
+                    let [left, width] =
+                        applet_area(treeview_area, size).map(|length| length as f32);
+                    let mut window = vec![UITree::new_container_styled(
+                        Style::absolute([left, 0.0], [width, height as f32]),
+                        vec![holder.tree.get_screen_window(index)],
+                    )];
+                    if let Some(area) = treeview_area {
+                        window.push(Self::get_treeview(
+                            &holder.tree,
+                            index,
+                            view_layer.as_ref(),
+                            treeview_pointer,
+                            area,
+                            pinned,
+                        ));
+                    }
+                    UITree::new_container_styled(
+                        Style::absolute([x as f32, y as f32], [size.width as f32, height as f32]),
+                        window,
+                    )
+                });
+                UITree::new_container(screens.collect())
             },
             &self.request_sender,
         );
+    }
+
+    /// The screens' areas from the runner
+    fn set_screens(&mut self, rects: Vec<[u32; 4]>) {
+        if rects.is_empty() {
+            return;
+        }
+        // the active one may be gone
+        let active = self.holder.tree.active_screen().min(rects.len() - 1);
+        self.activate_screen(active);
+        self.holder.tree.set_screen_count(rects.len());
+        self.screens.resize_with(rects.len(), Screen::default);
+        for (screen, rect) in self.screens.iter_mut().zip(rects) {
+            screen.rect = rect;
+        }
+        let [_, _, width, height] = self.screens[active].rect;
+        self.latest_size = DisplayContainerSize::new(width, height);
+        self.surface.damage();
+        self.holder
+            .tree
+            .handle_event(StandardEvent::UIEvent(UIEvent::WindowResized(
+                self.inner_applet_size(),
+            )));
+        self.resize_inactive_screens();
+    }
+
+    /// Keys and the treeview go to the screen from now on (eg the pointer moved onto it)
+    fn activate_screen(&mut self, index: usize) {
+        let active = self.holder.tree.active_screen();
+        if index == active || index >= self.screens.len() {
+            return;
+        }
+        let left = &mut self.screens[active];
+        left.view_layer = self.view_layer.take();
+        left.treeview_pointer = std::mem::take(&mut self.treeview_pointer);
+        let screen = &mut self.screens[index];
+        self.view_layer = screen.view_layer.take();
+        self.treeview_pointer = std::mem::take(&mut screen.treeview_pointer);
+        let [_, _, width, height] = screen.rect;
+        self.latest_size = DisplayContainerSize::new(width, height);
+        self.holder.tree.activate_screen(index);
+        self.surface.damage();
+    }
+
+    /// Sends the inactive screens' applets' areas' sizes to the tree (the treeview shows on them only if pinned)
+    fn resize_inactive_screens(&mut self) {
+        let settings = settings::get();
+        let active = self.holder.tree.active_screen();
+        for (index, screen) in self.screens.iter().enumerate() {
+            if index == active {
+                continue;
+            }
+            let [_, _, width, height] = screen.rect;
+            let size = DisplayContainerSize::new(width, height);
+            let treeview_area =
+                treeview_area(&settings, size, self.treeview_pinned, self.treeview_pinned);
+            self.holder.tree.resize_screen(
+                index,
+                DisplayContainerSize::new(applet_area(treeview_area, size)[1], height),
+            );
+        }
     }
 
     fn send_request(&self, request: StandardRequest) {
@@ -295,6 +352,10 @@ impl RootNodeApplet {
             applet_area: [0, 800],
             session_path,
             saved_session,
+            screens: vec![Screen {
+                rect: [0, 0, 800, 600],
+                ..Screen::default()
+            }],
         }
     }
 
@@ -404,15 +465,8 @@ impl RootNodeApplet {
             return;
         }
         match event {
-            StandardEvent::UIEvent(UIEvent::WindowResized(size)) => {
-                self.latest_size = size;
-                self.surface.damage();
-                self.holder
-                    .tree
-                    .handle_event(StandardEvent::UIEvent(UIEvent::WindowResized(
-                        self.inner_applet_size(),
-                    )));
-            }
+            // the screens' areas follow
+            StandardEvent::UIEvent(UIEvent::WindowResized(_)) => {}
             StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)) => self.handle_mouse(mouse_event),
             StandardEvent::DamageAck(StateKind::Surface) => self.surface.ack(),
             // the treeview is drawn into the surface
@@ -434,7 +488,7 @@ impl RootNodeApplet {
             StandardEvent::ToggleCollapsed(path) => self.holder.toggle_collapsed(&path),
             StandardEvent::NodeAction(path, action) => self.holder.node_action(&path, action),
             StandardEvent::Capturing(_) => {}
-            StandardEvent::Screens(_) => {}
+            StandardEvent::Screens(rects) => self.set_screens(rects),
             // it reads the settings when it draws
             StandardEvent::SettingsChanged(_) => self.surface.damage(),
             // its tree is in the runner's directory
@@ -481,11 +535,30 @@ impl RootNodeApplet {
     }
 
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
+        // the screen under the pointer becomes active, unless a drag is going on
+        let [pointer_x, pointer_y] = mouse_event.position;
+        if !self.treeview_pointer.is_pressed()
+            && !self.holder.tree.has_pointer_grab()
+            && let Some(index) = self.screens.iter().position(|screen| {
+                let [x, y, width, height] = screen.rect.map(f64::from);
+                (x..x + width).contains(&pointer_x) && (y..y + height).contains(&pointer_y)
+            })
+        {
+            self.activate_screen(index);
+        }
+        // in the active screen's coords
+        let [x, y, ..] = self.screens[self.holder.tree.active_screen()].rect;
+        mouse_event.position = [pointer_x - f64::from(x), pointer_y - f64::from(y)];
+
         let settings = settings::get();
         let treeview_area = self.treeview_area(&settings);
         // a hidden treeview has no rows to hit
         let (rows, general) = if treeview_area.is_some() {
-            view_rows(&self.holder.tree, self.view_layer.as_ref())
+            view_rows(
+                &self.holder.tree,
+                self.view_layer.as_ref(),
+                self.holder.tree.active_screen(),
+            )
         } else {
             (Vec::new(), WorldTreePath::new_into())
         };
@@ -638,19 +711,20 @@ impl RootNodeApplet {
     /// The treeview at `area` with its pin button, framed like a pane with `always_frame` (a floating one always is)
     fn get_treeview(
         tree: &NodeTree,
+        screen: usize,
         view_layer: Option<&WorldTreePath>,
         treeview_pointer: &mut TreeviewPointer,
         (area, place): ([u32; 4], TreeviewPlace),
         pinned: bool,
     ) -> UITree {
-        let (rows, _) = view_rows(tree, view_layer);
+        let (rows, _) = view_rows(tree, view_layer, screen);
         let settings = settings::get();
         let ([x, y, width, height], border) = treeview_frame(&settings, area, place);
         let inner_width = width.saturating_sub(2 * border) as f32;
         let treeview = treeview_pointer.render(
             &rows,
             [inner_width, height.saturating_sub(2 * border) as f32],
-            &tree.get_focus_path(),
+            &tree.screen_focus_path(screen),
         );
         let size = close_width();
         let pin_button = UITree::leaf_styled(
@@ -678,6 +752,62 @@ impl RootNodeApplet {
             },
             vec![treeview, pin_button],
         )
+    }
+}
+
+/// Where the treeview is drawn on a screen of `size` (`[x, y, width, height]`, frame included), and how;
+/// `None` while hidden
+fn treeview_area(
+    settings: &Settings,
+    DisplayContainerSize { width, height }: DisplayContainerSize,
+    shown: bool,
+    pinned: bool,
+) -> Option<([u32; 4], TreeviewPlace)> {
+    if !shown {
+        return None;
+    }
+    let side = settings.treeview.side;
+    let column = width * settings.treeview.width.min(100) / 100;
+    let column_x = match side {
+        TreeviewSide::Left => 0,
+        TreeviewSide::Right => width - column,
+    };
+    if pinned {
+        return Some(([column_x, 0, column, height], TreeviewPlace::Column(side)));
+    }
+    let area = match settings.treeview.floating {
+        TreeviewFloating::Center => {
+            let [w, h] = settings.treeview.floating_size;
+            let [w, h] = [width * w.min(100) / 100, height * h.min(100) / 100];
+            [(width - w) / 2, (height - h) / 2, w, h]
+        }
+        // in the column's place, with the gap all around
+        TreeviewFloating::Side => {
+            let gap = settings.gap.round() as u32;
+            [
+                column_x + gap,
+                gap,
+                column.saturating_sub(2 * gap),
+                height.saturating_sub(2 * gap),
+            ]
+        }
+    };
+    Some((area, TreeviewPlace::Floating))
+}
+
+/// The applets' area's left edge and width on a screen of `size`: beside a treeview column, else everything
+fn applet_area(
+    treeview_area: Option<([u32; 4], TreeviewPlace)>,
+    size: DisplayContainerSize,
+) -> [u32; 2] {
+    match treeview_area {
+        Some(([_, _, width, _], TreeviewPlace::Column(TreeviewSide::Left))) => {
+            [width, size.width - width]
+        }
+        Some(([_, _, width, _], TreeviewPlace::Column(TreeviewSide::Right))) => {
+            [0, size.width - width]
+        }
+        Some((_, TreeviewPlace::Floating)) | None => [0, size.width],
     }
 }
 
@@ -726,6 +856,7 @@ fn treeview_frame(
 fn view_rows(
     tree: &NodeTree,
     view_layer: Option<&WorldTreePath>,
+    screen: usize,
 ) -> (Vec<TreeviewRow>, WorldTreePath) {
     if let Some(rows) = view_layer.and_then(|holder| inner_layer_rows(&tree.get_treeview(), holder))
     {
@@ -734,8 +865,12 @@ fn view_rows(
         general.push(TreeNodePath::new_root());
         return (rows, WorldTreePath(general.into_boxed_slice()));
     }
-    let base = tree.view_root_path();
-    let rows = treeview_rows(&tree.get_view_treeview(), &base, tree.view_parent());
+    let base = tree.view_root_path(screen);
+    let rows = treeview_rows(
+        &tree.get_view_treeview(screen),
+        &base,
+        tree.view_parent(screen),
+    );
     (rows, WorldTreePath(Box::new([base])))
 }
 

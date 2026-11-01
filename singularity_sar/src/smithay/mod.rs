@@ -1980,9 +1980,11 @@ impl AppletRunner {
     /// Follows Sonamu focus; `None` (or a stale id) clears keyboard focus
     pub(crate) fn focus_wl_keyboard(&mut self, surface_id: Option<WlSurfaceId>) {
         self.smithay_state.wl_target = surface_id;
-        // Sonamu focus left the fullscreen tile (eg traversing, so the treeview shows)
+        // Sonamu focus left the fullscreen tile (eg traversing, so the treeview shows),
+        // other than by the pointer going to another screen (#60)
         if self.smithay_state.fullscreen().is_some()
             && self.smithay_state.fullscreen() != surface_id
+            && self.on_fullscreen_screen(self.pointer_position)
         {
             self.unset_fullscreen();
         }
@@ -2099,7 +2101,7 @@ impl AppletRunner {
     /// Sends the mouse event (in window px) to the fullscreen toplevel, which is over the root on its screen.
     /// Returns false if there is none, or the pointer is on another screen.
     pub(crate) fn fullscreen_mouse(&mut self, mut event: MouseEvent) -> bool {
-        let (Some(surface), Some([x, y, width, height])) = (
+        let (Some(surface), Some([x, y, ..])) = (
             self.smithay_state
                 .fullscreen()
                 .and_then(|surface_id| self.smithay_state.surfaces.get(surface_id).cloned()),
@@ -2107,14 +2109,23 @@ impl AppletRunner {
         ) else {
             return false;
         };
-        let [x, y, width, height] = [x, y, width, height].map(f64::from);
-        let [pointer_x, pointer_y] = event.position;
-        if !((x..x + width).contains(&pointer_x) && (y..y + height).contains(&pointer_y)) {
+        if !self.on_fullscreen_screen(event.position) {
             return false;
         }
-        event.position = [pointer_x - x, pointer_y - y];
+        let [pointer_x, pointer_y] = event.position;
+        event.position = [pointer_x - f64::from(x), pointer_y - f64::from(y)];
         self.tile_mouse(&surface, event);
         true
+    }
+
+    /// Whether `position` (window px) is on the fullscreen toplevel's screen
+    pub(crate) fn on_fullscreen_screen(&self, [pointer_x, pointer_y]: [f64; 2]) -> bool {
+        self.smithay_state
+            .fullscreen_screen()
+            .is_some_and(|[x, y, width, height]| {
+                let [x, y, width, height] = [x, y, width, height].map(f64::from);
+                (x..x + width).contains(&pointer_x) && (y..y + height).contains(&pointer_y)
+            })
     }
 
     /// Moves the pointer to `location` (focused on `focus` and its origin, same coordinates), then sends the event

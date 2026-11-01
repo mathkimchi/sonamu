@@ -226,11 +226,12 @@ impl DrmDisplay {
                     .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::Drm {
                         fd: drm.as_fd().as_raw_fd(),
                         // Vulkan's display plane index, not a DRM plane id.
-                        // Mesa has one plane per acquired connector, so the first is ours.
+                        // Mesa has one plane per acquired connector, in the order they were acquired.
                         plane: std::env::var("SONAMU_VK_DISPLAY_PLANE")
                             .ok()
                             .and_then(|plane| plane.parse().ok())
-                            .unwrap_or(0),
+                            .unwrap_or(0)
+                            + outputs.len() as u32,
                         connector_id: connector.into(),
                         width,
                         height,

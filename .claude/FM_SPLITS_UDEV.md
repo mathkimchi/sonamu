@@ -95,7 +95,7 @@ is replaced by that pane (it sends `Unwrap`). Saved as the `split` spawner with 
 - **Approach: present the existing wgpu renderer directly to a monitor** via wgpu's `SurfaceTargetUnsafe::Drm`
   (Vulkan `VK_EXT_acquire_drm_display`), instead of smithay's DRM/GBM/GLES path. The whole renderer stays as is;
   the Vulkan driver does the modesetting and page flips. Cost: needs a Vulkan driver with that extension
-  (Mesa has it; NVIDIA's proprietary driver probably not), no hardware cursor, no multi-monitor, and VT switching
+  (Mesa has it; NVIDIA's proprietary driver probably not), no hardware cursor, and VT switching
   is best effort (below). The smithay-renderer route would mean rewriting the renderer, so I didn't.
 - New `sonamu_ui::winit_backend::drm::run_drm_display` (exported as `sonamu_ui::run_drm_display`), same arguments as
   `UIDisplay::run_display`. It lives under `winit_backend` because it reuses that module's private `WgpuData` and draw
@@ -103,8 +103,9 @@ is replaced by that pane (it sends `Unwrap`). Saved as the `split` spawner with 
 - **Selection**: `AppletRunner::run` runs on the TTY if neither `WAYLAND_DISPLAY` nor `DISPLAY` is set (like niri/anvil),
   or if `SONAMU_BACKEND=tty`; `SONAMU_BACKEND=winit` forces a window. On the TTY, wgpu is limited to Vulkan.
 - Session: smithay's `LibSeatSession` (logind or seatd); GPU: `udev::primary_gpu`, else the first GPU.
-  Monitor: the first connected connector at its preferred mode. Vulkan display plane index 0
-  (Mesa numbers planes by its connector list, which only has ours), overridable with `SONAMU_VK_DISPLAY_PLANE`.
+  Monitors: every connected connector at its preferred mode, side by side left to right (#60), each its own surface
+  drawing its part of the one scene (`UIDisplay::draw`'s `origin`). Vulkan display plane index = the output's index
+  (Mesa numbers planes by its acquired connectors, in order), offset by `SONAMU_VK_DISPLAY_PLANE`.
   wgpu matches the mode by exact refresh rate, so it's computed the way Mesa does (`vulkan_refresh_millihertz`).
 - Input: libinput (smithay's `LibinputInputBackend`) on the display thread, translated to the same `UIEvent`s as winit:
   xkb keymap from `XKB_DEFAULT_*`, key symbols from the keysym (so Ctrl+W is still `w`, not a control char),

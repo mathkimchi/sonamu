@@ -15,7 +15,7 @@ use sonamu_ui::{
     PointerGrab,
     display_units::DisplayContainerSize,
     ui_element::{PrimitiveScene, Style, UIElement, UITree},
-    ui_event::{KeyModifiers, KeySymbol, UIEvent},
+    ui_event::{KeyModifiers, KeySymbol, MouseEventKind, UIEvent},
 };
 
 /// The Singularity Applet Runner (SAR) is kind of just a wrapper around the Singularity UI.
@@ -271,13 +271,18 @@ impl AppletRunner {
         }
 
         if let UIEvent::Mouse(mouse_event) = &mut event {
+            let was_on_fullscreen = self.on_fullscreen_screen(self.pointer_position);
             self.pointer_position = mouse_event.position;
             // what's plucked follows the pointer
             if self.plucked.is_some() {
                 self.needs_redraw = true;
             }
             // layer surfaces are above (or beside) the root
-            if self.layer_mouse(mouse_event) || self.fullscreen_mouse(*mouse_event) {
+            if self.layer_mouse(mouse_event)
+                || (self.fullscreen_mouse(*mouse_event)
+                    // but the root still sees the pointer coming onto the screen, to make it active (#60)
+                    && (was_on_fullscreen || mouse_event.kind != MouseEventKind::Motion))
+            {
                 return;
             }
             // the root's area is offset by the exclusive zones
