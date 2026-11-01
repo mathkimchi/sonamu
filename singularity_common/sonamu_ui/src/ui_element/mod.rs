@@ -508,7 +508,10 @@ pub enum Cursor {
         rgba: Arc<[u8]>,
         width: u16,
         height: u16,
+        /// In image px
         hotspot: [u16; 2],
+        /// Image px per screen px (eg 2.0 for a scale 2 buffer on a scale 1 screen)
+        scale: f32,
     },
 }
 

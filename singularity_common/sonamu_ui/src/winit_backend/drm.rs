@@ -59,7 +59,9 @@ const SWIPE_DISTANCE: f64 = 50.0;
 /// A cursor uploaded to the GPU
 struct CursorImage {
     texture: wgpu::TextureView,
+    /// In screen px
     size: [u32; 2],
+    /// In screen px
     hotspot: [u32; 2],
 }
 
@@ -405,7 +407,7 @@ impl DrmDisplay {
 
     /// Uploads the cursor's image, `None` if it has none (or is hidden)
     fn load_cursor(&self, cursor: &Cursor) -> Option<CursorImage> {
-        let (rgba, size, hotspot) = match cursor {
+        let (rgba, size, hotspot, scale) = match cursor {
             Cursor::Hidden => return None,
             Cursor::Named(icon) => {
                 let image = self.load_theme_cursor(*icon).or_else(|| {
@@ -416,6 +418,7 @@ impl DrmDisplay {
                     image.pixels_rgba.into(),
                     [image.width, image.height],
                     [image.xhot, image.yhot],
+                    1.0,
                 )
             }
             Cursor::Custom {
@@ -423,10 +426,12 @@ impl DrmDisplay {
                 width,
                 height,
                 hotspot,
+                scale,
             } => (
                 rgba.clone(),
                 [u32::from(*width), u32::from(*height)],
                 hotspot.map(u32::from),
+                *scale,
             ),
         };
 
@@ -455,10 +460,13 @@ impl DrmDisplay {
             },
             texture.size(),
         );
+        // image px to screen px; the texture is stretched to the drawn size
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let to_screen = |px: [u32; 2]| px.map(|px| (px as f32 / scale).round() as u32);
         Some(CursorImage {
             texture: texture.create_view(&wgpu::TextureViewDescriptor::default()),
-            size,
-            hotspot,
+            size: to_screen(size).map(|px| px.max(1)),
+            hotspot: to_screen(hotspot),
         })
     }
 

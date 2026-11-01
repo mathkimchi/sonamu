@@ -853,7 +853,7 @@ impl SmithayState {
             CursorImageStatus::Hidden => Some(Cursor::Hidden),
             CursorImageStatus::Named(icon) => Some(Cursor::Named(*icon)),
             CursorImageStatus::Surface(surface) if surface.is_alive() => {
-                read_cursor_surface(surface)
+                read_cursor_surface(surface, self.scale)
             }
             CursorImageStatus::Surface(_) => None,
         }
@@ -1053,8 +1053,8 @@ fn window_geometry(surface: &WlSurface) -> Option<Rectangle<i32, Logical>> {
 }
 
 /// Copies a cursor surface's shm buffer into a custom cursor.
-/// Its subsurfaces are ignored, and the buffer is drawn at its own px (not rescaled).
-fn read_cursor_surface(surface: &WlSurface) -> Option<Cursor> {
+/// Its subsurfaces are ignored. `scale` is the screen's (screen px per logical px).
+fn read_cursor_surface(surface: &WlSurface, scale: f64) -> Option<Cursor> {
     let (buffer, buffer_scale, hotspot) = with_states(surface, |states| {
         let (buffer, buffer_scale) = {
             let surface_state = states
@@ -1112,6 +1112,7 @@ fn read_cursor_surface(surface: &WlSurface) -> Option<Cursor> {
                 u16::try_from(hotspot.x).ok()?,
                 u16::try_from(hotspot.y).ok()?,
             ],
+            scale: (f64::from(buffer_scale) / scale) as f32,
         })
     })
     .ok()

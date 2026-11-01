@@ -306,6 +306,8 @@ impl UIDisplay {
                 width,
                 height,
                 hotspot: [hotspot_x, hotspot_y],
+                // winit takes image px as is
+                scale: _,
             }) => match CustomCursorSource::from_rgba(
                 rgba.to_vec(),
                 *width,
