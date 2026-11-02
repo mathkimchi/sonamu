@@ -139,7 +139,7 @@ impl AppletRunner {
         if on_tty {
             Self::export_session_env(&smithay_state.socket_name);
         }
-        Self::spawn_shell(&smithay_state.socket_name);
+        Self::run_startup(&smithay_state.socket_name);
 
         let mut runner = Self::new(
             &event_loop.handle(),
@@ -188,14 +188,17 @@ impl AppletRunner {
         }
     }
 
-    /// Runs dms (the bar, launcher, etc) here
-    fn spawn_shell(socket_name: &std::ffi::OsStr) {
-        let result = std::process::Command::new("dms")
-            .arg("run")
-            .env("WAYLAND_DISPLAY", socket_name)
-            .spawn();
-        if let Err(err) = result {
-            eprintln!("Failed to run dms: {err}");
+    /// Runs the `startup` commands from the settings here (eg dms: the bar, launcher, etc)
+    fn run_startup(socket_name: &std::ffi::OsStr) {
+        for startup in &singularity_common::settings::get().startup {
+            let result = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(startup)
+                .env("WAYLAND_DISPLAY", socket_name)
+                .spawn();
+            if let Err(err) = result {
+                eprintln!("Failed to run {startup:?}: {err}");
+            }
         }
     }
 

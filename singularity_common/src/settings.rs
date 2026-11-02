@@ -38,6 +38,8 @@ pub struct Settings {
     pub keybinds: Vec<Keybind>,
     /// Programs restored running in their terminal (see `.claude/SESSIONS.md`)
     pub restore_programs: Vec<RestoreProgram>,
+    /// Shell commands run once when Sonamu starts (eg `dms run`)
+    pub startup: Vec<String>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -51,6 +53,7 @@ impl Default for Settings {
             treeview: TreeviewSettings::default(),
             keybinds: Vec::new(),
             restore_programs: Vec::new(),
+            startup: Vec::new(),
         }
     }
 }
