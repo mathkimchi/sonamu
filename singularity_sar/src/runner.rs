@@ -212,7 +212,9 @@ impl AppletRunner {
     /// Tells the root its size (the whole window), and the screens in it
     pub(crate) fn send_content_size(&mut self) {
         self.root_client
-            .send_event(StandardEvent::UIEvent(UIEvent::WindowResized(self.window_size)));
+            .send_event(StandardEvent::UIEvent(UIEvent::WindowResized(
+                self.window_size,
+            )));
         self.send_screens();
     }
 
@@ -250,12 +252,7 @@ impl AppletRunner {
         }
         // the output's origin is the main screen's
         let [x, y, ..] = screens[0];
-        screens[0] = [
-            x + left as u32,
-            y + top as u32,
-            size.width,
-            size.height,
-        ];
+        screens[0] = [x + left as u32, y + top as u32, size.width, size.height];
         self.root_client.send_event(StandardEvent::Screens(screens));
     }
 

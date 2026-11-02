@@ -579,8 +579,9 @@ impl RootNodeApplet {
             (Vec::new(), WorldTreePath::new_into())
         };
         // in the treeview's coords, inside its frame
-        let ([x, y, width, height], border) = treeview_area
-            .map_or(([0; 4], 0), |(area, place)| treeview_frame(&settings, area, place));
+        let ([x, y, width, height], border) = treeview_area.map_or(([0; 4], 0), |(area, place)| {
+            treeview_frame(&settings, area, place)
+        });
         let [x, y, width, height] = [x, y, width, height].map(f64::from);
         let [pointer_x, pointer_y] = mouse_event.position;
         let in_treeview = treeview_area.is_some()

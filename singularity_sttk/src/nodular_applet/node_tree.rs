@@ -930,7 +930,9 @@ impl NodeTree {
             return;
         };
         let stand_in = match treeview.saved {
-            Some(SavedApplet::Wl(_)) if !self.wl_surfaces.values().any(|&node_id| node_id == id) => {
+            Some(SavedApplet::Wl(_))
+                if !self.wl_surfaces.values().any(|&node_id| node_id == id) =>
+            {
                 return;
             }
             Some(saved @ SavedApplet::Wl(_)) => {

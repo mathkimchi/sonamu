@@ -993,7 +993,9 @@ impl SmithayState {
             .rev()
             .find(|layer| {
                 let point = point - layer.location.to_f64();
-                Rectangle::from_size(layer.view.dst).to_f64().contains(point)
+                Rectangle::from_size(layer.view.dst)
+                    .to_f64()
+                    .contains(point)
                     && with_states(&layer.surface, |states| {
                         states
                             .cached_state
@@ -1254,7 +1256,10 @@ fn read_cursor_surface(surface: &WlSurface, scale: f64) -> Option<Cursor> {
                 .get::<RendererSurfaceStateUserData>()?
                 .lock()
                 .unwrap();
-            (surface_state.buffer()?.clone(), surface_state.buffer_scale())
+            (
+                surface_state.buffer()?.clone(),
+                surface_state.buffer_scale(),
+            )
         };
         let hotspot = states
             .data_map

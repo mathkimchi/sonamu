@@ -810,10 +810,8 @@ impl FileManagerApplet {
                 self.set_pane(Pane::Document);
             }
             if let Some(document) = self.active_document() {
-                mouse_event.position = [
-                    x - f64::from(self.body_left()),
-                    y - f64::from(row_height()),
-                ];
+                mouse_event.position =
+                    [x - f64::from(self.body_left()), y - f64::from(row_height())];
                 document
                     .handle
                     .send_event(StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)));

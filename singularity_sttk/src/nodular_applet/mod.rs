@@ -465,7 +465,9 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         let _ = state.request_sender.send(NodeRequest::Close);
                     }
                 }
-                calloop::channel::Event::Msg(StandardEvent::Deactivate) => state.applet.deactivate(),
+                calloop::channel::Event::Msg(StandardEvent::Deactivate) => {
+                    state.applet.deactivate()
+                }
                 calloop::channel::Event::Msg(StandardEvent::WlSurfaceRegistered(surface)) => {
                     if let Err(surface) = state.applet.take_wl_surface(surface) {
                         let _ = state
