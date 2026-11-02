@@ -37,7 +37,7 @@ I am building Sonamu for personal use, but conceptually, I believe a standardize
 Run it from the tty or embedded inside another Wayland compositor with:
 
 ```sh
-sh scripts/runner.sh
+cargo run --release --bin sonamu_sde
 ```
 
 ## Current Stage of Sonamu
