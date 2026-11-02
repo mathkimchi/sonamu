@@ -131,15 +131,23 @@ impl AppletRunner {
             .ok();
         // SAFETY: nothing else runs yet (the display, root and applet threads start below)
         unsafe {
-            std::env::set_var("SONAMU_WAYLAND_DISPLAY", &smithay_state.socket_name);
+            std::env::set_var(
+                singularity_common::WAYLAND_DISPLAY_ENV,
+                &smithay_state.socket_name,
+            );
             if let Some(msg_socket) = &msg_socket {
                 std::env::set_var(msg::SOCKET_ENV, msg_socket.path());
             }
+            // So clients pick Wayland over X11 (there's no Xwayland): Qt, Electron's `auto`,
+            // and Nix-wrapped Electron/Chromium apps
+            std::env::set_var("XDG_SESSION_TYPE", "wayland");
+            std::env::set_var("ELECTRON_OZONE_PLATFORM_HINT", "auto");
+            std::env::set_var("NIXOS_OZONE_WL", "1");
         }
         if on_tty {
             Self::export_session_env(&smithay_state.socket_name);
         }
-        Self::run_startup(&smithay_state.socket_name);
+        Self::run_startup();
 
         let mut runner = Self::new(
             &event_loop.handle(),
@@ -189,13 +197,12 @@ impl AppletRunner {
     }
 
     /// Runs the `startup` commands from the settings here (eg dms: the bar, launcher, etc)
-    fn run_startup(socket_name: &std::ffi::OsStr) {
+    fn run_startup() {
         for startup in &singularity_common::settings::get().startup {
-            let result = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(startup)
-                .env("WAYLAND_DISPLAY", socket_name)
-                .spawn();
+            let result = singularity_common::connect_wl_client(
+                std::process::Command::new("sh").arg("-c").arg(startup),
+            )
+            .spawn();
             if let Err(err) = result {
                 eprintln!("Failed to run {startup:?}: {err}");
             }

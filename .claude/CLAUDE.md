@@ -28,6 +28,7 @@ DEVLOG.md is 10k+ lines, read it with tail.
 - Sessions: applets publish `StandardApplet::save` with their treeview; the root saves the tree every 2 s and restores it on start (wl clients by command line, matched back by pid/app id). See `.claude/SESSIONS.md`.
 - Settings (#63): JSON, or JSON printed by an executable settings program, live-reloaded. See `.claude/SETTINGS.md`.
 - Other processes reach the runner over `$SONAMU_SOCKET` (`singularity_common::msg`, `singularity_sar/src/msg_socket.rs`): `sonamu-msg open <applet> [args]` becomes `StandardEvent::Open` to the root, which places that registered applet like a new wl surface: into the focused applet if focus is inside it (`StandardApplet::take_open`, else `NodeRequest::Open` back), otherwise as the focused node's child (`NodeHolder::open`). `assets/sonamu-file-manager.desktop` makes the file manager the default for folders.
+- No Xwayland: the runner sets `XDG_SESSION_TYPE=wayland`, `ELECTRON_OZONE_PLATFORM_HINT=auto` and `NIXOS_OZONE_WL=1` in its own env at start, so clients inherit them. `WAYLAND_DISPLAY` can't be set that way (see `AppletRunner::run`), so each launch sets it from `SONAMU_WAYLAND_DISPLAY`.
 - Testing with input and screenshots without a monitor (headless sway): `.claude/TESTING.md`.
 - World tree, paths ("inside" a node), focus, selectors, and who owns what (incl. projects, which are plain applets holding a `NodeTree`): `.claude/WORLD_TREE.md`.
 

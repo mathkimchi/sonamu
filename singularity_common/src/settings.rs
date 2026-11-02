@@ -99,9 +99,7 @@ impl Keybind {
         let mut command = Command::new("sh");
         command.arg("-c").arg(&self.command);
         // connect wl clients (grim, swappy, ...) to Sonamu
-        if let Some(socket) = std::env::var_os("SONAMU_WAYLAND_DISPLAY") {
-            command.env("WAYLAND_DISPLAY", socket);
-        }
+        crate::connect_wl_client(&mut command);
         match command.spawn() {
             Ok(mut child) => {
                 // reap it
