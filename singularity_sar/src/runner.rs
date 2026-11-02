@@ -190,6 +190,8 @@ impl AppletRunner {
             .arg("XDG_CURRENT_DESKTOP=sonamu")
             // so programs D-Bus starts can reach `sonamu-msg`'s socket
             .arg(msg::SOCKET_ENV)
+            // so they prefer Wayland too (set in `run`)
+            .args(["XDG_SESSION_TYPE", "ELECTRON_OZONE_PLATFORM_HINT", "NIXOS_OZONE_WL"])
             .status();
         if !result.as_ref().is_ok_and(std::process::ExitStatus::success) {
             eprintln!("Failed to export the session env, so portals may not work: {result:?}");
