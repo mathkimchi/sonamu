@@ -72,9 +72,11 @@ use smithay::{
             data_device::{
                 DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
             },
+            ext_data_control,
             primary_selection::{
                 PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
             },
+            wlr_data_control,
         },
         shell::wlr_layer::{LayerSurface, WlrLayerShellState},
         shell::xdg::{
@@ -138,6 +140,8 @@ pub struct SmithayState {
     _output_manager_state: OutputManagerState,
     data_device_state: DataDeviceState,
     primary_selection_state: PrimarySelectionState,
+    ext_data_control_state: ext_data_control::DataControlState,
+    wlr_data_control_state: wlr_data_control::DataControlState,
     _xdg_decoration_state: XdgDecorationState,
     _idle_inhibit_state: IdleInhibitManagerState,
     popup_manager: PopupManager,
@@ -623,6 +627,17 @@ impl SmithayState {
 
         let data_device_state = DataDeviceState::new::<AppletRunner>(&display_handle);
         let primary_selection_state = PrimarySelectionState::new::<AppletRunner>(&display_handle);
+        // clipboard tools (wl-copy) use these, else they open a window to get focus (#113)
+        let ext_data_control_state = ext_data_control::DataControlState::new::<AppletRunner, _>(
+            &display_handle,
+            Some(&primary_selection_state),
+            |_| true,
+        );
+        let wlr_data_control_state = wlr_data_control::DataControlState::new::<AppletRunner, _>(
+            &display_handle,
+            Some(&primary_selection_state),
+            |_| true,
+        );
         let xdg_decoration_state = XdgDecorationState::new::<AppletRunner>(&display_handle);
         let idle_inhibit_state = IdleInhibitManagerState::new::<AppletRunner>(&display_handle);
         // smithay applies the viewport to the surface view, which rendering uses
@@ -702,6 +717,8 @@ impl SmithayState {
             _output_manager_state: output_manager_state,
             data_device_state,
             primary_selection_state,
+            ext_data_control_state,
+            wlr_data_control_state,
             _xdg_decoration_state: xdg_decoration_state,
             _idle_inhibit_state: idle_inhibit_state,
             popup_manager: PopupManager::default(),
@@ -1898,6 +1915,18 @@ impl DndGrabHandler for AppletRunner {
 impl PrimarySelectionHandler for AppletRunner {
     fn primary_selection_state(&mut self) -> &mut PrimarySelectionState {
         &mut self.smithay_state.primary_selection_state
+    }
+}
+
+impl ext_data_control::DataControlHandler for AppletRunner {
+    fn data_control_state(&mut self) -> &mut ext_data_control::DataControlState {
+        &mut self.smithay_state.ext_data_control_state
+    }
+}
+
+impl wlr_data_control::DataControlHandler for AppletRunner {
+    fn data_control_state(&mut self) -> &mut wlr_data_control::DataControlState {
+        &mut self.smithay_state.wlr_data_control_state
     }
 }
 
