@@ -1,4 +1,4 @@
-//! Lists the keybinds. Super+? opens it under the focused node (the root does that); Esc, q or Super+? closes it.
+//! The basic usage manual (`docs/usage.md`). Super+? opens it under the focused node (the root does that); Esc, q or Super+? closes it.
 
 use crate::{
     command_hub::{ACCENT, BAR_BG, BG, CURSOR, DIM, OUTPUT, RUNNING, fill_row, put},
@@ -14,78 +14,64 @@ use sonamu_ui::{
     ui_event::{KeySymbol, MouseEventKind, UIEvent},
 };
 
-/// `(keys, what they do)`; empty keys start a section
-const BINDS: &[(&str, &str)] = &[
-    ("", "Anywhere"),
-    ("Super+?", "show or hide this help"),
-    (
-        "Alt+P",
-        "pluck what's focused; again to place it at the focus",
-    ),
-    (
-        "Super+P",
-        "put the node (and under it) in a project; Ctrl+W on the project undoes it",
-    ),
-    (
-        "Super+V",
-        "view only the focused node's subtree; on the view root, view everything",
-    ),
-    (
-        "Alt+R",
-        "show the tree focus is in in the treeview (the view layer); going out of it shows the outer one",
-    ),
-    ("Ctrl+Shift+Q", "quit Sonamu"),
-    ("Ctrl+Alt+Backspace", "quit (on a TTY)"),
-    ("Ctrl+Alt+F1..F12", "switch VT (on a TTY)"),
-    ("", "Inside an applet (green border)"),
-    ("Super+W", "close it; its children move up"),
-    ("Super+T / Super+N", "start foot / firefox"),
-    ("Alt+Shift+W / S", "swap with the previous / next sibling"),
-    ("Ctrl+Shift++", "add a command hub as its child"),
-    ("Ctrl+Shift+|", "split side by side with a new command hub"),
-    ("Ctrl+Shift+_", "split stacked with a new command hub"),
-    (
-        "Alt+Q",
-        "out of the applet, to traversal (its own, if it has one)",
-    ),
-    ("", "Traversal (yellow border, treeview shown)"),
-    ("a, 0", "parent; past the view root, widens the view"),
-    ("d, 1-8, 9", "first, nth or last child"),
-    ("w, s", "previous or next sibling"),
-    ("e", "into its inner tree"),
-    (
-        "q",
-        "out of this inner tree, to the node holding it (or the root)",
-    ),
-    ("Enter", "confirm: into the applet"),
-    ("Space", "collapse or expand its inner tree in the treeview"),
-    (
-        "Super+W, Ctrl+Shift++/|/_",
-        "as inside, on the selected node (Ctrl+W on a project undoes it)",
-    ),
-    ("other keys", "go into the applet"),
-    ("", "Mouse"),
-    ("click a pane", "focus inside it"),
-    ("click a row", "focus that node (treeview)"),
-    (
-        "drag a row",
-        "pluck it; drop it on a row or a pane to place it",
-    ),
-    ("", "Command hub"),
-    ("Tab", "complete commands and applet names"),
-    ("Up, Down", "recall commands"),
-    ("PageUp, PageDown", "scroll"),
-    ("Esc", "clear the prompt"),
-    ("help", "(command) list the commands"),
-    ("", "File manager"),
-    ("Ctrl+Tab", "switch between the file list and the document"),
-    ("Up, Down, j, k", "move"),
-    ("Enter, Right, l", "open a file or expand a folder"),
-    ("Left, h", "collapse, or go to the parent folder"),
-    ("Alt+Q", "(in a document) back to the file list"),
-    ("", "This help"),
-    ("Esc, q", "close"),
-    ("Up, Down, PgUp, PgDn", "scroll"),
+struct ManEntry {
+    key: &'static str,
+    description: &'static str,
+}
+
+struct ManSection {
+    title: &'static str,
+    entries: &'static [ManEntry],
+}
+
+const fn entry(key: &'static str, description: &'static str) -> ManEntry {
+    ManEntry { key, description }
+}
+
+/// The basic usage bullet points of `docs/usage.md`
+const MAN_PAGE: &[ManSection] = &[
+    ManSection {
+        title: "Global Shortcuts",
+        entries: &[
+            entry(
+                "Super+Shift+/ (Super+?)",
+                "bring up this basic usage manual",
+            ),
+            entry("Super+T", "spawn foot terminal"),
+            entry("Super+N", "spawn firefox browser"),
+            entry("Super+P", "wrap current tab in a project"),
+            entry("Super+W", "close current tab"),
+            entry("Super+Shift+\\ (Super+|)", "split to right"),
+            entry("Super+Shift+-", "split to bottom"),
+        ],
+    },
+    ManSection {
+        title: "Traversal Keys (Alt+<traversal key> focuses the tree view)",
+        entries: &[
+            entry("(Shift+)Tab", "goes (up)/down in the tree view"),
+            entry("W/S", "goes to prev/next sibling"),
+            entry("A/D", "goes to parent/child"),
+        ],
+    },
+    ManSection {
+        title: "Actions while focused on tree view",
+        entries: &[
+            entry("Traversal keys", "as above"),
+            entry("Enter", "focus on main content"),
+            entry("Space", "toggle children visibility"),
+            entry("Click top right circle", "pin/unpin tree view"),
+            entry("Double click on node", "makes it the view root"),
+            entry("Drag/drop nodes", "moves them"),
+            entry("Right click", "brings up options"),
+        ],
+    },
+    ManSection {
+        title: "Gestures",
+        entries: &[
+            entry("3-finger swipe up/down", "same as Alt+(Shift+)Tab"),
+            entry("4-finger swipe up/down", "focus tree view/main content"),
+        ],
+    },
 ];
 
 /// Below this, keys go above their descriptions instead of beside them
@@ -99,13 +85,13 @@ struct Row {
     section: bool,
 }
 
-pub struct HelpApplet {
+pub struct ManPageApplet {
     /// Rows scrolled past
     scroll: usize,
     size: DisplayContainerSize,
     hook: AppletContext,
 }
-impl HelpApplet {
+impl ManPageApplet {
     #[must_use]
     pub fn get_boxed_initiator() -> NodularAppletInitializer {
         Box::new(|hook: AppletContext| {
@@ -119,57 +105,65 @@ impl HelpApplet {
 
     #[must_use]
     pub fn get_applet_spawner() -> AppletSpawner {
-        struct HelpSpawner;
-        impl AppletSpawnerTrait for HelpSpawner {
+        struct ManPageSpawner;
+        impl AppletSpawnerTrait for ManPageSpawner {
             fn create_initializer(&self, _args: &[&str]) -> Option<NodularAppletInitializer> {
-                Some(HelpApplet::get_boxed_initiator())
+                Some(ManPageApplet::get_boxed_initiator())
             }
 
             fn duplicate(&self) -> AppletSpawner {
                 Box::new(Self)
             }
         }
-        Box::new(HelpSpawner)
+        Box::new(ManPageSpawner)
     }
 
     /// Every row at `width`, descriptions word-wrapped
     fn rows(width: usize) -> Vec<Row> {
-        let key_width = BINDS.iter().map(|(keys, _)| keys.len()).max().unwrap_or(0);
+        let key_width = MAN_PAGE
+            .iter()
+            .flat_map(|section| section.entries)
+            .map(|entry| entry.key.len())
+            .max()
+            .unwrap_or(0);
         let beside = width >= 2 + key_width + 2 + MIN_DESCRIPTION_WIDTH;
         let mut rows = Vec::new();
-        for &(keys, text) in BINDS {
-            if keys.is_empty() {
-                if !rows.is_empty() {
-                    rows.push(Row {
-                        keys: "",
-                        text: String::new(),
-                        section: false,
-                    });
-                }
+        for section in MAN_PAGE {
+            if !rows.is_empty() {
                 rows.push(Row {
                     keys: "",
-                    text: text.to_string(),
-                    section: true,
-                });
-                continue;
-            }
-            if !beside {
-                rows.push(Row {
-                    keys,
                     text: String::new(),
                     section: false,
                 });
             }
-            let indent = if beside { 2 + key_width + 2 } else { 4 };
-            for (index, line) in word_wrap(text, width.saturating_sub(indent))
-                .into_iter()
-                .enumerate()
+            rows.push(Row {
+                keys: "",
+                text: section.title.to_string(),
+                section: true,
+            });
+            for &ManEntry {
+                key: keys,
+                description,
+            } in section.entries
             {
-                rows.push(Row {
-                    keys: if beside && index == 0 { keys } else { "" },
-                    text: format!("{}{line}", " ".repeat(indent)),
-                    section: false,
-                });
+                if !beside {
+                    rows.push(Row {
+                        keys,
+                        text: String::new(),
+                        section: false,
+                    });
+                }
+                let indent = if beside { 2 + key_width + 2 } else { 4 };
+                for (index, line) in word_wrap(description, width.saturating_sub(indent))
+                    .into_iter()
+                    .enumerate()
+                {
+                    rows.push(Row {
+                        keys: if beside && index == 0 { keys } else { "" },
+                        text: format!("{}{line}", " ".repeat(indent)),
+                        section: false,
+                    });
+                }
             }
         }
         rows
@@ -191,7 +185,7 @@ impl HelpApplet {
         self.hook.damage_window();
     }
 }
-impl StandardApplet for HelpApplet {
+impl StandardApplet for ManPageApplet {
     fn handle_standard_event(&mut self, standard_event: StandardEvent) {
         let StandardEvent::UIEvent(ui_event) = standard_event else {
             return;
@@ -239,7 +233,7 @@ impl StandardApplet for HelpApplet {
         }
 
         fill_row(&mut grid, 0, BAR_BG);
-        let title_end = put(&mut grid, 0, 1, "Keybinds", CURSOR);
+        let title_end = put(&mut grid, 0, 1, "Basic Usage", CURSOR);
         let note = "Esc closes, Up/Down scroll ";
         if let Some(column) = width
             .checked_sub(note.len())
@@ -261,7 +255,7 @@ impl StandardApplet for HelpApplet {
     }
 
     fn get_treeview(&self) -> WorldTree<String> {
-        WorldTree::Base("Help".to_string())
+        WorldTree::Base("Manual".to_string())
     }
 }
 

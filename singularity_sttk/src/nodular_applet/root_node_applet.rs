@@ -1,5 +1,5 @@
 use crate::{
-    help::HelpApplet,
+    man_page::ManPageApplet,
     nodular_applet::{
         AppletSpawner, NodeRequest, NodularAppletInitializer,
         node_holder::{NodeHolder, client_spawners},
@@ -525,7 +525,7 @@ impl RootNodeApplet {
         }
         let parent = tree.focused_node();
         let parent_inner = tree.is_inner(parent);
-        if let Some(node) = tree.add_child(parent, HelpApplet::get_boxed_initiator()) {
+        if let Some(node) = tree.add_child(parent, ManPageApplet::get_boxed_initiator()) {
             tree.focus(node, true);
             self.help = Some(OpenHelp {
                 node,

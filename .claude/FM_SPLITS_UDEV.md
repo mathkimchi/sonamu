@@ -237,8 +237,8 @@ The dead-applet guard and `remove_wl_surface` weren't exercised (no panicking ap
 
 ## Help (Super+?)
 
-- `singularity_sttk/src/help.rs`: `HelpApplet`, a cheat sheet in sections (anywhere, inside an applet, traversal, mouse,
-  command hub, file manager, the help itself), keys in amber beside wrapped descriptions (stacked when narrow).
+- `singularity_sttk/src/man_page.rs`: `ManPageApplet`, the basic usage bullet points of `docs/usage.md` in sections
+  (global shortcuts, traversal keys, tree view actions, gestures), keys in amber beside wrapped descriptions (stacked when narrow).
   Also registered as the `help` applet in sde (`add_child help`).
 - **Super+? is handled by the root** (before the tree), so it works whatever is focused, including wl clients.
   It opens the help as a **child of the focused node**, focused inside, so it shows in that pane, like any node

@@ -23,7 +23,7 @@ use singularity_standard_tabs::{
 };
 use singularity_sttk::{
     command_hub::CommandHubApplet,
-    help::HelpApplet,
+    man_page::ManPageApplet,
     nodular_applet::root_node_applet::{self, RootNodeApplet},
     session,
 };
@@ -58,7 +58,7 @@ fn main() {
                     "image_viewer".to_string(),
                     ImageViewerApplet::get_applet_spawner(),
                 ),
-                ("help".to_string(), HelpApplet::get_applet_spawner()),
+                ("help".to_string(), ManPageApplet::get_applet_spawner()),
             ]),
             session::session_path(),
         ),
