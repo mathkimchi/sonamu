@@ -34,11 +34,8 @@ Some more screenshots:
 
 I am building Sonamu for personal use, but conceptually, I believe a standardized hierarchical organizer is better than the current status quo of the window-based paradigm for anyone like me who has many projects and apps open at a time.
 
-Run it from the tty or embedded inside another Wayland compositor with:
-
-```sh
-cargo run --release --bin sonamu_sde
-```
+If you're interested in trying it out,
+check out the [`usage manual`](./docs/usage.md).
 
 ## Current Stage of Sonamu
 
