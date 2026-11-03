@@ -24,6 +24,51 @@
       in
       with pkgs;
       rec {
+        # `nix run github:mathkimchi/sonamu`
+        packages.default = rustPlatform.buildRustPackage {
+          pname = "sonamu";
+          version = "0.1.0";
+          src = ./.;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            allowBuiltinFetchGit = true; # smithay from git
+          };
+          cargoBuildFlags = [
+            "-p"
+            "sonamu_sde"
+          ];
+          doCheck = false;
+
+          nativeBuildInputs = [
+            pkg-config
+            autoPatchelfHook
+          ];
+          buildInputs = [
+            libxkbcommon
+            fontconfig
+            udev
+            seatd
+            libgbm
+            libinput
+            pixman
+            wayland
+            vulkan-loader
+            libX11
+            libXcursor
+            libXi
+            libXrandr
+          ];
+          # Loaded at runtime (dlopen), so added to the binaries' runpath
+          runtimeDependencies = [
+            libGL
+            vulkan-loader
+            libxkbcommon
+            wayland
+          ];
+
+          meta.mainProgram = "sonamu_sde";
+        };
+
         devShell = mkShell rec {
           buildInputs = [
             # Fix: linking with `cc` failed
