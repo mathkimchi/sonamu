@@ -46,7 +46,6 @@
             seatd
             libgbm
             libinput
-            pixman
             wayland
             vulkan-loader
             libX11
@@ -83,7 +82,6 @@
             seatd
             libgbm
             libinput
-            pixman
 
             # WINIT_UNIX_BACKEND=wayland
             wayland

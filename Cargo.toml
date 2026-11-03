@@ -33,7 +33,19 @@ wgpu = "^29.0.3"
 
 # Smithay doesn't post the newest version to crates.io
 # smithay = { version = "^0.7.0", features = ["wayland_frontend"] }
-smithay = { git = "https://github.com/Smithay/smithay", branch = "master", features = [
+# default features minus `renderer_pixman` and `renderer_multi` (both pull in pixman, unused)
+smithay = { git = "https://github.com/Smithay/smithay", branch = "master", default-features = false, features = [
+    "backend_drm",
+    "backend_gbm",
+    "backend_libinput",
+    "backend_udev",
+    "backend_session_libseat",
+    "backend_x11",
+    "backend_winit",
+    "backend_vulkan",
+    "backend_libei",
+    "renderer_gl",
+    "xwayland",
     "wayland_frontend",
     "desktop",
     # "backend_egl",
