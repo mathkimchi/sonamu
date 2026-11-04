@@ -940,7 +940,7 @@ impl StandardApplet for ProjectApplet {
 
     fn get_focus_path(&self) -> WorldTreePath {
         if self.dissolved {
-            return WorldTreePath::new_into();
+            return WorldTreePath::root();
         }
         self.holder.tree.get_focus_path()
     }

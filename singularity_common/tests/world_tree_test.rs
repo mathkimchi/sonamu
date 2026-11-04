@@ -1,34 +1,42 @@
 use singularity_common::utils::tree::{
     recursive_tree::RecursiveTreeNode,
     tree_node_path::TreeNodePath,
-    world_tree::{WorldTree, WorldTreePath},
+    world_tree::{Step, WorldTree, WorldTreePath},
 };
-
-fn assert_index_zero_does_nothing(world_tree: &WorldTree<impl PartialEq>) {
-    assert!(world_tree.safe_get(&WorldTreePath([].into())) == Some(world_tree));
-}
 
 #[test]
 fn test_world_tree() {
     let a = WorldTree::Base("Hi");
-
     assert_eq!(a.get_root_value(), &"Hi");
-    assert_index_zero_does_nothing(&a);
-    assert!(
-        a.safe_get(&WorldTreePath([TreeNodePath(Vec::new())].into()))
-            .is_none()
-    );
+    assert!(a.safe_get(&WorldTreePath::root()).is_none());
 
     let b = WorldTree::new_world(a);
-
     assert_eq!(b.get_root_value(), &"Hi");
-    assert_index_zero_does_nothing(&b);
-    assert!(
-        b.safe_get(&WorldTreePath([TreeNodePath(Vec::new())].into()))
-            == Some(&WorldTree::Base("Hi"))
-    );
+    assert!(b.safe_get(&WorldTreePath::root()).unwrap().get_value() == &WorldTree::Base("Hi"));
+    assert!(b.safe_get(&WorldTreePath(vec![Step::Child(0)])).is_none());
+    assert!(b.safe_get(&WorldTreePath(vec![Step::Inner(0)])).is_none());
+}
 
-    // TODO: test more things
+#[test]
+fn test_paths() {
+    let path = WorldTreePath(vec![
+        Step::Child(2),
+        Step::Child(1),
+        Step::Inner(0),
+        Step::Child(1),
+    ]);
+    let (node, inner) = path.split_world();
+    assert_eq!(node, TreeNodePath(vec![2, 1]));
+    let inner = inner.unwrap();
+    assert_eq!(inner, WorldTreePath(vec![Step::Child(0), Step::Child(1)]));
+    assert_eq!(WorldTreePath::join(&node, &inner), path);
+
+    // a node and its inner root are the same
+    assert_eq!(
+        WorldTreePath::join(&node, &WorldTreePath::root()),
+        WorldTreePath::from_tree_path(&node)
+    );
+    assert_eq!(WorldTreePath::from_tree_path(&node).split_world().1, None);
 }
 
 #[test]
@@ -154,8 +162,9 @@ fn test_printing() {
     println!(
         "{}",
         level_2
-            .safe_get(&WorldTreePath(Box::new([TreeNodePath(vec![2, 1])])))
+            .safe_get(&WorldTreePath(vec![Step::Child(2), Step::Child(1)]))
             .unwrap()
+            .get_value()
             .outer_world_to_string(None)
     );
 }

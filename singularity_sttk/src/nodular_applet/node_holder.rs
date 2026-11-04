@@ -133,10 +133,8 @@ impl NodeHolder {
     }
 
     /// A path inside the node's applet, as a path of the holder's treeview
-    pub fn full_path(&self, id: NodeId, inner: WorldTreePath) -> Option<WorldTreePath> {
-        let mut path = vec![self.tree.path_of(id)?];
-        path.extend(inner.0);
-        Some(WorldTreePath(path.into_boxed_slice()))
+    pub fn full_path(&self, id: NodeId, inner: &WorldTreePath) -> Option<WorldTreePath> {
+        Some(WorldTreePath::join(&self.tree.path_of(id)?, inner))
     }
 
     pub fn focus(&mut self, path: &WorldTreePath) {
@@ -150,24 +148,21 @@ impl NodeHolder {
     }
 
     /// Plucks at `path` (`None`: at the focus) and answers with `Plucked`.
-    /// `path[0]` is the node, the rest is inside its applet.
+    /// The path's node is in this tree, and the rest (if any) is inside its applet.
     pub fn start_pluck(&mut self, path: Option<&WorldTreePath>) {
         let path = path.cloned().unwrap_or_else(|| self.tree.get_focus_path());
-        let id = match path.0.first() {
-            None => Some(self.tree.root()),
-            Some(node_path) => self.tree.node_at(node_path),
-        };
-        let Some(id) = id else {
+        let (node_path, inner) = path.split_world();
+        let Some(id) = self.tree.node_at(&node_path) else {
             self.send(StandardRequest::Plucked(None));
             return;
         };
 
         // the applet may have something closer; it answers with `Plucked`.
         // Without a running applet (eg a split) it would never answer.
-        if path.0.len() > 1
+        if let Some(inner) = inner
             && self
                 .tree
-                .try_send_event(id, StandardEvent::Pluck(Some(inner_path(&path))))
+                .try_send_event(id, StandardEvent::Pluck(Some(inner)))
                 .is_ok()
         {
             self.pending = Some(Pending::Pluck(id));
@@ -216,22 +211,19 @@ impl NodeHolder {
         }
     }
 
-    /// Does the action to the node at `path[0]`, or passes it on to its applet if the path goes into it
+    /// Does the action to the path's node, or passes it on to its applet if the path goes into it
     pub fn node_action(&mut self, path: &WorldTreePath, action: NodeAction) {
-        let Some(id) = path
-            .0
-            .first()
-            .and_then(|node_path| self.tree.node_at(node_path))
-        else {
+        let (node_path, inner) = path.split_world();
+        let Some(id) = self.tree.node_at(&node_path) else {
             return;
         };
-        if path.0.len() > 1 {
+        if let Some(inner) = inner {
             // so a spawned program's window is passed in there
             if matches!(action, NodeAction::Spawn { .. }) {
                 self.tree.focus(id, true);
             }
             self.tree
-                .send_event(id, StandardEvent::NodeAction(inner_path(path), action));
+                .send_event(id, StandardEvent::NodeAction(inner, action));
             return;
         }
         match action {
@@ -331,27 +323,27 @@ impl NodeHolder {
             .is_ok()
     }
 
-    /// Places at the deepest node along `path[0]` (`None`: at the focus),
+    /// Places at the deepest node along the path's node in this tree (`None`: at the focus),
     /// asking its applet first if the path goes into it
     pub fn start_place(
         &mut self,
         path: Option<&WorldTreePath>,
-        position: SpawnPosition,
+        mut position: SpawnPosition,
         mut tree: DetachedTree,
     ) {
         let path = path.cloned().unwrap_or_else(|| self.tree.get_focus_path());
-        let (id, exact) = path
-            .0
-            .first()
-            .map_or((self.tree.root(), true), |node_path| {
-                self.tree.closest_node_at(node_path)
-            });
+        let (node_path, mut inner) = path.split_world();
+        let (id, exact) = self.tree.closest_node_at(&node_path);
+        if let SpawnPosition::InsertInner { child_index } = position {
+            inner.get_or_insert_with(WorldTreePath::root);
+            position = SpawnPosition::InsertChild { child_index };
+        }
 
-        if exact && path.0.len() > 1 {
-            match self.tree.try_send_event(
-                id,
-                StandardEvent::Place(Some(inner_path(&path)), position, tree),
-            ) {
+        if exact && let Some(inner) = inner {
+            match self
+                .tree
+                .try_send_event(id, StandardEvent::Place(Some(inner), position, tree))
+            {
                 Ok(()) => {
                     self.pending = Some(Pending::Place(id));
                     return;
@@ -440,12 +432,12 @@ impl NodeHolder {
                 .send_event(id, StandardEvent::SettingsChanged(settings::get())),
             // the applet's path is inside its inner tree
             NodeRequest::Standard(StandardRequest::RequestPluck(path)) => {
-                if let Some(path) = self.full_path(id, path) {
+                if let Some(path) = self.full_path(id, &path) {
                     self.send(StandardRequest::RequestPluck(path));
                 }
             }
             NodeRequest::Standard(StandardRequest::RequestPlace(path, position)) => {
-                if let Some(path) = self.full_path(id, path) {
+                if let Some(path) = self.full_path(id, &path) {
                     self.send(StandardRequest::RequestPlace(path, position));
                 }
             }
@@ -487,9 +479,4 @@ impl NodeHolder {
         }
         None
     }
-}
-
-/// The part of the path inside the node's applet
-fn inner_path(path: &WorldTreePath) -> WorldTreePath {
-    WorldTreePath(path.0.get(1..).unwrap_or_default().into())
 }

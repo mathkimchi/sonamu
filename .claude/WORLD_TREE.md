@@ -22,22 +22,24 @@ Its value is the project's own world of applets (deeper layer). An applet's valu
 
 ## Paths
 
-`WorldTreePath` is a list of `TreeNodePath`s, **one per world**:
+`WorldTreePath` (#83) is a list of `Step`s from a world's root:
 
-- The first picks a node in the outermost world (`[]` is that world's root, `[2, 1]` is child 1 of child 2).
-- Each later one picks a node in the **inner world of the node the previous one ended at**.
+- `Child(i)`: child `i` of the current node, in the same world.
+- `Inner(i)`: child `i` of the root of the current node's inner world (its value).
+
+An inner world's root is the node's own row, so it has no path of its own: every row has exactly one path.
 
 ```text
-[[2, 1]]          on node [2, 1] of the outer world
-[[2, 1], []]      inside node [2, 1]: at the root of its inner world
-[[2, 1], [0]]     inside node [2, 1]: at child 0 of its inner root
-[[2, 1], [0], []] inside that one in turn
+[Child(2), Child(1)]                     node [2, 1] of the outer world (and its inner root)
+[Child(2), Child(1), Inner(0)]           child 0 of its inner root
+[Child(2), Child(1), Inner(0), Child(1)] child 1 of that, in the same inner world
 ```
 
-**"Inside" a node** means the path goes past it: it has more components than the path ending at that node.
-`[[2, 1]]` is *on* the node; `[[2, 1], []]` is *inside* it.
-The treeview draws an inner world's root on the node's own row, so a path ending in `[]` shows on the same row as the node,
-but marked as inside (`row_path`, `is_inside_element` in `nodular_applet/treeview.rs`).
+`split_world` gives the node in the outermost world and the rest as a path of that node's own world
+(`Inner(i)` becomes `Child(i)`); `join`/`push_inner` go the other way.
+"Inside" a node (keys going to its main) isn't part of the path: it is the node's `FocusIndex::Inner`
+(`NodeTree::screen_focus_inside` for the treeview's marker).
+The saved session's `focus` falls back to the root if it can't be read (eg saved before #83).
 
 ## Traversal keys
 
@@ -45,7 +47,7 @@ The treeview selector shows when focus is on a node rather than inside an applet
 Keys (`WorldTreeTraversalOperation`):
 
 - `e`: **into** a layer (NextLayer): from a node into its inner world, at its root
-  (the node becomes `Inner` and its main gets `Focus([[]])`).
+  (the node becomes `Inner` and its main gets `Focus([])`).
 - `q`: **out of** a layer (PrevLayer): from anywhere in an inner world back to the node holding that world
   (from the outermost world: up to its root).
 - `a` / `0`: parent; `d`, `1`-`8`, `9`: first, nth, last child; `w` / `s`: previous/next sibling.
@@ -120,7 +122,7 @@ Each node stores one `FocusIndex`:
 The full focus path is built bottom-up:
 
 - A `Child(i)` node prefixes `i` to its child's node path.
-- An `Inner` node appends its main's published focus path, which adds more `TreeNodePath`s, one per deeper world.
+- An `Inner` node appends its main's published focus path (`push_inner`), so at its main's root it is just the node.
 
 Moving focus is recursive too:
 
@@ -128,7 +130,7 @@ Moving focus is recursive too:
 - If it passes the root of a world, it **escapes** (`NodeTree::escaped`). A project sends it to its own node
   as `ChangeFocus`, which continues in the outer world. That is how `q` from inside a project lands on the project.
   Other applets do the same by hand (`AppletContext::change_focus`).
-- Going into a deeper world is done by the node holding it. `NextLayer` makes the node `Inner` and sends `Focus([[]])`,
+- Going into a deeper world is done by the node holding it. `NextLayer` makes the node `Inner` and sends `Focus([])`,
   and from then on keys go to its main, which moves focus inside its own world.
 - `Inner` + `Parent`/`PrevLayer` (from the main) makes the node `Focusing` again: the inner root is the node's own row.
 
@@ -181,7 +183,7 @@ The holder above stitches these in:
   world's root (eg a project's overview; `TreeviewRow::inner_root`). Else it shows the view root's subtree (Super+V).
   Expanded inner worlds are drawn in a box; the panel scrolls with the wheel and follows focus.
 - `is_traversing` follows `Inner` nodes down into
-  their mains' `traversing`, since a path inside a project can still be a selection (eg `[[p], []]`).
+  their mains' `traversing`, since a path inside a project can still be a selection (eg `[Child(p)]` with the project selecting its root).
 
 ## Paths across holders
 
@@ -190,7 +192,7 @@ The holder converts them:
 
 - Going up, a holder prefixes the node's path (`NodeHolder::full_path`). Applies to `RequestPluck`, `RequestPlace`
   and focus.
-- Going down, it takes the first component to find its node and passes the rest (`inner_path`) to that node's main
+- Going down, it finds its node by `split_world` and passes the rest to that node's main
   as `Pluck`, `Place` or `Focus`. `Pluck(None)`/`Place(None)` mean "at your focus" (`AppletClient` uses the applet's
   `get_focus_path`).
 - `NodeAction(path, action)` (`NodeHolder::node_action`) does something to the node at the path, passed down the same

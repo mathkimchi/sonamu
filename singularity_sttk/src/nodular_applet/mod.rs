@@ -80,7 +80,7 @@ pub trait StandardApplet {
     /// Where focus is in the inner tree (see `Treeview::focus`); published with the treeview,
     /// so call `AppletContext::damage_treeview` when it changes
     fn get_focus_path(&self) -> WorldTreePath {
-        WorldTreePath::new_into()
+        WorldTreePath::root()
     }
 
     /// Whether it is selecting an element of its inner tree (its own treeview selector, so the root shows the treeview),

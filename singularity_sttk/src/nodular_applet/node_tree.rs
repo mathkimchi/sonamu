@@ -16,7 +16,9 @@ use singularity_common::{
     utils::tree::{
         recursive_tree::RecursiveTreeNode,
         tree_node_path::{TreeNodePath, TreeTraverseOperation},
-        world_tree::{WorldTree, WorldTreePath, world_tree_traversal::WorldTreeTraversalOperation},
+        world_tree::{
+            Step, WorldTree, WorldTreePath, world_tree_traversal::WorldTreeTraversalOperation,
+        },
     },
 };
 use slotmap::SlotMap;
@@ -830,24 +832,20 @@ impl NodeTree {
     /// Focuses what `path` of the treeview points at: the node itself if the path ends at it,
     /// otherwise inside its main, which is asked to focus the rest of the path
     pub fn focus_path(&mut self, path: &WorldTreePath) {
-        let Some(id) = path
-            .0
-            .first()
-            .map_or(Some(self.root), |path| self.node_at(path))
-        else {
+        let (node_path, inner) = path.split_world();
+        let Some(id) = self.node_at(&node_path) else {
             return;
         };
         self.focus_node(id);
-        let inner = path.0.get(1..).unwrap_or_default();
-        self.nodes[id].focus = if inner.is_empty() {
+        self.nodes[id].focus = if inner.is_none() {
             FocusIndex::Focusing
         } else {
             FocusIndex::Inner
         };
         // so the path inside goes to the woken applet
         self.wake_focused();
-        if !inner.is_empty() {
-            self.send_event(id, StandardEvent::Focus(WorldTreePath(inner.into())));
+        if let Some(inner) = inner {
+            self.send_event(id, StandardEvent::Focus(inner));
         }
     }
 
@@ -1089,22 +1087,23 @@ impl NodeTree {
     }
 
     /// Where the screen's focus is: `get_focus_path` for the active one,
-    /// else the node it was left on (and its main's root, if inside it)
+    /// else the node it was left on (inside it or not, it is that node's row)
     pub fn screen_focus_path(&self, screen: usize) -> WorldTreePath {
         if screen == self.active_screen {
             return self.get_focus_path();
         }
-        let Some(&Screen {
-            focus: (id, inner), ..
-        }) = self.screens.get(screen)
-        else {
-            return WorldTreePath::new_into();
+        let Some(&Screen { focus: (id, _), .. }) = self.screens.get(screen) else {
+            return WorldTreePath::root();
         };
-        let mut path = vec![self.path_of(id).unwrap_or_else(TreeNodePath::new_root)];
-        if inner {
-            path.push(TreeNodePath::new_root());
+        WorldTreePath::from_tree_path(&self.path_of(id).unwrap_or_else(TreeNodePath::new_root))
+    }
+
+    /// Whether keys on the screen go into an applet, rather than to a selector
+    pub fn screen_focus_inside(&self, screen: usize) -> bool {
+        if screen == self.active_screen {
+            return !self.is_traversing();
         }
-        WorldTreePath(path.into_boxed_slice())
+        self.screens.get(screen).is_some_and(|shown| shown.focus.1)
     }
 
     pub const fn active_screen(&self) -> usize {
@@ -1331,17 +1330,13 @@ impl NodeTree {
     /// Collapses or expands what `path` of the treeview points at: the node itself if the path ends at it,
     /// otherwise something inside its main, which is asked to do it
     pub fn toggle_collapsed_path(&mut self, path: &WorldTreePath) {
-        let Some(id) = path.0.first().and_then(|path| self.node_at(path)) else {
+        let (node_path, inner) = path.split_world();
+        let Some(id) = self.node_at(&node_path) else {
             return;
         };
-        let inner = path.0.get(1..).unwrap_or_default();
-        if inner.is_empty() {
-            self.toggle_collapsed(id);
-        } else {
-            self.send_event(
-                id,
-                StandardEvent::ToggleCollapsed(WorldTreePath(inner.into())),
-            );
+        match inner {
+            None => self.toggle_collapsed(id),
+            Some(inner) => self.send_event(id, StandardEvent::ToggleCollapsed(inner)),
         }
     }
 
@@ -1418,7 +1413,7 @@ impl NodeTree {
                     // into its main's inner tree, at its root
                     FocusIndex::Inner => {
                         if let Some(main) = &node.main {
-                            main.send_event(StandardEvent::Focus(WorldTreePath::new_into()));
+                            main.send_event(StandardEvent::Focus(WorldTreePath::root()));
                         }
                     }
                     FocusIndex::Focusing => {}
@@ -1897,32 +1892,19 @@ impl NodeTree {
     fn get_focus_path_of(&self, id: NodeId) -> WorldTreePath {
         let node = &self.nodes[id];
         match node.focus {
-            FocusIndex::Focusing => WorldTreePath::new_into(),
+            FocusIndex::Focusing => WorldTreePath::root(),
             // this node, then the focus inside its main's inner tree
             FocusIndex::Inner => {
-                let inner = node
-                    .main
-                    .as_ref()
-                    .map_or_else(WorldTreePath::new_into, |main| main.get_treeview().focus);
-                let mut path = vec![TreeNodePath::new_root()];
-                path.extend(inner.0);
-                WorldTreePath(path.into_boxed_slice())
+                let mut path = WorldTreePath::root();
+                if let Some(main) = &node.main {
+                    path.push_inner(&main.get_treeview().focus);
+                }
+                path
             }
             FocusIndex::Child(child_index) => {
-                let mut path_tail = self
-                    .get_focus_path_of(node.children[child_index])
-                    .0
-                    .to_vec();
-
-                if path_tail.is_empty() {
-                    log::warn!("Warning: this shouldn't happen");
-                    path_tail.push(TreeNodePath::new_root());
-                }
-
-                // child of index `focus - 1` is focused
-                path_tail[0].0.insert(0, child_index);
-
-                WorldTreePath(path_tail.into_boxed_slice())
+                let mut path = self.get_focus_path_of(node.children[child_index]);
+                path.0.insert(0, Step::Child(child_index));
+                path
             }
         }
     }

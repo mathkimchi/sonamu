@@ -28,8 +28,8 @@ use singularity_common::{
     },
     settings::{self, Settings, TreeviewFloating, TreeviewSide},
     utils::tree::{
-        tree_node_path::TreeNodePath,
-        world_tree::{WorldTree, WorldTreePath},
+        recursive_tree::RecursiveTreeNode,
+        world_tree::{Step, WorldTree, WorldTreePath},
     },
 };
 use sonamu_ui::{
@@ -284,7 +284,7 @@ impl RootNodeApplet {
         };
         let session = Session {
             tree: self.holder.tree.save(),
-            focus: self.holder.tree.get_focus_path().0.into_vec(),
+            focus: self.holder.tree.get_focus_path(),
             treeview_pinned: self.treeview_pinned,
         };
         if self.saved_session.as_ref() == Some(&session) {
@@ -327,7 +327,7 @@ impl RootNodeApplet {
         let tree = match &saved_session {
             Some(saved) => {
                 let mut tree = NodeTree::restore(saved.tree.clone(), spawn_client, attach_client);
-                tree.focus_path(&WorldTreePath(saved.focus.clone().into_boxed_slice()));
+                tree.focus_path(&saved.focus);
                 tree
             }
             None => NodeTree::new(root_initializer, spawn_client, attach_client),
@@ -576,7 +576,7 @@ impl RootNodeApplet {
                 self.holder.tree.active_screen(),
             )
         } else {
-            (Vec::new(), WorldTreePath::new_into())
+            (Vec::new(), WorldTreePath::root())
         };
         // in the treeview's coords, inside its frame
         let ([x, y, width, height], border) = treeview_area.map_or(([0; 4], 0), |(area, place)| {
@@ -635,10 +635,10 @@ impl RootNodeApplet {
                         SpawnPosition::AppendChild,
                     )
                 });
-                self.last_drop = path
-                    .0
-                    .first()
-                    .and_then(|node_path| self.holder.tree.node_at(node_path))
+                self.last_drop = self
+                    .holder
+                    .tree
+                    .node_at(&path.split_world().0)
                     .map(|id| (path.clone(), id));
                 self.send_request(StandardRequest::RequestPlace(path, position));
             }
@@ -661,7 +661,7 @@ impl RootNodeApplet {
         match self.last_drop.take() {
             Some((dropped, id)) if dropped == path => self
                 .holder
-                .full_path(id, inner_path(&path))
+                .full_path(id, &path.split_world().1.unwrap_or_default())
                 .unwrap_or_else(|| self.holder.tree.get_focus_path()),
             _ => path,
         }
@@ -684,12 +684,7 @@ impl RootNodeApplet {
 
     /// Shows the tree that `path` is in
     fn set_view_layer(&mut self, path: &WorldTreePath) {
-        self.view_layer = path
-            .0
-            .split_last()
-            .map(|(_, holder)| holder)
-            .filter(|holder| !holder.is_empty())
-            .map(|holder| WorldTreePath(holder.into()));
+        self.view_layer = holder_of(path);
         self.surface.damage();
     }
 
@@ -702,18 +697,18 @@ impl RootNodeApplet {
         let focus_moved = self.view_layer_focus.as_ref() != Some(&focus);
         self.view_layer_focus = Some(focus.clone());
         let treeview = self.holder.tree.get_treeview();
-        while !((!focus_moved
-            || (focus.0.len() > holder.0.len() && focus.0.starts_with(&holder.0)))
-            && matches!(treeview.safe_get(&holder), Some(WorldTree::World(_))))
+        while !((!focus_moved || focus.starts_with(&holder))
+            && matches!(
+                treeview.safe_get(&holder).map(RecursiveTreeNode::get_value),
+                Some(WorldTree::World(_))
+            ))
         {
-            let mut outer = holder.0.into_vec();
-            outer.pop();
-            if outer.is_empty() {
+            let Some(outer) = holder_of(&holder) else {
                 self.view_layer = None;
                 self.surface.damage();
                 return;
-            }
-            holder = WorldTreePath(outer.into_boxed_slice());
+            };
+            holder = outer;
         }
         if self.view_layer.as_ref() != Some(&holder) {
             self.view_layer = Some(holder);
@@ -744,6 +739,7 @@ impl RootNodeApplet {
             &rows,
             [inner_width, height.saturating_sub(2 * border) as f32],
             &tree.screen_focus_path(screen),
+            tree.screen_focus_inside(screen),
         );
         let size = close_width();
         let pin_button = UITree::leaf_styled(
@@ -880,9 +876,8 @@ fn view_rows(
     if let Some(rows) = view_layer.and_then(|holder| inner_layer_rows(&tree.get_treeview(), holder))
     {
         // the first row is the node holding it
-        let mut general = rows[0].path.0.to_vec();
-        general.push(TreeNodePath::new_root());
-        return (rows, WorldTreePath(general.into_boxed_slice()));
+        let general = rows[0].path.clone();
+        return (rows, general);
     }
     let base = tree.view_root_path(screen);
     let rows = treeview_rows(
@@ -890,12 +885,16 @@ fn view_rows(
         &base,
         tree.view_parent(screen),
     );
-    (rows, WorldTreePath(Box::new([base])))
+    (rows, WorldTreePath::from_tree_path(&base))
 }
 
-/// The part of the path inside the node's applet
-fn inner_path(path: &WorldTreePath) -> WorldTreePath {
-    WorldTreePath(path.0.get(1..).unwrap_or_default().into())
+/// The node whose inner world the path ends in, `None` for the outermost world
+fn holder_of(path: &WorldTreePath) -> Option<WorldTreePath> {
+    let last_inner = path
+        .0
+        .iter()
+        .rposition(|step| matches!(step, Step::Inner(_)))?;
+    Some(WorldTreePath(path.0[..last_inner].to_vec()))
 }
 
 /// The root's own keybinds

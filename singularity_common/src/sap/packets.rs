@@ -24,6 +24,9 @@ pub enum SpawnPosition {
     AppendChild,
     /// Before the child at this index (appended if it's past the end)
     InsertChild { child_index: usize },
+    /// Before the child at this index of the node's inner root (`Step::Inner`), so it goes to the node's applet.
+    /// A node without a running applet appends it as a child.
+    InsertInner { child_index: usize },
 }
 
 /// Something done to a node from the treeview (eg its close button, or its right-click menu)
@@ -57,8 +60,7 @@ pub enum NewApplet {
 #[derive(Clone)]
 pub struct Treeview {
     pub tree: WorldTree<String>,
-    /// A path of `tree`. Each path after the first goes into the inner world of the node the previous one ends at,
-    /// so focus is "inside" a node when the path goes past it (eg `[[2, 1], []]` is inside `[[2, 1]]`, at its inner root).
+    /// A path of `tree`, from its root (the client itself)
     pub focus: WorldTreePath,
     /// The client is selecting a node in its tree (eg a project's own treeview selector),
     /// rather than taking input itself
@@ -79,7 +81,7 @@ impl Treeview {
     pub fn new(tree: WorldTree<String>) -> Self {
         Self {
             tree,
-            focus: WorldTreePath::new_into(),
+            focus: WorldTreePath::root(),
             traversing: false,
             frames_itself: false,
             saved: None,

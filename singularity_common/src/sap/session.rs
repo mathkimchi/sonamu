@@ -1,19 +1,32 @@
 //! What a session is saved as, to be restored on the next start (see `.claude/SESSIONS.md`)
 
-use crate::{sap::detached::Layout, utils::tree::tree_node_path::TreeNodePath};
-use serde::{Deserialize, Serialize};
+use crate::{sap::detached::Layout, utils::tree::world_tree::WorldTreePath};
+use serde::{Deserialize, Deserializer, Serialize, de::IgnoredAny};
 use std::path::PathBuf;
 
 /// The whole tree, where focus was, and whether the treeview was pinned
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub tree: SavedTree,
-    /// A `WorldTreePath` of the tree
-    #[serde(default)]
-    pub focus: Vec<TreeNodePath>,
+    /// A path of the tree; the root if it can't be read (eg saved before #83)
+    #[serde(default, deserialize_with = "path_or_root")]
+    pub focus: WorldTreePath,
     /// The root's treeview is always shown, beside the panes
     #[serde(default)]
     pub treeview_pinned: bool,
+}
+
+fn path_or_root<'de, D: Deserializer<'de>>(deserializer: D) -> Result<WorldTreePath, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum PathOrOther {
+        Path(WorldTreePath),
+        Other(IgnoredAny),
+    }
+    Ok(match PathOrOther::deserialize(deserializer)? {
+        PathOrOther::Path(path) => path,
+        PathOrOther::Other(_) => WorldTreePath::root(),
+    })
 }
 
 /// A node, like a `DetachedTree` but saved

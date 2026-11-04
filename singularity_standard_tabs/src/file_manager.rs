@@ -16,7 +16,9 @@ use singularity_common::{
     utils::tree::{
         recursive_tree::RecursiveTreeNode,
         tree_node_path::{TreeNodePath, TreeTraverseOperation},
-        world_tree::{WorldTree, WorldTreePath, world_tree_traversal::WorldTreeTraversalOperation},
+        world_tree::{
+            Step, WorldTree, WorldTreePath, world_tree_traversal::WorldTreeTraversalOperation,
+        },
     },
 };
 use singularity_sttk::{
@@ -662,7 +664,7 @@ impl FileManagerApplet {
                 self.confirm(selected);
                 self.documents[index]
                     .handle
-                    .send_event(StandardEvent::Focus(WorldTreePath::new_into()));
+                    .send_event(StandardEvent::Focus(WorldTreePath::root()));
             }
             (
                 Selected::Root,
@@ -1157,13 +1159,13 @@ impl StandardApplet for FileManagerApplet {
     fn get_focus_path(&self) -> WorldTreePath {
         match (self.selecting, self.active_document()) {
             (Some(Selected::Document(index)), _) => {
-                WorldTreePath(Box::new([TreeNodePath(vec![index])]))
+                WorldTreePath::from_tree_path(&TreeNodePath(vec![index]))
             }
-            (None, Some(document)) if self.pane == Pane::Document => document_path(
-                self.active.expect("has an active document"),
-                document.handle.get_treeview().focus,
+            (None, Some(document)) if self.pane == Pane::Document => WorldTreePath::join(
+                &TreeNodePath(vec![self.active.expect("has an active document")]),
+                &document.handle.get_treeview().focus,
             ),
-            _ => WorldTreePath::new_into(),
+            _ => WorldTreePath::root(),
         }
     }
 
@@ -1171,20 +1173,21 @@ impl StandardApplet for FileManagerApplet {
         self.selecting.is_some()
     }
 
-    /// Selects the root (`[[]]`, eg `e` into it) or a document (`[[i]]`), or goes inside a document for longer paths
+    /// Selects the root (`[]`, eg `e` into it) or a document (`[Child(i)]`), or goes inside a document for longer paths
     fn focus(&mut self, path: &WorldTreePath) {
-        match path.0.split_first() {
-            Some((node_path, inner))
-                if node_path.0.len() == 1 && node_path.0[0] < self.documents.len() =>
+        match path.split_world() {
+            (TreeNodePath(node_path), inner)
+                if let &[index] = node_path.as_slice()
+                    && index < self.documents.len() =>
             {
-                let index = node_path.0[0];
-                if inner.is_empty() {
-                    self.set_selecting(Some(Selected::Document(index)));
-                } else {
-                    self.confirm(Selected::Document(index));
-                    self.documents[index]
-                        .handle
-                        .send_event(StandardEvent::Focus(WorldTreePath(inner.into())));
+                match inner {
+                    None => self.set_selecting(Some(Selected::Document(index))),
+                    Some(inner) => {
+                        self.confirm(Selected::Document(index));
+                        self.documents[index]
+                            .handle
+                            .send_event(StandardEvent::Focus(inner));
+                    }
                 }
             }
             _ => self.set_selecting(Some(Selected::Root)),
@@ -1193,11 +1196,10 @@ impl StandardApplet for FileManagerApplet {
         self.hook.damage_treeview();
     }
 
-    /// Closes a document (`[[i]]`), like Ctrl+W on it in its selector
+    /// Closes a document (`[Child(i)]`), like Ctrl+W on it in its selector
     fn node_action(&mut self, path: &WorldTreePath, action: NodeAction) {
         if action == NodeAction::Close
-            && let [TreeNodePath(index)] = &*path.0
-            && let &[index] = index.as_slice()
+            && let [Step::Child(index)] = *path.0
             && index < self.documents.len()
         {
             self.close_document(index);
@@ -1210,8 +1212,8 @@ impl StandardApplet for FileManagerApplet {
 
     /// A document (with everything inside it); the root plucks the file manager itself
     fn pluck(&mut self, path: &WorldTreePath) -> Answer<Option<DetachedTree>> {
-        let index = match path.0.first().map(|node_path| node_path.0.as_slice()) {
-            Some([index, ..]) if *index < self.documents.len() => *index,
+        let index = match path.0.first() {
+            Some(&Step::Child(index)) if index < self.documents.len() => index,
             _ => return Answer::Now(None),
         };
         let document = self.remove_document(index);
@@ -1260,12 +1262,20 @@ impl StandardApplet for FileManagerApplet {
             NodeRequest::Standard(StandardRequest::Damage(_)) => {}
             NodeRequest::Standard(StandardRequest::Quit) => self.hook.quit(),
             // its path is inside its own inner tree, which is child `index` of this one
-            NodeRequest::Standard(StandardRequest::RequestPluck(path)) => self
-                .hook
-                .request(StandardRequest::RequestPluck(document_path(index, path)).into()),
+            NodeRequest::Standard(StandardRequest::RequestPluck(path)) => self.hook.request(
+                StandardRequest::RequestPluck(WorldTreePath::join(
+                    &TreeNodePath(vec![index]),
+                    &path,
+                ))
+                .into(),
+            ),
             NodeRequest::Standard(StandardRequest::RequestPlace(path, position)) => {
                 self.hook.request(
-                    StandardRequest::RequestPlace(document_path(index, path), position).into(),
+                    StandardRequest::RequestPlace(
+                        WorldTreePath::join(&TreeNodePath(vec![index]), &path),
+                        position,
+                    )
+                    .into(),
                 )
             }
             // documents are in the file manager's directory
@@ -1332,13 +1342,6 @@ fn saved_file(saved: &SavedApplet) -> Option<PathBuf> {
             .filter(|file| is_pdf(file)),
         SavedApplet::Spawner { .. } => None,
     }
-}
-
-/// A path inside document `index`, as a path of the file manager's inner tree
-fn document_path(index: usize, path: WorldTreePath) -> WorldTreePath {
-    let mut full = vec![TreeNodePath(vec![index])];
-    full.extend(path.0);
-    WorldTreePath(full.into_boxed_slice())
 }
 
 /// Directories first, then files, each sorted by name; hidden files are skipped

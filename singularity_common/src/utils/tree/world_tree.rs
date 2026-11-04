@@ -1,30 +1,92 @@
 use crate::utils::tree::{recursive_tree::RecursiveTreeNode, tree_node_path::TreeNodePath};
+use serde::{Deserialize, Serialize};
 
 pub mod world_tree_traversal;
 
-// pub struct WorldTreePath(Vec<TreeNodePath>);
-/// One `TreeNodePath` per world: the first picks a node of the outermost world,
-/// and each next one picks a node of the inner world (the value) of the node before it.
-///
-/// So a path is "inside" a node when it goes past it: `[[2, 1]]` is on node `[2, 1]`,
-/// `[[2, 1], []]` is inside it at its inner world's root, and `[[2, 1], [0]]` is inside it at that root's first child.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorldTreePath(pub Box<[TreeNodePath]>);
-impl WorldTreePath {
-    // pub fn new(inner: &[TreeNodePath]) -> Self {
-    //     Self(Rc::new(inner))
-    // }
+/// One step of a `WorldTreePath`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Step {
+    /// To a child of the node, in the same world
+    Child(usize),
+    /// To a child of the root of the node's inner world (its value).
+    /// That root is the node's own row, so it has no step of its own.
+    Inner(usize),
+}
 
-    /// getting by this will return the same thing
+/// Steps from a world's root.
+/// Every node has exactly one path: a node and its inner world's root are the same.
+///
+/// So a path is "inside" a node when it goes into its value with `Inner`:
+/// `[Child(2), Child(1)]` is on node `[2, 1]`, and `[Child(2), Child(1), Inner(0)]` is its inner root's first child.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldTreePath(pub Vec<Step>);
+impl WorldTreePath {
+    /// The world's root
     #[must_use]
-    pub fn new_empty() -> Self {
-        Self(Box::new([]))
+    pub const fn root() -> Self {
+        Self(Vec::new())
     }
 
-    /// Goes one level `into`
+    /// The node at `path` of the outermost world
     #[must_use]
-    pub fn new_into() -> Self {
-        Self(Box::new([TreeNodePath::new_root()]))
+    pub fn from_tree_path(path: &TreeNodePath) -> Self {
+        Self(path.0.iter().map(|&index| Step::Child(index)).collect())
+    }
+
+    /// `inner` (a path of the node's own world, eg its applet's) from the node at `node` of this world
+    #[must_use]
+    pub fn join(node: &TreeNodePath, inner: &Self) -> Self {
+        let mut path = Self::from_tree_path(node);
+        path.push_inner(inner);
+        path
+    }
+
+    /// Goes on to `inner`, a path of the node's own world
+    pub fn push_inner(&mut self, inner: &Self) {
+        let mut steps = inner.0.iter();
+        match steps.next() {
+            Some(&Step::Child(index) | &Step::Inner(index)) => self.0.push(Step::Inner(index)),
+            None => return,
+        }
+        self.0.extend(steps);
+    }
+
+    /// The node in the outermost world, and the path inside it (as a path of its own world) if it goes in
+    #[must_use]
+    pub fn split_world(&self) -> (TreeNodePath, Option<Self>) {
+        let outer = self
+            .0
+            .iter()
+            .position(|step| matches!(step, Step::Inner(_)))
+            .unwrap_or(self.0.len());
+        let node = TreeNodePath(
+            self.0[..outer]
+                .iter()
+                .map(|&step| match step {
+                    Step::Child(index) | Step::Inner(index) => index,
+                })
+                .collect(),
+        );
+        let inner = (outer < self.0.len()).then(|| {
+            let mut inner = self.0[outer..].to_vec();
+            if let Step::Inner(index) = inner[0] {
+                inner[0] = Step::Child(index);
+            }
+            Self(inner)
+        });
+        (node, inner)
+    }
+
+    /// Whether this is `other` or a path below it
+    #[must_use]
+    pub fn starts_with(&self, other: &Self) -> bool {
+        self.0.starts_with(&other.0)
+    }
+
+    /// Whether it goes inside a node of the outermost world
+    #[must_use]
+    pub fn is_inner(&self) -> bool {
+        self.0.iter().any(|step| matches!(step, Step::Inner(_)))
     }
 }
 
@@ -52,21 +114,22 @@ impl<T> WorldTree<T> {
         }
     }
 
-    pub fn safe_get(&self, path: &WorldTreePath) -> Option<&Self> {
-        match path.0.first() {
-            None => {
-                // Base case:
-                Some(self)
-            }
-            Some(tree_path) => match self {
-                // If we are at the base, then we can't further index a tree path
-                Self::Base(_) => None,
-                Self::World(recursive_tree_node) => recursive_tree_node
-                    .safe_get(tree_path)?
-                    .get_value()
-                    .safe_get(&WorldTreePath(path.0[1..].into())),
-            },
+    /// The node at `path`, `None` for a base value
+    pub fn safe_get(&self, path: &WorldTreePath) -> Option<&RecursiveTreeNode<Self>> {
+        let Self::World(root) = self else {
+            return None;
+        };
+        let mut node: &RecursiveTreeNode<Self> = root;
+        for &step in &path.0 {
+            node = match step {
+                Step::Child(index) => node.safe_get(&TreeNodePath(vec![index]))?,
+                Step::Inner(index) => match node.get_value() {
+                    Self::World(inner_root) => inner_root.safe_get(&TreeNodePath(vec![index]))?,
+                    Self::Base(_) => return None,
+                },
+            };
         }
+        Some(node)
     }
 }
 impl WorldTree<String> {

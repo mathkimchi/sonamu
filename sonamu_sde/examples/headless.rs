@@ -226,21 +226,25 @@ fn main() {
     }
 }
 
-/// `a|b|c` world path of `,`-separated indices, eg `|0` = [[], [0]]
+/// `a|b|c` world path of `,`-separated indices: each part after the first goes into the inner world
+/// of the node the previous one ends at (eg `2|0` is `[Child(2), Inner(0)]`, and `2|` is just node `2`)
 fn parse_path(raw: &str) -> singularity_common::utils::tree::world_tree::WorldTreePath {
-    use singularity_common::utils::tree::tree_node_path::TreeNodePath;
-    singularity_common::utils::tree::world_tree::WorldTreePath(
-        raw.split('|')
-            .map(|part| {
-                TreeNodePath(
-                    part.split(',')
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.parse().unwrap())
-                        .collect(),
-                )
-            })
-            .collect(),
-    )
+    use singularity_common::utils::tree::world_tree::{Step, WorldTreePath};
+    let mut path = WorldTreePath::root();
+    for (world, part) in raw.split('|').enumerate() {
+        let indices = part
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.parse().unwrap());
+        for (index, child) in indices.enumerate() {
+            path.0.push(if world > 0 && index == 0 {
+                Step::Inner(child)
+            } else {
+                Step::Child(child)
+            });
+        }
+    }
+    path
 }
 
 fn parse(arg: &str) -> (String, Option<KeySymbol>, KeyModifiers) {

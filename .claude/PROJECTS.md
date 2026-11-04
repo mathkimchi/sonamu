@@ -108,7 +108,7 @@ a layer. Round 2 gave projects an inner tree but no children. Path "inside" must
 Enter only confirms, modifier keys don't leave the selector.
 
 Superseding round 2:
-- **On the project (`[[p]]`) and inside it at its inner root (`[[p], []]`) are distinct again.** Removed
+- (Undone by #83: the two are one row and one path, `[Child(p)]`.) **On the project (`[[p]]`) and inside it at its inner root (`[[p], []]`) are distinct again.** Removed
   `focus_into_project`, `leave_project`, the empty published focus and the project-row border special case.
   The inner world's root is still a container labeled `Project` (shown on the project's row, as an inner root is).
   Making a project focuses the project node itself.

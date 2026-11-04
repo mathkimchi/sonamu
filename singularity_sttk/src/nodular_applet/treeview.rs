@@ -8,7 +8,7 @@ use singularity_common::{
     settings,
     utils::tree::{
         tree_node_path::{TraversableTree, TreeNodePath},
-        world_tree::{WorldTree, WorldTreePath},
+        world_tree::{Step, WorldTree, WorldTreePath},
     },
 };
 use std::time::{Duration, Instant};
@@ -97,15 +97,16 @@ pub fn treeview_rows(
     up: Option<(TreeNodePath, String)>,
 ) -> Vec<TreeviewRow> {
     let mut rows = Vec::new();
-    push_rows(treeview, &[], 0, false, 0, &mut rows);
+    push_rows(treeview, &WorldTreePath::root(), 0, false, 0, &mut rows);
+    let base = WorldTreePath::from_tree_path(base);
     for row in &mut rows {
-        row.path.0[0].0.splice(0..0, base.0.iter().copied());
+        row.path.0.splice(0..0, base.0.iter().copied());
     }
     if let Some((path, label)) = up {
         rows.insert(
             0,
             TreeviewRow {
-                path: WorldTreePath(Box::new([path])),
+                path: WorldTreePath::from_tree_path(&path),
                 depth: 0,
                 label: format!("‹ {label}"),
                 inner: true,
@@ -117,37 +118,35 @@ pub fn treeview_rows(
     rows
 }
 
-/// The rows of the inner tree of the node at `holder` (eg `[[2]]`),
+/// The rows of the inner tree of the node at `holder`,
 /// under a first row for that node (focusing it goes back out).
 /// `treeview` is the whole tree.
 pub fn inner_layer_rows(
     treeview: &WorldTree<String>,
     holder: &WorldTreePath,
 ) -> Option<Vec<TreeviewRow>> {
-    let world = treeview.safe_get(holder)?;
+    let world = treeview.safe_get(holder)?.get_value();
     if !matches!(world, WorldTree::World(_)) {
         return None;
     }
     let label = world.get_root_value().trim_start_matches("▾ ");
-    let mut inner_root = holder.0.to_vec();
-    inner_root.push(TreeNodePath::new_root());
     let mut rows = vec![TreeviewRow {
         label: format!("‹ {label}"),
         path: holder.clone(),
         depth: 0,
         inner: true,
         closable: false,
-        inner_root: Some(WorldTreePath(inner_root.into_boxed_slice())),
+        inner_root: Some(holder.clone()),
     }];
-    push_rows(world, &holder.0, 0, true, holder.0.len(), &mut rows);
+    push_rows(world, holder, 0, true, world_depth(holder) + 1, &mut rows);
     Some(rows)
 }
 
-/// `skip_root`: the world's root is already the row above (an applet's inner tree root is the applet itself).
+/// `skip_root`: the world's root is already the row above (`prefix`; an applet's inner tree root is the applet itself).
 /// `layer`: how many worlds deep the view is; rows deeper than it are `inner`.
 fn push_rows(
     world: &WorldTree<String>,
-    prefix: &[TreeNodePath],
+    prefix: &WorldTreePath,
     depth: usize,
     skip_root: bool,
     layer: usize,
@@ -162,14 +161,18 @@ fn push_rows(
         }
         let value = &root[&path];
         let row_depth = depth + path.depth();
-        let closable = !(prefix.is_empty() && path.is_root());
-        let mut full_path = prefix.to_vec();
-        full_path.push(path);
+        let closable = !(prefix.0.is_empty() && path.is_root());
+        let mut full_path = prefix.clone();
+        if skip_root {
+            full_path.push_inner(&WorldTreePath::from_tree_path(&path));
+        } else {
+            full_path.0.extend(WorldTreePath::from_tree_path(&path).0);
+        }
         rows.push(TreeviewRow {
-            path: WorldTreePath(full_path.clone().into_boxed_slice()),
+            path: full_path.clone(),
             depth: row_depth,
             label: value.get_root_value().clone(),
-            inner: prefix.len() > layer,
+            inner: world_depth(&full_path) > layer,
             closable,
             inner_root: None,
         });
@@ -177,33 +180,23 @@ fn push_rows(
     }
 }
 
-/// The path of the row showing what `path` points at (an applet's inner root is the applet's row)
-fn row_path(path: &WorldTreePath) -> WorldTreePath {
-    let mut path = path.0.to_vec();
-    while path.len() > 1 && path.last().is_some_and(TreeNodePath::is_root) {
-        path.pop();
-    }
-    if path.is_empty() {
-        path.push(TreeNodePath::new_root());
-    }
-    WorldTreePath(path.into_boxed_slice())
+/// How many worlds deep the path ends
+fn world_depth(path: &WorldTreePath) -> usize {
+    path.0
+        .iter()
+        .filter(|step| matches!(step, Step::Inner(_)))
+        .count()
 }
 
 /// The row showing the focus: its own row, or if that is hidden (inside a collapsed node), the row it is hidden in
 fn focused_row(rows: &[TreeviewRow], focus_path: &WorldTreePath) -> WorldTreePath {
-    let own = row_path(focus_path);
-    if rows.iter().any(|row| row.path == own) {
-        return own;
+    if rows.iter().any(|row| &row.path == focus_path) {
+        return focus_path.clone();
     }
     rows.iter()
-        .filter(|row| focus_path.0.starts_with(&row.path.0))
+        .filter(|row| focus_path.starts_with(&row.path))
         .max_by_key(|row| row.path.0.len())
-        .map_or(own, |row| row.path.clone())
-}
-
-/// Whether the focus path goes past its row, into the element's inner world (eg `[[2, 1], []]` is inside `[[2, 1]]`)
-fn is_inside_element(focus_path: &WorldTreePath) -> bool {
-    focus_path.0.len() > row_path(focus_path).0.len()
+        .map_or_else(|| focus_path.clone(), |row| row.path.clone())
 }
 
 fn rect(color: Color, position: [f32; 2], size: [f32; 2]) -> UITree {
@@ -389,23 +382,20 @@ enum DropZone {
 /// An applet that can't insert there (eg one without a `NodeTree`) appends or gives it back.
 fn drop_target(row: &TreeviewRow, zone: DropZone) -> (WorldTreePath, SpawnPosition) {
     let append = || (row.path.clone(), SpawnPosition::AppendChild);
-    let Some((node, outer)) = row.path.0.split_last().filter(|_| row.closable) else {
+    let Some((&last, parent)) = row.path.0.split_last().filter(|_| row.closable) else {
         return append();
     };
-    let Some((&index, parent)) = node.0.split_last() else {
-        return append();
-    };
+    let (Step::Child(index) | Step::Inner(index)) = last;
     let child_index = match zone {
         DropZone::Middle => return append(),
         DropZone::Top => index,
         DropZone::Bottom => index + 1,
     };
-    let mut path = outer.to_vec();
-    path.push(TreeNodePath(parent.to_vec()));
-    (
-        WorldTreePath(path.into_boxed_slice()),
-        SpawnPosition::InsertChild { child_index },
-    )
+    let position = match last {
+        Step::Child(_) => SpawnPosition::InsertChild { child_index },
+        Step::Inner(_) => SpawnPosition::InsertInner { child_index },
+    };
+    (WorldTreePath(parent.to_vec()), position)
 }
 
 struct Press {
@@ -651,9 +641,9 @@ impl TreeviewPointer {
         rows: &[TreeviewRow],
         [width, height]: [f32; 2],
         focus_path: &WorldTreePath,
+        focus_inner: bool,
     ) -> UITree {
         let focused_row = focused_row(rows, focus_path);
-        let focus_inner = is_inside_element(focus_path);
 
         if self.followed.as_ref() != Some(&focused_row) {
             if let Some(index) = rows.iter().position(|row| row.path == focused_row) {
