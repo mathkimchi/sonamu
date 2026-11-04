@@ -928,6 +928,15 @@ impl StandardApplet for ProjectApplet {
             .collect()
     }
 
+    fn screen_focus(&self) -> Vec<WorldTreePath> {
+        if !self.screen_windows() {
+            return Vec::new();
+        }
+        (0..self.holder.tree.screen_count())
+            .map(|screen| self.holder.tree.screen_focus_path(screen))
+            .collect()
+    }
+
     /// Its tree, whose root (a container) is labeled with the project's name
     fn get_treeview(&self) -> WorldTree<String> {
         if self.dissolved {

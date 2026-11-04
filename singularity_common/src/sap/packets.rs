@@ -79,6 +79,8 @@ pub struct Treeview {
     pub screen_windows: bool,
     /// With `screen_windows`, `frames_itself` for each screen's window (eg a project's overview isn't framed)
     pub screen_frames_itself: Vec<bool>,
+    /// With `screen_windows`, `focus` on each screen (eg a project's per-screen focus)
+    pub screen_focus: Vec<WorldTreePath>,
 }
 impl Treeview {
     /// Focus inside the root, not traversing, not saved
@@ -94,6 +96,7 @@ impl Treeview {
             awaiting_wl: Vec::new(),
             screen_windows: false,
             screen_frames_itself: Vec::new(),
+            screen_focus: Vec::new(),
         }
     }
 }

@@ -148,7 +148,8 @@ Enter makes a `Focusing` node `Inner`, and from then on keys go to its main.
   (`screen_surface`). A project does: its tree mirrors the screens (`set_screen_count`, `activate_screen`,
   `resize_screen`), so each screen has its own path inside it, nested projects too. Every screen shows what it would
   if active (its overview where that screen's focus is at its root, `at_root_on`), so switching screens changes
-  nothing on them; `Treeview::screen_frames_itself` says which windows frame themselves.
+  nothing on them; `Treeview::screen_frames_itself` says which windows frame themselves, and
+  `Treeview::screen_focus` where each screen's focus is inside it (for an inactive screen's treeview highlight).
 - Known gaps: splits (and anything inside them) and other applets look and focus the same on every screen;
   only the active screen's focus is saved in the session; no wallpaper or bar on the other screens (one wl output);
   no keybind to move between screens; monitors are always side by side, top aligned, at scale 1.

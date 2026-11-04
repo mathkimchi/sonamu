@@ -1001,15 +1001,28 @@ impl NodeTree {
     }
 
     /// Where the screen's focus is: `get_focus_path` for the active one,
-    /// else the node it was left on (inside it or not, it is that node's row)
+    /// else the node it was left on, and inside it the applet's focus on that screen if it has one per screen
     pub fn screen_focus_path(&self, screen: usize) -> WorldTreePath {
         if screen == self.active_screen {
             return self.get_focus_path();
         }
-        let Some(&Screen { focus: (id, _), .. }) = self.screens.get(screen) else {
+        let Some(&Screen {
+            focus: (id, inner), ..
+        }) = self.screens.get(screen)
+        else {
             return WorldTreePath::root();
         };
-        WorldTreePath::from_tree_path(&self.path_of(id).unwrap_or_else(TreeNodePath::new_root))
+        let mut path =
+            WorldTreePath::from_tree_path(&self.path_of(id).unwrap_or_else(TreeNodePath::new_root));
+        if inner && let Some(main) = self.nodes.get(id).and_then(|node| node.main.as_ref()) {
+            let treeview = main.get_treeview();
+            if treeview.screen_windows
+                && let Some(focus) = treeview.screen_focus.get(screen)
+            {
+                path.push_inner(focus);
+            }
+        }
+        path
     }
 
     /// Whether keys on the screen go into an applet, rather than to a selector

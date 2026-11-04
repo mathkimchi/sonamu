@@ -72,6 +72,11 @@ pub trait StandardApplet {
         Vec::new()
     }
 
+    /// With `screen_windows`, where focus is on each screen (`Treeview::screen_focus`)
+    fn screen_focus(&self) -> Vec<WorldTreePath> {
+        Vec::new()
+    }
+
     /// The applet's inner tree; its node shows it as is.
     fn get_treeview(&self) -> WorldTree<String>;
 
@@ -565,6 +570,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         awaiting_wl: state.applet.awaiting_wl(),
                         screen_windows: state.applet.screen_windows(),
                         screen_frames_itself: state.applet.screen_frames_itself(),
+                        screen_focus: state.applet.screen_focus(),
                     },
                     &state.request_sender,
                 );
