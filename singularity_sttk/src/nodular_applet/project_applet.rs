@@ -945,8 +945,9 @@ impl StandardApplet for ProjectApplet {
         self.holder.tree.get_focus_path()
     }
 
+    /// Not at its root: the overview has the keys there (selecting the project is its outer node's)
     fn is_traversing(&self) -> bool {
-        !self.dissolved && self.holder.tree.is_traversing()
+        !self.dissolved && !self.at_root() && self.holder.tree.is_traversing()
     }
 
     /// Its panes are framed by its own tree; the overview isn't

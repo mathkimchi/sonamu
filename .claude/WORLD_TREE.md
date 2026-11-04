@@ -176,7 +176,7 @@ The holder above stitches these in:
   (or focus leaving the view any other way) widens the view (`update_view_root`, `update_view_path`).
   Inner rows look like any other (#83: no box or shading); the panel scrolls with the wheel and follows focus.
 - `is_traversing` follows `Inner` nodes down into
-  their mains' `traversing`, since a path inside a project can still be a selection (eg `[Child(p)]` with the project selecting its root).
+  their mains' `traversing`, since a path inside a project can still be a selection (eg `[Child(p), Inner(0)]` with the project selecting its child). A project at its own root (its overview) isn't traversing (#123): selecting it is its outer node's `Focusing`.
 
 ## Paths across holders
 
