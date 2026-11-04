@@ -1,4 +1,4 @@
-# Singularity
+# Sonamu
 
 A compositor that arranges native applets and Wayland clients, and their elements, into one recursive tree.
 

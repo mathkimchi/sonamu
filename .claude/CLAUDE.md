@@ -9,9 +9,10 @@ Organizes applets and even elements of applets into a large recursive tree hiera
   - `sonamu_common/sonamu_ui` contains custom UI protocol
   - `sonamu_common/sonamu_sync` contains sync primitives
 - `sonamu_sar` is general server-side framework
-- `sonamu_sde` is containst main runner
+- `sonamu_sde` contains the main runner
 - `sonamu_sttk` contains tools for clients and necessary clients
-- `sonamu_standard_tabs`
+- `sonamu_standard_tabs` contains the native applets (code editor, file manager, image viewer, pdf preview)
+- Check for unused dependencies with `cargo machete` (sttk's `regex` is a build.rs dep it can't see; ignored in its `Cargo.toml`)
 
 DEVLOG.md is 10k+ lines, read it with tail.
 

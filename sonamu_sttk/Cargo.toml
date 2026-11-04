@@ -19,3 +19,6 @@ log = { workspace = true }
 
 [build-dependencies]
 regex = "1.12"
+
+[package.metadata.cargo-machete]
+ignored = ["regex"] # used by build.rs

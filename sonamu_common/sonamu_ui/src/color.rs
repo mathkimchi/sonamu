@@ -75,24 +75,6 @@ impl<'de> serde::Deserialize<'de> for Color {
             .map_err(serde::de::Error::custom)
     }
 }
-#[cfg(feature = "wayland_backend")]
-impl From<Color> for raqote::Color {
-    fn from(value: Color) -> Self {
-        // raqote is argb, but our color is rgba
-        raqote::Color::new(value.0[3], value.0[0], value.0[1], value.0[2])
-    }
-}
-#[cfg(feature = "wayland_backend")]
-impl From<Color> for raqote::SolidSource {
-    fn from(value: Color) -> Self {
-        raqote::SolidSource {
-            r: value.0[0],
-            g: value.0[1],
-            b: value.0[2],
-            a: value.0[3],
-        }
-    }
-}
 #[cfg(feature = "winit_backend")]
 impl From<Color> for glyphon::Color {
     /// TODO: figure out most idiomatic way of dealing with these references for copy-able types.

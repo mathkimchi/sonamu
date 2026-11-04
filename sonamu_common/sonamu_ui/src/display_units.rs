@@ -242,14 +242,6 @@ impl DisplayCoord {
             self.y.map_onto(container_area.0.y, container_area.1.y),
         )
     }
-
-    #[cfg(feature = "wayland_backend")]
-    pub fn into_raqote_point(&self, dt: &raqote::DrawTarget) -> raqote::Point {
-        raqote::Point::new(
-            self.x.pixels(dt.width()) as f32,
-            self.y.pixels(dt.height()) as f32,
-        )
-    }
 }
 
 /// technically, any opposite extremes should work,

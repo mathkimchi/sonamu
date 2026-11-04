@@ -9,22 +9,10 @@ workspace = true
 [dependencies]
 sonamu_sync = { workspace = true }
 
-wayland-client = { version = "^0.31", optional = true }
-wayland-protocols = { version = "^0.32", features = [
-    "client",
-], optional = true }
-smithay-client-toolkit = { version = "^0.20", optional = true }
 calloop = { workspace = true }
-
-# raqote = { version = "^0.8", optional = true }
-# font-kit = { version = "^0.14.3", optional = true }
-# # pathfinder_canvas = { version = "^0.5.0", optional = true }
-# pathfinder_geometry = { version = "^0.5.1", optional = true }
 
 serde = { workspace = true }
 # serde_json = { workspace = true }
-
-image = { workspace = true }
 
 # just for winit backend
 glyphon = "^0.11"
@@ -47,14 +35,4 @@ log = { workspace = true }
 
 [features]
 default = ["winit_backend"]
-wayland_backend = [
-    "wayland-client",
-    "wayland-protocols",
-    "smithay-client-toolkit",
-
-    # "raqote",
-    # "font-kit",
-    # # "pathfinder_canvas",
-    # "pathfinder_geometry",
-]
 winit_backend = []
