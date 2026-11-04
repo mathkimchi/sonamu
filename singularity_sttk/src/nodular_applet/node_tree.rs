@@ -1112,6 +1112,14 @@ impl NodeTree {
         &self.nodes[id].children
     }
 
+    /// New children of the node go inside its main (see `StandardApplet::holds_children`)
+    pub fn holds_children(&self, id: NodeId) -> bool {
+        self.nodes
+            .get(id)
+            .and_then(|node| node.main.as_ref())
+            .is_some_and(|main| main.get_treeview().holds_children)
+    }
+
     /// Its main frames what it shows itself (see `StandardApplet::frames_itself`)
     /// Its window on `screen` frames itself
     fn frames_itself(&self, id: NodeId, screen: usize) -> bool {

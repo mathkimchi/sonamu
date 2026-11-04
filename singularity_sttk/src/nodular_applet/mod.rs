@@ -93,6 +93,13 @@ pub trait StandardApplet {
         false
     }
 
+    /// Whether new children of its node go inside it instead (eg a project's or split's panes): a keybind, menu,
+    /// drop, opened applet or wl window that would add one to its node is passed in, at its root (#83).
+    /// Published with the treeview.
+    fn holds_children(&self) -> bool {
+        false
+    }
+
     /// Puts focus at the element at `path` (in the inner tree), eg it was clicked in the root's treeview
     /// or `e` went into this applet (`[[]]`, its inner root)
     fn focus(&mut self, _path: &WorldTreePath) {}
@@ -545,6 +552,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         focus: state.applet.get_focus_path(),
                         traversing: state.applet.is_traversing(),
                         frames_itself: state.applet.frames_itself(),
+                        holds_children: state.applet.holds_children(),
                         saved: state.applet.save(),
                         awaiting_wl: state.applet.awaiting_wl(),
                         screen_windows: state.applet.screen_windows(),

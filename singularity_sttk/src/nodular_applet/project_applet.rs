@@ -954,6 +954,10 @@ impl StandardApplet for ProjectApplet {
         !self.dissolved && !self.at_root()
     }
 
+    fn holds_children(&self) -> bool {
+        !self.dissolved
+    }
+
     fn focus(&mut self, path: &WorldTreePath) {
         if !self.dissolved {
             self.holder.focus(path);

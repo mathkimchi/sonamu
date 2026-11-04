@@ -67,6 +67,8 @@ pub struct Treeview {
     pub traversing: bool,
     /// It frames what it shows itself (eg a nested tree framing its own panes), so its holder doesn't frame it
     pub frames_itself: bool,
+    /// New children of its node go inside it (eg a project's panes), so its holder passes them in (#83)
+    pub holds_children: bool,
     /// How to make the client again on the next start; `None` if it isn't saved (eg the help)
     pub saved: Option<SavedApplet>,
     /// Restored wl clients inside the client whose tiles wait for their toplevel (eg in a project)
@@ -84,6 +86,7 @@ impl Treeview {
             focus: WorldTreePath::root(),
             traversing: false,
             frames_itself: false,
+            holds_children: false,
             saved: None,
             awaiting_wl: Vec::new(),
             screen_windows: false,

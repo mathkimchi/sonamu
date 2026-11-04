@@ -192,11 +192,26 @@ impl NodeHolder {
     /// except that its applet is asked to close rather than closed (eg a wl client may refuse).
     /// Returns what the holder's own node should do instead, like `handle_node_request`.
     pub fn handle_ui_event(&mut self, event: StandardEvent) -> Option<NodeRequest> {
+        let ui_event = match &event {
+            StandardEvent::UIEvent(ui_event) => Some(*ui_event),
+            _ => None,
+        };
         self.tree.handle_event(event);
         self.tree.wake_focused();
         let (id, request) = self.tree.take_keybind_request()?;
         if matches!(request, NodeRequest::Close) {
             self.request_close(id);
+            return None;
+        }
+        // a new child of a node holding its children: the keybind is done inside it, at its root
+        if matches!(request, NodeRequest::AddChild(_) | NodeRequest::Run(_))
+            && self.tree.holds_children(id)
+            && let Some(ui_event) = ui_event
+        {
+            self.tree.focus(id, true);
+            self.tree
+                .send_event(id, StandardEvent::Focus(WorldTreePath::root()));
+            self.tree.send_event(id, StandardEvent::UIEvent(ui_event));
             return None;
         }
         self.handle_node_request(id, request)
@@ -217,6 +232,12 @@ impl NodeHolder {
         let Some(id) = self.tree.node_at(&node_path) else {
             return;
         };
+        // a new child of a node holding its children goes inside it
+        let inner = inner.or_else(|| {
+            (matches!(action, NodeAction::Spawn { sibling: false, .. })
+                && self.tree.holds_children(id))
+            .then(WorldTreePath::root)
+        });
         if let Some(inner) = inner {
             // so a spawned program's window is passed in there
             if matches!(action, NodeAction::Spawn { .. }) {
@@ -283,7 +304,7 @@ impl NodeHolder {
     /// (it may take it or give it back with `NodeRequest::Open`), otherwise under the focused node
     pub fn open(&mut self, open: OpenApplet) {
         let id = self.tree.focused_node();
-        if self.tree.is_inner(id) {
+        if self.tree.is_inner(id) || self.tree.holds_children(id) {
             self.tree.send_event(id, StandardEvent::Open(open));
         } else {
             self.open_under(id, &open);
@@ -338,6 +359,13 @@ impl NodeHolder {
             inner.get_or_insert_with(WorldTreePath::root);
             position = SpawnPosition::InsertChild { child_index };
         }
+        // onto a node holding its children: inside it
+        if position == SpawnPosition::AppendChild
+            && let (id, true) = self.tree.closest_node_at(&node_path)
+            && self.tree.holds_children(id)
+        {
+            inner.get_or_insert_with(WorldTreePath::root);
+        }
 
         if exact && let Some(inner) = inner {
             match self
@@ -372,7 +400,7 @@ impl NodeHolder {
             return;
         }
         let id = self.tree.focused_node();
-        if self.tree.is_inner(id) {
+        if self.tree.is_inner(id) || self.tree.holds_children(id) {
             self.tree
                 .send_event(id, StandardEvent::WlSurfaceRegistered(surface));
         } else {
