@@ -54,9 +54,6 @@ const PANEL_BG: Color = with_opacity(Color([0x16, 0x16, 0x1C, 0]));
 const HOVER_BG: Color = with_opacity(Color([0x26, 0x2A, 0x32, 0]));
 const FOCUS_BG: Color = with_opacity(Color([0x1C, 0x3D, 0x2E, 0]));
 const GUIDE: Color = with_opacity(Color([0x3B, 0x40, 0x49, 0]));
-/// An expanded inner tree's box
-const INNER_BOX_BG: Color = with_opacity(Color([0x1C, 0x1C, 0x26, 0]));
-const INNER_BOX_BORDER: Color = GUIDE;
 const DRAGGED_TEXT: Color = Color([0x55, 0x5A, 0x64, 0]);
 const DROP_TARGET: Color = with_opacity(Color::CYAN);
 /// The share of a row's height at its top and at its bottom that drops between siblings
@@ -79,8 +76,6 @@ pub struct TreeviewRow {
     pub path: WorldTreePath,
     pub(crate) depth: usize,
     label: String,
-    /// Inside an applet's inner tree, rather than a node (or the view root's parent)
-    inner: bool,
     /// Has a close button (shown while hovered): not the root, nor a `‹` row
     closable: bool,
 }
@@ -95,7 +90,7 @@ pub fn treeview_rows(
     up: Option<(WorldTreePath, String)>,
 ) -> Vec<TreeviewRow> {
     let mut rows = Vec::new();
-    push_rows(treeview, &WorldTreePath::root(), 0, false, 0, &mut rows);
+    push_rows(treeview, &WorldTreePath::root(), 0, false, &mut rows);
     for row in &mut rows {
         row.path.0.splice(0..0, base.0.iter().copied());
     }
@@ -106,7 +101,6 @@ pub fn treeview_rows(
                 path,
                 depth: 0,
                 label: format!("‹ {label}"),
-                inner: true,
                 closable: false,
             },
         );
@@ -115,13 +109,11 @@ pub fn treeview_rows(
 }
 
 /// `skip_root`: the world's root is already the row above (`prefix`; an applet's inner tree root is the applet itself).
-/// `layer`: how many worlds deep the view is; rows deeper than it are `inner`.
 fn push_rows(
     world: &WorldTree<String>,
     prefix: &WorldTreePath,
     depth: usize,
     skip_root: bool,
-    layer: usize,
     rows: &mut Vec<TreeviewRow>,
 ) {
     let WorldTree::World(root) = world else {
@@ -144,19 +136,10 @@ fn push_rows(
             path: full_path.clone(),
             depth: row_depth,
             label: value.get_root_value().clone(),
-            inner: world_depth(&full_path) > layer,
             closable,
         });
-        push_rows(value, &full_path, row_depth, true, layer, rows);
+        push_rows(value, &full_path, row_depth, true, rows);
     }
-}
-
-/// How many worlds deep the path ends
-fn world_depth(path: &WorldTreePath) -> usize {
-    path.0
-        .iter()
-        .filter(|step| matches!(step, Step::Inner(_)))
-        .count()
 }
 
 /// The row showing the focus: its own row, or if that is hidden (inside a collapsed node), the row it is hidden in
@@ -624,131 +607,134 @@ impl TreeviewPointer {
 
         let dragging = self.press.as_ref().filter(|press| press.dragging);
 
-        let mut children = inner_box_trees(rows, width, row_top);
+        let mut children: Vec<UITree> = rows
+            .iter()
+            .enumerate()
+            .skip(scroll)
+            .map(|(index, row)| {
+                let is_focused = row.path == focused_row;
+                let is_hovered = self.hovered == Some(index);
+                let is_dragged = dragging.is_some_and(|press| press.path == row.path);
 
-        children.extend(rows.iter().enumerate().skip(scroll).map(|(index, row)| {
-            let is_focused = row.path == focused_row;
-            let is_hovered = self.hovered == Some(index);
-            let is_dragged = dragging.is_some_and(|press| press.path == row.path);
+                let mut parts = Vec::new();
+                for level in 0..row.depth {
+                    parts.push(rect(
+                        GUIDE,
+                        [LEFT_PAD + level as f32 * INDENT + INDENT / 2.0 - 1.0, 0.0],
+                        [2.0, row_height()],
+                    ));
+                }
+                if is_focused {
+                    let marker = if focus_inner {
+                        settings.border.focused
+                    } else {
+                        settings.palette.accent
+                    };
+                    parts.push(rect(
+                        with_opacity(marker),
+                        [0.0, 0.0],
+                        [MARKER_WIDTH, row_height()],
+                    ));
+                }
 
-            let mut parts = Vec::new();
-            for level in 0..row.depth {
-                parts.push(rect(
-                    GUIDE,
-                    [LEFT_PAD + level as f32 * INDENT + INDENT / 2.0 - 1.0, 0.0],
-                    [2.0, row_height()],
-                ));
-            }
-            if is_focused {
-                let marker = if focus_inner {
-                    settings.border.focused
-                } else {
-                    settings.palette.accent
-                };
-                parts.push(rect(
-                    with_opacity(marker),
-                    [0.0, 0.0],
-                    [MARKER_WIDTH, row_height()],
-                ));
-            }
-
-            let text_left = LEFT_PAD + row.depth as f32 * INDENT;
-            let text_top = (row_height() - font_size()) / 2.0;
-            // like a browser tab's, only on the hovered row
-            let shows_close = row.closable && is_hovered && dragging.is_none();
-            let text_color = with_opacity(if is_dragged {
-                DRAGGED_TEXT
-            } else if is_inactive(row) {
-                settings.palette.inactive
-            } else {
-                settings.palette.fg
-            });
-            let label = if row.label.is_empty() {
-                "…".to_string()
-            } else {
-                row.label.clone()
-            };
-            parts.push(UITree::leaf_styled(
-                UIElement::Text(vec![(label, UIElement::glyphon_attr(text_color))]),
-                Style::absolute(
-                    [text_left, text_top],
-                    [
-                        (width - text_left - if shows_close { close_width() } else { 0.0 })
-                            .max(0.0),
-                        row_height() - text_top,
-                    ],
-                ),
-            ));
-            if shows_close {
-                let color = if self.hovered_close {
-                    settings.palette.fg
-                } else {
+                let text_left = LEFT_PAD + row.depth as f32 * INDENT;
+                let text_top = (row_height() - font_size()) / 2.0;
+                // like a browser tab's, only on the hovered row
+                let shows_close = row.closable && is_hovered && dragging.is_none();
+                let text_color = with_opacity(if is_dragged {
+                    DRAGGED_TEXT
+                } else if is_inactive(row) {
                     settings.palette.inactive
-                };
-                parts.push(
-                    UITree::leaf_styled(
-                        UIElement::Text(vec![(
-                            "×".to_string(),
-                            UIElement::glyphon_attr(with_opacity(color)),
-                        )]),
-                        Style::absolute(
-                            [
-                                width - close_width() + (close_width() - font_size()) / 2.0,
-                                text_top,
-                            ],
-                            [close_width(), row_height() - text_top],
-                        ),
-                    )
-                    .with_cursor(Some(Cursor::Named(CursorIcon::Pointer))),
-                );
-            }
-            if has_triangle(row) {
-                parts.push(
-                    UITree::leaf_styled(
-                        UIElement::Nothing,
-                        Style::absolute([text_left, 0.0], [triangle_width(), row_height()]),
-                    )
-                    .with_cursor(Some(Cursor::Named(CursorIcon::Pointer))),
-                );
-            }
-
-            let hovered_drop = dragging.is_some() && is_hovered && !is_dragged;
-            if hovered_drop && drop_target(row, self.zone).1 != SpawnPosition::AppendChild {
-                // a line between siblings
-                let line_left = LEFT_PAD + row.depth as f32 * INDENT;
-                let line_top = if self.zone == DropZone::Top {
-                    0.0
                 } else {
-                    row_height() - INSERT_LINE_HEIGHT
+                    settings.palette.fg
+                });
+                let label = if row.label.is_empty() {
+                    "…".to_string()
+                } else {
+                    row.label.clone()
                 };
-                parts.push(rect(
-                    DROP_TARGET,
-                    [line_left, line_top],
-                    [(width - line_left - 4.0).max(0.0), INSERT_LINE_HEIGHT],
-                ));
-            } else if hovered_drop {
                 parts.push(UITree::leaf_styled(
-                    UIElement::border(DROP_TARGET),
-                    Style {
-                        border: Length::uniform_rect(Length::Px(2.0)),
-                        ..Style::absolute([2.0, 0.0], [(width - 4.0).max(0.0), row_height()])
-                    },
+                    UIElement::Text(vec![(label, UIElement::glyphon_attr(text_color))]),
+                    Style::absolute(
+                        [text_left, text_top],
+                        [
+                            (width - text_left - if shows_close { close_width() } else { 0.0 })
+                                .max(0.0),
+                            row_height() - text_top,
+                        ],
+                    ),
                 ));
-            }
+                if shows_close {
+                    let color = if self.hovered_close {
+                        settings.palette.fg
+                    } else {
+                        settings.palette.inactive
+                    };
+                    parts.push(
+                        UITree::leaf_styled(
+                            UIElement::Text(vec![(
+                                "×".to_string(),
+                                UIElement::glyphon_attr(with_opacity(color)),
+                            )]),
+                            Style::absolute(
+                                [
+                                    width - close_width() + (close_width() - font_size()) / 2.0,
+                                    text_top,
+                                ],
+                                [close_width(), row_height() - text_top],
+                            ),
+                        )
+                        .with_cursor(Some(Cursor::Named(CursorIcon::Pointer))),
+                    );
+                }
+                if has_triangle(row) {
+                    parts.push(
+                        UITree::leaf_styled(
+                            UIElement::Nothing,
+                            Style::absolute([text_left, 0.0], [triangle_width(), row_height()]),
+                        )
+                        .with_cursor(Some(Cursor::Named(CursorIcon::Pointer))),
+                    );
+                }
 
-            let background = if is_focused {
-                UIElement::Backgrounded(FOCUS_BG)
-            } else if is_hovered && dragging.is_none() {
-                UIElement::Backgrounded(HOVER_BG)
-            } else {
-                UIElement::Nothing
-            };
-            UITree::new_styled(
-                background,
-                Style::absolute([0.0, row_top(index)], [width, row_height()]),
-                parts,
-            )
-        }));
+                let hovered_drop = dragging.is_some() && is_hovered && !is_dragged;
+                if hovered_drop && drop_target(row, self.zone).1 != SpawnPosition::AppendChild {
+                    // a line between siblings
+                    let line_left = LEFT_PAD + row.depth as f32 * INDENT;
+                    let line_top = if self.zone == DropZone::Top {
+                        0.0
+                    } else {
+                        row_height() - INSERT_LINE_HEIGHT
+                    };
+                    parts.push(rect(
+                        DROP_TARGET,
+                        [line_left, line_top],
+                        [(width - line_left - 4.0).max(0.0), INSERT_LINE_HEIGHT],
+                    ));
+                } else if hovered_drop {
+                    parts.push(UITree::leaf_styled(
+                        UIElement::border(DROP_TARGET),
+                        Style {
+                            border: Length::uniform_rect(Length::Px(2.0)),
+                            ..Style::absolute([2.0, 0.0], [(width - 4.0).max(0.0), row_height()])
+                        },
+                    ));
+                }
+
+                let background = if is_focused {
+                    UIElement::Backgrounded(FOCUS_BG)
+                } else if is_hovered && dragging.is_none() {
+                    UIElement::Backgrounded(HOVER_BG)
+                } else {
+                    UIElement::Nothing
+                };
+                UITree::new_styled(
+                    background,
+                    Style::absolute([0.0, row_top(index)], [width, row_height()]),
+                    parts,
+                )
+            })
+            .collect();
 
         if let Some(menu) = &self.menu {
             children.push(menu.render([width, height]));
@@ -759,34 +745,6 @@ impl TreeviewPointer {
             children,
         )
     }
-}
-
-/// A box behind each shown inner tree's rows. `row_top` is where a row is drawn.
-fn inner_box_trees(
-    rows: &[TreeviewRow],
-    width: f32,
-    row_top: impl Fn(usize) -> f32,
-) -> Vec<UITree> {
-    inner_boxes(rows)
-        .flat_map(|(holder, end)| {
-            let left = LEFT_PAD + rows[holder].depth as f32 * INDENT + INDENT / 2.0 - 1.0;
-            let position = [left, row_top(holder + 1)];
-            let size = [
-                (width - left - 4.0).max(0.0),
-                (end - holder) as f32 * row_height(),
-            ];
-            [
-                rect(INNER_BOX_BG, position, size),
-                UITree::leaf_styled(
-                    UIElement::border(INNER_BOX_BORDER),
-                    Style {
-                        border: Length::uniform_rect(Length::Px(2.0)),
-                        ..Style::absolute(position, size)
-                    },
-                ),
-            ]
-        })
-        .collect()
 }
 
 /// Its node is inactive (see `INACTIVE_MARK`)
@@ -810,21 +768,6 @@ fn shown_rows(height: f32) -> usize {
 /// The furthest the rows can scroll: until the last one is at the bottom
 fn max_scroll(row_count: usize, height: f32) -> usize {
     row_count.saturating_sub(shown_rows(height))
-}
-
-/// Each shown inner tree: the row holding it, and the last of the rows of it (which directly follow)
-fn inner_boxes(rows: &[TreeviewRow]) -> impl Iterator<Item = (usize, usize)> {
-    rows.iter().enumerate().filter_map(|(holder, row)| {
-        let len = rows[holder + 1..]
-            .iter()
-            .take_while(|inner| {
-                inner.inner
-                    && inner.path.0.len() > row.path.0.len()
-                    && inner.path.0.starts_with(&row.path.0)
-            })
-            .count();
-        (len > 0).then_some((holder, holder + len))
-    })
 }
 
 fn distance([x1, y1]: [f64; 2], [x2, y2]: [f64; 2]) -> f64 {

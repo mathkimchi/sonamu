@@ -56,7 +56,8 @@ Applets have no traversal of their own.
 - Swipes (DRM backend only: `UIEvent::Swipe`, a step each time the fingers move `SWIPE_DISTANCE`): 3 fingers up / down
   is Shift+Tab / Tab, every step; 4 fingers up selects the focused row (out of its applet), 4 down is Enter; once a swipe.
 - In the selector (the deepest holder's `NodeTree::handle_event`, or an applet's own, eg the file manager's documents):
-  Space (or clicking its `▾`/`▸`, outer-world nodes only for now) collapses/expands; Enter confirms (into the applet,
+  Space (or clicking its `▾`/`▸`) collapses/expands all its children, inner and own (the holder owning the row keeps
+  the flag, unsaved; `NodeTree::applet_treeview`/`get_treeview_of` leave them out); Enter confirms (into the applet,
   resuming where it was; a split's first pane). Modifiers on their own don't leave the selector; other keys go into the applet.
 - The standard keybinds (Ctrl+W, Ctrl+Shift++, splits, Super+P) act on the selected node.
   Ctrl+W asks its main to close (`CloseRequest`, see below) rather than closing it.
@@ -170,7 +171,7 @@ The holder above stitches these in:
   is then the node holding it). Set by a double click on a row, its right click › Set as view root, Super+V (the focused
   row, or back to the whole tree) and Alt+R (the focused row's parent). Above it is a dim `‹ parent` row; focusing it
   (or focus leaving the view any other way) widens the view (`update_view_root`, `update_view_path`).
-  Expanded inner worlds are drawn in a box; the panel scrolls with the wheel and follows focus.
+  Inner rows look like any other (#83: no box or shading); the panel scrolls with the wheel and follows focus.
 - `is_traversing` follows `Inner` nodes down into
   their mains' `traversing`, since a path inside a project can still be a selection (eg `[Child(p)]` with the project selecting its root).
 

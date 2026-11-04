@@ -1138,24 +1138,28 @@ impl NodeTree {
         self.applet_treeview(id).get_root_value().clone()
     }
 
-    /// Its main's inner tree (or its layout's label), marked `▾` if it has inner elements, or `▸` and hidden if collapsed
+    /// Its main's inner tree (or its layout's label), marked `▾` if it has inner elements or children,
+    /// or `▸` and hidden if collapsed (its children too, see `get_treeview_of`)
     fn applet_treeview(&self, id: NodeId) -> WorldTree<String> {
         let node = &self.nodes[id];
-        let Some(main) = &node.main else {
-            return WorldTree::Base(node.layout.label().to_string());
+        let mut treeview = match &node.main {
+            None => WorldTree::Base(node.layout.label().to_string()),
+            Some(main) => {
+                let published = main.get_treeview();
+                let mut treeview = published.tree;
+                if let Some(icon) = icon(published.saved.as_ref()) {
+                    root_label_mut(&mut treeview).insert_str(0, &format!("{icon} "));
+                }
+                if node.inactive {
+                    root_label_mut(&mut treeview).insert_str(0, INACTIVE_MARK);
+                }
+                treeview
+            }
         };
-        let published = main.get_treeview();
-        let mut treeview = published.tree;
-        if let Some(icon) = icon(published.saved.as_ref()) {
-            root_label_mut(&mut treeview).insert_str(0, &format!("{icon} "));
-        }
-        if node.inactive {
-            root_label_mut(&mut treeview).insert_str(0, INACTIVE_MARK);
-        }
         if node.collapsed {
             return WorldTree::Base(format!("▸ {}", treeview.get_root_value()));
         }
-        if has_inner_elements(&treeview) {
+        if has_inner_elements(&treeview) || !node.children.is_empty() {
             root_label_mut(&mut treeview).insert_str(0, "▾ ");
         }
         treeview
@@ -1216,6 +1220,7 @@ impl NodeTree {
             return;
         };
         let collapsible = node.collapsed
+            || !node.children.is_empty()
             || node
                 .main
                 .as_ref()
@@ -1709,6 +1714,9 @@ impl NodeTree {
     fn get_treeview_of(&self, id: NodeId) -> WorldTree<String> {
         let node = &self.nodes[id];
         let mut raw_treeview = RecursiveTreeNode::from_value(self.applet_treeview(id));
+        if node.collapsed {
+            return WorldTree::World(Box::new(raw_treeview));
+        }
 
         for &child in &node.children {
             match self.get_treeview_of(child) {
