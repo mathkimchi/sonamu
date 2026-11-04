@@ -96,15 +96,15 @@ impl DrmOutput {
         capture: bool,
     ) -> Result<Option<CapturedFrame>, String> {
         let (buffer, _) = self.surface.next_buffer().map_err(|err| err.to_string())?;
-        let texture = match self.textures.iter().find(|(drawn, _)| *drawn == buffer) {
-            Some((_, texture)) => texture.clone(),
-            None => {
+        let texture =
+            if let Some((_, texture)) = self.textures.iter().find(|(drawn, _)| *drawn == buffer) {
+                texture.clone()
+            } else {
                 let texture = dmabuf::import(&renderer.device, &buffer, SCANOUT_USAGE)
                     .ok_or("can't import a scanout buffer into wgpu")?;
                 self.textures.push((buffer, texture.clone()));
                 texture
-            }
-        };
+            };
         let captured = UIDisplay::draw_to(renderer, &texture, scene, capture, self.origin);
         // no fences yet, so it has to be drawn before it's flipped
         let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
@@ -176,7 +176,7 @@ pub fn run_drm_display(
     event_queue: Sender<UIEvent>,
     ui_content: TrackedEncapsulatedLock<PrimitiveScene>,
     gpu: Gpu,
-    proxy_tx: std::sync::mpsc::Sender<DisplayProxy>,
+    proxy_tx: &std::sync::mpsc::Sender<DisplayProxy>,
     display_notification_queue: Sender<DisplayNotification>,
 ) {
     let mut event_loop: EventLoop<DrmDisplay> = EventLoop::try_new().unwrap();
@@ -425,23 +425,22 @@ impl DrmDisplay {
                 .any(|(info, mode)| (info.handle(), *mode) == (output.connector, output.mode))
         });
         for (info, mode) in connected {
-            let output = match old
+            let output = if let Some(index) = old
                 .iter()
                 .position(|output| output.connector == info.handle())
             {
-                Some(index) => old.swap_remove(index),
-                None => {
-                    let used = old
-                        .iter()
-                        .chain(&self.outputs)
-                        .map(|output| output.crtc)
-                        .collect::<Vec<_>>();
-                    match self.new_output(&info, mode, &used) {
-                        Ok(output) => output,
-                        Err(err) => {
-                            log::error!("Can't show on {:?}: {err}", info.handle());
-                            continue;
-                        }
+                old.swap_remove(index)
+            } else {
+                let used = old
+                    .iter()
+                    .chain(&self.outputs)
+                    .map(|output| output.crtc)
+                    .collect::<Vec<_>>();
+                match self.new_output(&info, mode, &used) {
+                    Ok(output) => output,
+                    Err(err) => {
+                        log::error!("Can't show on {:?}: {err}", info.handle());
+                        continue;
                     }
                 }
             };

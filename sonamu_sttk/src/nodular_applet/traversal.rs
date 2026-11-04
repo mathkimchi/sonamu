@@ -158,6 +158,10 @@ mod tests {
         treeview_rows(&tree, &WorldTreePath::root(), None)
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "compared with `target`'s `Option`"
+    )]
     fn path(steps: &[sonamu_common::utils::tree::world_tree::Step]) -> Option<WorldTreePath> {
         Some(WorldTreePath(steps.to_vec()))
     }

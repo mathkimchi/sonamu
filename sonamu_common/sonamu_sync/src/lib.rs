@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, Mutex, RwLock, atomic::AtomicUsize},
 };
 
-
 /// Lock (RwLock) but you can only call getter and setter,
 /// so this is guranteed to prevent deadlocks.
 /// (Don't hold me liable for the above statement.)

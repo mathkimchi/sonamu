@@ -5,6 +5,7 @@ use crate::{
     standard_keybinds::standard_keybind_request,
     wl_surface_applet::WlSurfaceApplet,
 };
+use slotmap::SlotMap;
 use sonamu_common::{
     sap::{
         client_handle::ClientHandle,
@@ -19,7 +20,6 @@ use sonamu_common::{
         world_tree::{Step, WorldTree, WorldTreePath},
     },
 };
-use slotmap::SlotMap;
 use sonamu_ui::{
     display_units::DisplayContainerSize,
     ui_element::{Length, Style, UIElement, UITree},
@@ -361,7 +361,7 @@ impl NodeTree {
     /// Gives the surface to the restored tile awaiting it, by its pid, else its app id
     /// (eg a browser's window comes from its running instance, not the process the tile started).
     /// A tile inside a main (eg a project) is given it by the main. `Err` if none awaits it.
-    pub fn claim_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), NewWlSurface> {
+    pub fn claim_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), Box<NewWlSurface>> {
         let matches = |awaited: &AwaitedWl, by_pid: bool| {
             if by_pid {
                 surface.pid == Some(awaited.pid)
@@ -396,7 +396,7 @@ impl NodeTree {
                 return Ok(());
             }
         }
-        Err(surface)
+        Err(Box::new(surface))
     }
 
     /// The tile shows the surface in place of the applet standing in for it

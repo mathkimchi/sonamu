@@ -4,9 +4,6 @@ mod layer_shell;
 
 use crate::runner::AppletRunner;
 use calloop::{LoopHandle, PostAction};
-use sonamu_common::sap::packets::{
-    NewWlSurface, StandardEvent, WlSurfaceEvent, WlSurfaceId, WlSurfaceRequest,
-};
 use slotmap::{SecondaryMap, SlotMap};
 use smithay::backend::allocator::Buffer as _;
 use smithay::{
@@ -92,6 +89,9 @@ use smithay::{
             XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
         },
     },
+};
+use sonamu_common::sap::packets::{
+    NewWlSurface, StandardEvent, WlSurfaceEvent, WlSurfaceId, WlSurfaceRequest,
 };
 use sonamu_ui::{
     DisplayInfo, ImeEvent, PointerGrab,
@@ -428,9 +428,7 @@ impl SmithayState {
         let mode = Mode {
             size: (size.width as i32, size.height as i32).into(),
             // 60 Hz when unknown
-            refresh: self
-                .refresh_millihertz
-                .map_or(60_000, |refresh| refresh.cast_signed()),
+            refresh: self.refresh_millihertz.map_or(60_000, u32::cast_signed),
         };
         self.output
             .change_current_state(Some(mode), None, None, None);
@@ -453,6 +451,7 @@ impl SmithayState {
         self.output
             .change_current_state(None, None, Some(Scale::Fractional(self.scale)), None);
 
+        #[expect(clippy::float_cmp, reason = "any change in scale")]
         if old_scale != self.scale {
             if let Some((_, size)) = &mut self.fullscreen {
                 *size = size
@@ -1061,7 +1060,7 @@ impl SmithayState {
                 // closure: the pointer is only valid while it runs, and smithay only
                 // installs its SIGBUS guard for that duration.
                 smithay::wayland::shm::with_buffer_contents(
-                    &wl_buffer,
+                    wl_buffer,
                     |content_ptr, length, metadata| {
                         // SAFETY: valid for the body of this closure only. The client
                         // may mutate the pool concurrently, so don't hold this anywhere.
@@ -1146,7 +1145,8 @@ impl SmithayState {
                     label: Some("wayland_dmabuf_texture"),
                     view_formats: &[],
                 });
-                let mut encoder = device.create_command_encoder(&Default::default());
+                let mut encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
                 encoder.copy_texture_to_texture(
                     wgpu::TexelCopyTextureInfo {
                         texture: &imported,
@@ -1309,10 +1309,12 @@ fn read_cursor_surface(surface: &WlSurface, scale: f64) -> Option<Cursor> {
             for pixel in data.get(start..start + width * 4)?.chunks_exact(4) {
                 let &[b, g, r, a] = pixel else { unreachable!() };
                 let a = if has_alpha { a } else { u8::MAX };
-                let unpremultiply = |c: u8| {
-                    let c = (u16::from(c) * 255).checked_div(u16::from(a)).unwrap_or(0);
+                let unpremultiply = |channel: u8| {
+                    let value = (u16::from(channel) * 255)
+                        .checked_div(u16::from(a))
+                        .unwrap_or(0);
                     // clamp, in case the client's color is brighter than its alpha allows
-                    u8::try_from(c).unwrap_or(u8::MAX)
+                    u8::try_from(value).unwrap_or(u8::MAX)
                 };
                 rgba.extend([unpremultiply(r), unpremultiply(g), unpremultiply(b), a]);
             }
@@ -1549,7 +1551,7 @@ impl CompositorHandler for AppletRunner {
                 runner
                     .smithay_state
                     .event_handle
-                    .insert_source(source, move |_, _, runner| {
+                    .insert_source(source, move |(), _, runner| {
                         let display_handle = runner.smithay_state.display_handle.clone();
                         runner
                             .client_compositor_state(&client)
@@ -2030,31 +2032,31 @@ impl AppletRunner {
             self.focus_wl_keyboard_on(layer);
             return;
         }
-        match surface_id.and_then(|surface_id| self.smithay_state.surfaces.get(surface_id).cloned())
+        if let Some(surface) =
+            surface_id.and_then(|surface_id| self.smithay_state.surfaces.get(surface_id).cloned())
         {
-            Some(surface) => self.focus_wl_keyboard_on(surface),
-            None => {
-                let keyboard = self.smithay_state.seat.get_keyboard().unwrap();
-                if keyboard.current_focus().is_some() {
-                    // also ends any popup grab
-                    keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial());
-                }
+            self.focus_wl_keyboard_on(surface);
+        } else {
+            let keyboard = self.smithay_state.seat.get_keyboard().unwrap();
+            if keyboard.current_focus().is_some() {
+                // also ends any popup grab
+                keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial());
+            }
 
-                // the pointer leaves too, which ends any pointer lock (and so the window's grab)
-                if self.smithay_state.pointer_focus.take().is_some() {
-                    let pointer = self.smithay_state.seat.get_pointer().unwrap();
-                    let location = pointer.current_location();
-                    pointer.motion(
-                        self,
-                        None,
-                        &MotionEvent {
-                            location,
-                            serial: SERIAL_COUNTER.next_serial(),
-                            time: self.smithay_state.now_input_time(),
-                        },
-                    );
-                    pointer.frame(self);
-                }
+            // the pointer leaves too, which ends any pointer lock (and so the window's grab)
+            if self.smithay_state.pointer_focus.take().is_some() {
+                let pointer = self.smithay_state.seat.get_pointer().unwrap();
+                let location = pointer.current_location();
+                pointer.motion(
+                    self,
+                    None,
+                    &MotionEvent {
+                        location,
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: self.smithay_state.now_input_time(),
+                    },
+                );
+                pointer.frame(self);
             }
         }
     }

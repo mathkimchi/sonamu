@@ -258,11 +258,10 @@ fn running_in_terminal(mut argv: Vec<String>, running: &SavedRunning) -> Vec<Str
     {
         argv.push("-e".to_string());
     }
-    let shell = running
-        .shell
-        .as_deref()
-        .map(program_name)
-        .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string()));
+    let shell = running.shell.as_deref().map_or_else(
+        || std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string()),
+        program_name,
+    );
     argv.extend(["sh", "-c", WRAPPER].map(String::from));
     argv.push(shell);
     argv.push(program_name(program));

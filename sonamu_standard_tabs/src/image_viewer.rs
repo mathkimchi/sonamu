@@ -1,9 +1,7 @@
 use image::{ImageReader, RgbaImage};
 use sonamu_common::sap::packets::StandardEvent;
 use sonamu_sttk::nodular_applet::{AppletContext, StandardApplet};
-use sonamu_sttk::nodular_applet::{
-    AppletSpawner, AppletSpawnerTrait, NodularAppletInitializer,
-};
+use sonamu_sttk::nodular_applet::{AppletSpawner, AppletSpawnerTrait, NodularAppletInitializer};
 use sonamu_sttk::standard_keybinds::handle_standard_keybinds;
 use sonamu_ui::display_units::DisplayContainerSize;
 use sonamu_ui::ui_element::UITree;

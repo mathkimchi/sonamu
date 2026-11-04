@@ -512,7 +512,7 @@ impl UIDisplay {
         event_queue: Sender<UIEvent>,
         ui_content: TrackedEncapsulatedLock<PrimitiveScene>,
         gpu: Gpu,
-        proxy_tx: std::sync::mpsc::Sender<DisplayProxy>,
+        proxy_tx: &std::sync::mpsc::Sender<DisplayProxy>,
         display_notification_queue: Sender<DisplayNotification>,
     ) {
         let event_loop = smithay::reexports::winit::event_loop::EventLoop::builder()

@@ -271,9 +271,9 @@ impl StandardApplet for SplitApplet {
         self.holder.tree.deactivate_all();
     }
 
-    fn take_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), NewWlSurface> {
+    fn take_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), Box<NewWlSurface>> {
         if self.dissolved {
-            return Err(surface);
+            return Err(Box::new(surface));
         }
         self.holder.add_wl_surface(surface);
         Ok(())

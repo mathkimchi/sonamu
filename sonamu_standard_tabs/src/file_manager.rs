@@ -966,13 +966,13 @@ impl StandardApplet for FileManagerApplet {
     }
 
     /// Okular's window for a PDF becomes its document
-    fn take_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), NewWlSurface> {
+    fn take_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), Box<NewWlSurface>> {
         let Some(index) = self
             .starting
             .iter()
             .position(|&(pid, _)| surface.pid == Some(pid))
         else {
-            return Err(surface);
+            return Err(Box::new(surface));
         };
         let (_, file) = self.starting.remove(index);
         self.status = None;

@@ -391,6 +391,7 @@ impl NodeHolder {
         let Err(surface) = self.tree.claim_wl_surface(surface) else {
             return;
         };
+        let surface = *surface;
         if let Some((parent, position)) = self
             .wl_target
             .take()

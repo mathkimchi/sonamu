@@ -154,8 +154,8 @@ pub trait StandardApplet {
 
     /// A new wl surface while focus is inside this applet, or one it awaits (`awaiting_wl`).
     /// `Err` gives it back, and its node gets it as a child.
-    fn take_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), NewWlSurface> {
-        Err(surface)
+    fn take_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), Box<NewWlSurface>> {
+        Err(Box::new(surface))
     }
 
     /// An applet to open while focus is inside this applet (`StandardEvent::Open`), like `take_wl_surface`
@@ -477,7 +477,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                     if let Err(surface) = state.applet.take_wl_surface(surface) {
                         let _ = state
                             .request_sender
-                            .send(NodeRequest::AddWlSurface(surface));
+                            .send(NodeRequest::AddWlSurface(*surface));
                     }
                 }
                 calloop::channel::Event::Msg(StandardEvent::Open(open)) => {

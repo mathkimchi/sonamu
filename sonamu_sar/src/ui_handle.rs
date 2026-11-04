@@ -153,7 +153,7 @@ impl UIHandle {
                 UIDisplay::run_display
             };
             thread::spawn(move || {
-                run_display(is_running, tx, ui_content, gpu, proxy_tx, notification_tx);
+                run_display(is_running, tx, ui_content, gpu, &proxy_tx, notification_tx);
             });
 
             dbg!("Started UI thread");

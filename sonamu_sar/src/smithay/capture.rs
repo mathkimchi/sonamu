@@ -3,7 +3,6 @@
 
 use super::SmithayState;
 use crate::runner::AppletRunner;
-use sonamu_common::sap::packets::StandardEvent;
 use smithay::{
     output::{Output, WeakOutput},
     reexports::wayland_server::{DisplayHandle, protocol::wl_shm::Format},
@@ -20,6 +19,7 @@ use smithay::{
         shm::with_buffer_contents_mut,
     },
 };
+use sonamu_common::sap::packets::StandardEvent;
 use sonamu_ui::CapturedFrame;
 
 #[derive(Debug)]
