@@ -1,6 +1,6 @@
 use crate::{
     color::Color,
-    display_units::{DisplayArea, DisplayAreaPx, DisplayContainerSize},
+    display_units::{DisplayArea, DisplayAreaPx, DisplayContainerSize, ToPx},
 };
 pub use smithay::reexports::winit::cursor::CursorIcon;
 use std::sync::{
@@ -310,11 +310,11 @@ impl PrimitiveScene {
             y: parent_location.y + layout.location.y,
         };
         let [left, top] = transform.apply([location.x, location.y]);
-        let area = DisplayAreaPx::new(
-            left as u32,
-            top as u32,
-            (left + layout.size.width * transform.scale) as u32,
-            (top + layout.size.height * transform.scale) as u32,
+        let area = DisplayAreaPx::from_f32(
+            left,
+            top,
+            left + layout.size.width * transform.scale,
+            top + layout.size.height * transform.scale,
         );
 
         let (element, cursor) = std::mem::replace(
@@ -373,7 +373,7 @@ impl PrimitiveScene {
         let is_box = !style.size.width.is_auto() && !style.size.height.is_auto();
         let child_clip = match &primitive {
             Some(UIPrimitiveElement::RoundRect(rect)) if rect.corner_radius > 0.0 => {
-                let width = rect.border_width as u32;
+                let width = rect.border_width.to_px();
                 let DisplayAreaPx([[left, top], [right, bot]]) = area;
                 let inside = DisplayAreaPx::new(
                     left + width,

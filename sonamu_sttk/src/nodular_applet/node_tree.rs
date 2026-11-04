@@ -1614,8 +1614,7 @@ impl NodeTree {
         screen: usize,
     ) -> Vec<Pane> {
         let settings = settings::get();
-        let gap = settings.gap.round() as u32;
-        let border = settings.border.width.round() as u32;
+        let (gap, border) = settings.gap_and_border_px();
         let mut panes = Vec::new();
         self.push_panes(
             view_root,

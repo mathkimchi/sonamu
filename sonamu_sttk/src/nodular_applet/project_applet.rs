@@ -599,60 +599,8 @@ impl ProjectApplet {
                     },
                 ..
             }) => {
-                let root = self.holder.tree.root();
-                let [x, y] = [x, y].map(|coord| coord as f32);
-                let card = self
-                    .card_rects()
-                    .iter()
-                    .position(|&[left, top, width, height]| {
-                        (left..left + width).contains(&x) && (top..top + height).contains(&y)
-                    });
-                if let Some(index) = card {
-                    let id = self.holder.tree.children(root)[index];
-                    self.holder.tree.focus(id, false);
-                    self.hook.damage_window();
-                    self.hook.damage_treeview();
-                    return None;
-                }
-                let y = f64::from(y);
-                let contents = self.holder.tree.children(root).len();
-                // non-negative, since `y >= PAD`
-                #[allow(clippy::cast_sign_loss)]
-                let row = (y >= f64::from(PAD))
-                    .then(|| ((y - f64::from(PAD)) / f64::from(row_height())) as usize);
-                match row {
-                    None => {}
-                    Some(row) if row >= CONTENTS_ROW && self.picking_icon.is_some() => {
-                        if let Some(&(icon, _)) = ICONS.get(row - CONTENTS_ROW) {
-                            self.set_icon(Some(icon.to_string()));
-                        }
-                    }
-                    Some(row) if row >= CONTENTS_ROW && self.setting_directory.is_some() => {
-                        if let Some(input) = &mut self.setting_directory
-                            && let Some(option) = input.options.get(row - CONTENTS_ROW).cloned()
-                        {
-                            input.set(option);
-                        }
-                    }
-                    Some(0) => {
-                        self.setting_directory = None;
-                        self.picking_icon = None;
-                        self.renaming = Some(String::new());
-                    }
-                    Some(DIRECTORY_ROW) => self.start_setting_directory(),
-                    Some(ICON_ROW) => self.start_picking_icon(),
-                    Some(row) if (CONTENTS_ROW..CONTENTS_ROW + contents).contains(&row) => {
-                        let id = self.holder.tree.children(root)[row - CONTENTS_ROW];
-                        self.holder.tree.focus(id, false);
-                    }
-                    Some(row) if row >= CONTENTS_ROW + contents => {
-                        let index = row - CONTENTS_ROW - contents;
-                        if index < NEW_ROWS.len() {
-                            self.add_new(index);
-                        }
-                    }
-                    Some(_) => {}
-                }
+                self.handle_overview_click(x, y);
+                return None;
             }
             // the panes aren't shown
             UIEvent::Mouse(_) => {}
@@ -662,54 +610,10 @@ impl ProjectApplet {
                 pressed: true,
                 ..
             } if !(modifiers.ctrl || modifiers.alt || modifiers.logo) => {
-                if self.setting_directory.is_some() {
-                    if !self.handle_directory_key(key, modifiers) {
-                        return Some(ui_event);
-                    }
-                    self.hook.damage_window();
-                    return None;
+                if !self.handle_overview_key(key, modifiers) {
+                    return Some(ui_event);
                 }
-                if self.picking_icon.is_some() {
-                    if !self.handle_icon_key(key) {
-                        return Some(ui_event);
-                    }
-                    // the treeview shows it
-                    self.hook.damage_window();
-                    self.hook.damage_treeview();
-                    return None;
-                }
-                match (&mut self.renaming, key) {
-                    (None, KeySymbol::Char('d')) if modifiers == KeyModifiers::NONE => {
-                        self.start_setting_directory();
-                    }
-                    (Some(_), KeySymbol::Enter) => {
-                        let name = self.renaming.take().unwrap_or_default();
-                        if !name.trim().is_empty() {
-                            self.name = name.trim().to_string();
-                        }
-                    }
-                    (Some(_), KeySymbol::Escape) => self.renaming = None,
-                    (Some(name), KeySymbol::Backspace) => {
-                        name.pop();
-                    }
-                    (Some(name), KeySymbol::Char(key_char)) if !key_char.is_control() => {
-                        name.push(key_char);
-                    }
-                    (None, KeySymbol::Char('r')) if modifiers == KeyModifiers::NONE => {
-                        self.renaming = Some(String::new());
-                    }
-                    (None, KeySymbol::Char('i')) if modifiers == KeyModifiers::NONE => {
-                        self.start_picking_icon();
-                    }
-                    (None, KeySymbol::Char(key_char))
-                        if modifiers == KeyModifiers::NONE
-                            && let Some(index) =
-                                NEW_ROWS.iter().position(|&(_, key, _)| key == key_char) =>
-                    {
-                        self.add_new(index);
-                    }
-                    _ => return Some(ui_event),
-                }
+                return None;
             }
             _ => return Some(ui_event),
         }
@@ -718,8 +622,158 @@ impl ProjectApplet {
         None
     }
 
-    fn get_overview(&self, width: f32) -> UITree {
+    /// Damages what it changed
+    fn handle_overview_click(&mut self, x: f64, y: f64) {
+        let root = self.holder.tree.root();
+        let [x, y] = [x, y].map(|coord| coord as f32);
+        let card = self
+            .card_rects()
+            .iter()
+            .position(|&[left, top, width, height]| {
+                (left..left + width).contains(&x) && (top..top + height).contains(&y)
+            });
+        if let Some(index) = card {
+            let id = self.holder.tree.children(root)[index];
+            self.holder.tree.focus(id, false);
+            self.hook.damage_window();
+            self.hook.damage_treeview();
+            return;
+        }
+        let y = f64::from(y);
+        let contents = self.holder.tree.children(root).len();
+        // non-negative, since `y >= PAD`
+        #[allow(clippy::cast_sign_loss)]
+        let row = (y >= f64::from(PAD))
+            .then(|| ((y - f64::from(PAD)) / f64::from(row_height())) as usize);
+        match row {
+            None => {}
+            Some(row) if row >= CONTENTS_ROW && self.picking_icon.is_some() => {
+                if let Some(&(icon, _)) = ICONS.get(row - CONTENTS_ROW) {
+                    self.set_icon(Some(icon.to_string()));
+                }
+            }
+            Some(row) if row >= CONTENTS_ROW && self.setting_directory.is_some() => {
+                if let Some(input) = &mut self.setting_directory
+                    && let Some(option) = input.options.get(row - CONTENTS_ROW).cloned()
+                {
+                    input.set(option);
+                }
+            }
+            Some(0) => {
+                self.setting_directory = None;
+                self.picking_icon = None;
+                self.renaming = Some(String::new());
+            }
+            Some(DIRECTORY_ROW) => self.start_setting_directory(),
+            Some(ICON_ROW) => self.start_picking_icon(),
+            Some(row) if (CONTENTS_ROW..CONTENTS_ROW + contents).contains(&row) => {
+                let id = self.holder.tree.children(root)[row - CONTENTS_ROW];
+                self.holder.tree.focus(id, false);
+            }
+            Some(row) if row >= CONTENTS_ROW + contents => {
+                let index = row - CONTENTS_ROW - contents;
+                if index < NEW_ROWS.len() {
+                    self.add_new(index);
+                }
+            }
+            Some(_) => {}
+        }
+        self.hook.damage_window();
+        self.hook.damage_treeview();
+    }
+
+    /// `false` if it doesn't take it; damages what it changed
+    fn handle_overview_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) -> bool {
+        if self.setting_directory.is_some() {
+            if !self.handle_directory_key(key, modifiers) {
+                return false;
+            }
+            self.hook.damage_window();
+            return true;
+        }
+        if self.picking_icon.is_some() {
+            if !self.handle_icon_key(key) {
+                return false;
+            }
+            // the treeview shows it
+            self.hook.damage_window();
+            self.hook.damage_treeview();
+            return true;
+        }
+        match (&mut self.renaming, key) {
+            (None, KeySymbol::Char('d')) if modifiers == KeyModifiers::NONE => {
+                self.start_setting_directory();
+            }
+            (Some(_), KeySymbol::Enter) => {
+                let name = self.renaming.take().unwrap_or_default();
+                if !name.trim().is_empty() {
+                    self.name = name.trim().to_string();
+                }
+            }
+            (Some(_), KeySymbol::Escape) => self.renaming = None,
+            (Some(name), KeySymbol::Backspace) => {
+                name.pop();
+            }
+            (Some(name), KeySymbol::Char(key_char)) if !key_char.is_control() => {
+                name.push(key_char);
+            }
+            (None, KeySymbol::Char('r')) if modifiers == KeyModifiers::NONE => {
+                self.renaming = Some(String::new());
+            }
+            (None, KeySymbol::Char('i')) if modifiers == KeyModifiers::NONE => {
+                self.start_picking_icon();
+            }
+            (None, KeySymbol::Char(key_char))
+                if modifiers == KeyModifiers::NONE
+                    && let Some(index) =
+                        NEW_ROWS.iter().position(|&(_, key, _)| key == key_char) =>
+            {
+                self.add_new(index);
+            }
+            _ => return false,
+        }
+        self.hook.damage_window();
+        self.hook.damage_treeview();
+        true
+    }
+
+    /// The rows under the hint: the icons or directories to pick from, else the contents and what can be added
+    fn overview_options(&self) -> Vec<(String, Color)> {
         let tree = &self.holder.tree;
+        let text = settings::get().palette.fg;
+        match (&self.setting_directory, self.picking_icon) {
+            (_, Some(selected)) => (0..)
+                .zip(ICONS)
+                .map(|(index, (icon, name))| {
+                    if index == selected {
+                        (format!("› {icon}  {name}"), settings::get().palette.accent)
+                    } else {
+                        (format!("  {icon}  {name}"), text)
+                    }
+                })
+                .collect(),
+            (Some(input), None) => input
+                .options
+                .iter()
+                .take(MAX_OPTIONS)
+                .enumerate()
+                .map(|(index, option)| {
+                    if input.selected == Some(index) {
+                        (format!("› {option}"), settings::get().palette.accent)
+                    } else {
+                        (format!("  {option}"), text)
+                    }
+                })
+                .collect(),
+            (None, None) => (1..)
+                .zip(tree.children(tree.root()))
+                .map(|(index, &id)| (format!("{index}  {}", tree.label(id)), text))
+                .chain(NEW_ROWS.map(|(label, _, _)| (label.to_string(), text)))
+                .collect(),
+        }
+    }
+
+    fn get_overview(&self, width: f32) -> UITree {
         let text = settings::get().palette.fg;
         let title = match &self.renaming {
             Some(name) => format!("{}  {name}▏", self.shown_icon()),
@@ -775,36 +829,7 @@ impl ProjectApplet {
                 },
             ),
         };
-        let below: Vec<(String, Color)> = match (&self.setting_directory, self.picking_icon) {
-            (_, Some(selected)) => (0..)
-                .zip(ICONS)
-                .map(|(index, (icon, name))| {
-                    if index == selected {
-                        (format!("› {icon}  {name}"), settings::get().palette.accent)
-                    } else {
-                        (format!("  {icon}  {name}"), text)
-                    }
-                })
-                .collect(),
-            (Some(input), None) => input
-                .options
-                .iter()
-                .take(MAX_OPTIONS)
-                .enumerate()
-                .map(|(index, option)| {
-                    if input.selected == Some(index) {
-                        (format!("› {option}"), settings::get().palette.accent)
-                    } else {
-                        (format!("  {option}"), text)
-                    }
-                })
-                .collect(),
-            (None, None) => (1..)
-                .zip(tree.children(tree.root()))
-                .map(|(index, &id)| (format!("{index}  {}", tree.label(id)), text))
-                .chain(NEW_ROWS.map(|(label, _, _)| (label.to_string(), text)))
-                .collect(),
-        };
+        let below = self.overview_options();
         let rows = [
             (title, text),
             directory,

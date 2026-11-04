@@ -1,5 +1,8 @@
 use crate::ui_element::{Dimension, Style, UIElement, UITree};
-use crate::{color::Color, display_units::DisplayContainerSize};
+use crate::{
+    color::Color,
+    display_units::{DisplayContainerSize, ToPx},
+};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// 0 and 1 are planned to be bold and italic
@@ -104,12 +107,12 @@ pub fn set_font_size(px: f32) {
 
 /// Char grid cell height in px
 fn cell_height() -> u32 {
-    font_size().round() as u32
+    font_size().round().to_px()
 }
 
 /// Char grid cell width in px. The actual aspect ratio of DejaVu Mono is 1:1.933
 fn cell_width() -> u32 {
-    (font_size() / 1.933).ceil() as u32
+    (font_size() / 1.933).ceil().to_px()
 }
 
 /// #[deprecated]

@@ -585,6 +585,91 @@ impl SmithayState {
             .to_i32_round()
     }
 
+    /// A listening socket, automatically choosing the next available `wayland` socket name.
+    /// `SONAMU_WAYLAND_DISPLAY` is set to it by `AppletRunner::run`
+    fn listen(event_handle: &LoopHandle<'static, AppletRunner>) -> std::ffi::OsString {
+        // Creates a new listening socket, automatically choosing the next available `wayland` socket name.
+        let listening_socket = ListeningSocketSource::new_auto().unwrap();
+
+        // Get the name of the listening socket.
+        // Clients will connect to this socket.
+        let socket_name = listening_socket.socket_name().to_os_string();
+
+        event_handle
+            .insert_source(listening_socket, |client_stream, (), state| {
+                let _client = state
+                    .smithay_state
+                    .display_handle
+                    .insert_client(client_stream, Arc::new(ClientState::default()))
+                    .unwrap();
+
+                dbg!("Inserted new client!");
+            })
+            .unwrap();
+
+        dbg!(&socket_name);
+
+        socket_name
+    }
+
+    /// Dispatches the clients' requests
+    fn insert_display(
+        event_handle: &LoopHandle<'static, AppletRunner>,
+        display: Display<AppletRunner>,
+    ) {
+        event_handle
+            .insert_source(
+                calloop::generic::Generic::new(
+                    display,
+                    calloop::Interest::READ,
+                    calloop::Mode::Level,
+                ),
+                |_, display, state| {
+                    // profiling::scope!("dispatch_clients");
+                    // Safety: we don't drop the display
+                    let display = unsafe { display.get_mut() };
+                    display.dispatch_clients(state).unwrap();
+                    display.flush_clients().unwrap();
+
+                    Ok(PostAction::Continue)
+                },
+            )
+            .unwrap();
+    }
+
+    /// With a keyboard (same repeat as the udev backend's) and a pointer
+    fn new_seat(
+        seat_state: &mut SeatState<AppletRunner>,
+        display_handle: &DisplayHandle,
+    ) -> Seat<AppletRunner> {
+        let mut seat = seat_state.new_wl_seat(display_handle, "hello");
+        seat.add_keyboard(
+            smithay::input::keyboard::XkbConfig::default(),
+            REPEAT_DELAY.as_millis() as i32,
+            (1000 / REPEAT_INTERVAL.as_millis()) as i32,
+        )
+        .unwrap();
+        seat.add_pointer();
+        seat
+    }
+
+    /// The one wl output; the real scale is set by `set_display_info`
+    fn new_output(display_handle: &DisplayHandle) -> Output {
+        let output = Output::new(
+            String::from("sonamu"),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: Subpixel::Unknown,
+                make: String::from("Sonamu"),
+                model: String::from("Sonamu"),
+                serial_number: String::from("Unknown"),
+            },
+        );
+        output.change_current_state(None, None, Some(Scale::Integer(1)), Some((0, 0).into()));
+        output.create_global::<AppletRunner>(display_handle);
+        output
+    }
+
     pub fn new(event_handle: &LoopHandle<'static, AppletRunner>) -> Self {
         let start_time = std::time::Instant::now();
 
@@ -597,32 +682,11 @@ impl SmithayState {
         let shm_state = ShmState::new::<AppletRunner>(&display_handle, Vec::new());
         let mut seat_state = SeatState::new();
 
-        let mut seat = seat_state.new_wl_seat(&display_handle, "hello");
-
-        // same repeat as the udev backend's
-        seat.add_keyboard(
-            smithay::input::keyboard::XkbConfig::default(),
-            REPEAT_DELAY.as_millis() as i32,
-            (1000 / REPEAT_INTERVAL.as_millis()) as i32,
-        )
-        .unwrap();
-        seat.add_pointer();
+        let seat = Self::new_seat(&mut seat_state, &display_handle);
 
         let output_manager_state =
             OutputManagerState::new_with_xdg_output::<AppletRunner>(&display_handle);
-        let output = Output::new(
-            String::from("sonamu"),
-            PhysicalProperties {
-                size: (0, 0).into(),
-                subpixel: Subpixel::Unknown,
-                make: String::from("Sonamu"),
-                model: String::from("Sonamu"),
-                serial_number: String::from("Unknown"),
-            },
-        );
-        // the real scale is set by `set_display_info`
-        output.change_current_state(None, None, Some(Scale::Integer(1)), Some((0, 0).into()));
-        output.create_global::<AppletRunner>(&display_handle);
+        let output = Self::new_output(&display_handle);
 
         let data_device_state = DataDeviceState::new::<AppletRunner>(&display_handle);
         let primary_selection_state = PrimarySelectionState::new::<AppletRunner>(&display_handle);
@@ -657,51 +721,8 @@ impl SmithayState {
         let presentation_state =
             PresentationState::new::<AppletRunner>(&display_handle, clock.id() as u32);
 
-        // set up socket
-        let socket_name = {
-            // Creates a new listening socket, automatically choosing the next available `wayland` socket name.
-            let listening_socket = ListeningSocketSource::new_auto().unwrap();
-
-            // Get the name of the listening socket.
-            // Clients will connect to this socket.
-            let socket_name = listening_socket.socket_name().to_os_string();
-
-            event_handle
-                .insert_source(listening_socket, |client_stream, (), state| {
-                    let _client = state
-                        .smithay_state
-                        .display_handle
-                        .insert_client(client_stream, Arc::new(ClientState::default()))
-                        .unwrap();
-
-                    dbg!("Inserted new client!");
-                })
-                .unwrap();
-
-            dbg!(&socket_name);
-
-            // `SONAMU_WAYLAND_DISPLAY` is set to it by `AppletRunner::run`
-            socket_name
-        };
-
-        event_handle
-            .insert_source(
-                calloop::generic::Generic::new(
-                    display,
-                    calloop::Interest::READ,
-                    calloop::Mode::Level,
-                ),
-                |_, display, state| {
-                    // profiling::scope!("dispatch_clients");
-                    // Safety: we don't drop the display
-                    let display = unsafe { display.get_mut() };
-                    display.dispatch_clients(state).unwrap();
-                    display.flush_clients().unwrap();
-
-                    Ok(PostAction::Continue)
-                },
-            )
-            .unwrap();
+        let socket_name = Self::listen(event_handle);
+        Self::insert_display(event_handle, display);
 
         let wl_request_queue = Self::get_event_queue(event_handle);
 

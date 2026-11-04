@@ -201,74 +201,49 @@ impl winit::application::ApplicationHandler for UIDisplay {
                 );
             }
             winit::event::WindowEvent::PointerButton { state, button, .. } => {
-                // REVIEW: (claude) evdev codes from linux/input-event-codes.h
-                let button = match button.mouse_button() {
-                    Some(winit::event::MouseButton::Left) => 0x110,
-                    Some(winit::event::MouseButton::Right) => 0x111,
-                    Some(winit::event::MouseButton::Middle) => 0x112,
-                    Some(winit::event::MouseButton::Forward) => 0x115,
-                    Some(winit::event::MouseButton::Back) => 0x116,
-                    _ => return,
-                };
-                Self::send_mouse_event(
-                    &self.event_queue,
-                    self.cursor_position,
-                    MouseEventKind::Button {
-                        button,
-                        pressed: state.is_pressed(),
-                    },
-                );
-            }
-            winit::event::WindowEvent::MouseWheel { delta, .. } => {
-                // REVIEW: (claude) winit's positive is up/left while Wayland's is down/right, so negate
-                let kind = match delta {
-                    winit::event::MouseScrollDelta::LineDelta(x, y) => MouseEventKind::Scroll {
-                        // 15px per notch, like most compositors
-                        delta: [f64::from(-x) * 15., f64::from(-y) * 15.],
-                        v120: Some([(-x * 120.) as i32, (-y * 120.) as i32]),
-                        stop: [false; 2],
-                    },
-                    winit::event::MouseScrollDelta::PixelDelta(pos) => MouseEventKind::Scroll {
-                        delta: [-pos.x, -pos.y],
-                        v120: None,
-                        stop: [false; 2],
-                    },
-                    _ => return,
-                };
-                Self::send_mouse_event(&self.event_queue, self.cursor_position, kind);
-            }
-            winit::event::WindowEvent::RedrawRequested => {
-                // a capture draws even if nothing changed
-                let content = if self.capture {
-                    Some(self.ui_content.get().0)
-                } else {
-                    self.ui_content.get_if_dirty()
-                };
-                if let Some(content) = content {
-                    if let Some(winit_data) = &mut self.winit_data
-                        // a skipped frame is captured on the next draw
-                        && let Ok(captured) =
-                            Self::draw(&mut winit_data.wgpu_data, &content, self.capture, [0, 0])
-                        && std::mem::take(&mut self.capture)
-                    {
-                        self.display_notification_queue
-                            .send(DisplayNotification::Captured(captured))
-                            .unwrap();
-                    }
-                    self.display_notification_queue
-                        .send(DisplayNotification::Presented)
-                        .unwrap();
-
-                    // what's under the pointer may have changed
-                    self.drawn_cursors = content.cursors;
-                    self.update_cursor(event_loop);
+                if let Some(kind) = button_kind(state, button) {
+                    Self::send_mouse_event(&self.event_queue, self.cursor_position, kind);
                 }
             }
+            winit::event::WindowEvent::MouseWheel { delta, .. } => {
+                if let Some(kind) = scroll_kind(delta) {
+                    Self::send_mouse_event(&self.event_queue, self.cursor_position, kind);
+                }
+            }
+            winit::event::WindowEvent::RedrawRequested => self.redraw(event_loop),
             _ => {}
         }
     }
 }
 impl UIDisplay {
+    fn redraw(&mut self, event_loop: &dyn ActiveEventLoop) {
+        // a capture draws even if nothing changed
+        let content = if self.capture {
+            Some(self.ui_content.get().0)
+        } else {
+            self.ui_content.get_if_dirty()
+        };
+        if let Some(content) = content {
+            if let Some(winit_data) = &mut self.winit_data
+                // a skipped frame is captured on the next draw
+                && let Ok(captured) =
+                    Self::draw(&mut winit_data.wgpu_data, &content, self.capture, [0, 0])
+                && std::mem::take(&mut self.capture)
+            {
+                self.display_notification_queue
+                    .send(DisplayNotification::Captured(captured))
+                    .unwrap();
+            }
+            self.display_notification_queue
+                .send(DisplayNotification::Presented)
+                .unwrap();
+
+            // what's under the pointer may have changed
+            self.drawn_cursors = content.cursors;
+            self.update_cursor(event_loop);
+        }
+    }
+
     /// Sends the window's scale and refresh rate, if they changed
     fn send_display_info(&mut self, window: &dyn Window) {
         let info = DisplayInfo {
@@ -344,5 +319,42 @@ impl UIDisplay {
                 time_msec: None,
             }))
             .unwrap();
+    }
+}
+
+fn button_kind(
+    state: winit::event::ElementState,
+    button: winit::event::ButtonSource,
+) -> Option<MouseEventKind> {
+    // REVIEW: (claude) evdev codes from linux/input-event-codes.h
+    let button = match button.mouse_button() {
+        Some(winit::event::MouseButton::Left) => 0x110,
+        Some(winit::event::MouseButton::Right) => 0x111,
+        Some(winit::event::MouseButton::Middle) => 0x112,
+        Some(winit::event::MouseButton::Forward) => 0x115,
+        Some(winit::event::MouseButton::Back) => 0x116,
+        _ => return None,
+    };
+    Some(MouseEventKind::Button {
+        button,
+        pressed: state.is_pressed(),
+    })
+}
+
+fn scroll_kind(delta: winit::event::MouseScrollDelta) -> Option<MouseEventKind> {
+    // REVIEW: (claude) winit's positive is up/left while Wayland's is down/right, so negate
+    match delta {
+        winit::event::MouseScrollDelta::LineDelta(x, y) => Some(MouseEventKind::Scroll {
+            // 15px per notch, like most compositors
+            delta: [f64::from(-x) * 15., f64::from(-y) * 15.],
+            v120: Some([(-x * 120.) as i32, (-y * 120.) as i32]),
+            stop: [false; 2],
+        }),
+        winit::event::MouseScrollDelta::PixelDelta(pos) => Some(MouseEventKind::Scroll {
+            delta: [-pos.x, -pos.y],
+            v120: None,
+            stop: [false; 2],
+        }),
+        _ => None,
     }
 }

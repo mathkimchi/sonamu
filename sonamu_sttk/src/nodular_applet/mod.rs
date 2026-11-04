@@ -405,6 +405,75 @@ pub struct AppletState {
 }
 
 impl AppletState {
+    fn handle_event(&mut self, event: StandardEvent) {
+        match event {
+            StandardEvent::DamageAck(StateKind::Surface) => {
+                self.surface.ack();
+            }
+            StandardEvent::DamageAck(StateKind::Treeview) => {
+                self.treeview.ack();
+            }
+            // `None`: at the focus
+            StandardEvent::Pluck(path) => {
+                let path = path.unwrap_or_else(|| self.applet.get_focus_path());
+                if let Answer::Now(plucked) = self.applet.pluck(&path) {
+                    let _ = self
+                        .request_sender
+                        .send(StandardRequest::Plucked(plucked).into());
+                }
+            }
+            StandardEvent::Place(path, position, tree) => {
+                let path = path.unwrap_or_else(|| self.applet.get_focus_path());
+                if let Answer::Now(placed) = self.applet.place(&path, position, tree) {
+                    let _ = self
+                        .request_sender
+                        .send(StandardRequest::Placed(placed.err()).into());
+                }
+            }
+            StandardEvent::Focus(path) => {
+                self.applet.focus(&path);
+            }
+            StandardEvent::ToggleCollapsed(path) => {
+                self.applet.toggle_collapsed(&path);
+            }
+            StandardEvent::NodeAction(path, action) => {
+                self.applet.node_action(&path, action);
+            }
+            StandardEvent::SettingsChanged(settings) => {
+                self.settings_changed(&settings);
+            }
+            StandardEvent::CloseRequest => {
+                if self.applet.close_requested() {
+                    let _ = self.request_sender.send(NodeRequest::Close);
+                }
+            }
+            StandardEvent::Deactivate => self.applet.deactivate(),
+            StandardEvent::WlSurfaceRegistered(surface) => {
+                if let Err(surface) = self.applet.take_wl_surface(surface) {
+                    let _ = self
+                        .request_sender
+                        .send(NodeRequest::AddWlSurface(*surface));
+                }
+            }
+            StandardEvent::Open(open) => {
+                if let Err(open) = self.applet.take_open(open) {
+                    let _ = self.request_sender.send(NodeRequest::Open(open));
+                }
+            }
+            event => {
+                if let StandardEvent::UIEvent(UIEvent::WindowResized(size)) = event {
+                    self.size = size;
+                    self.surface.damage();
+                }
+                if let StandardEvent::ScreenViews { .. } = event {
+                    self.surface.damage();
+                    self.treeview.damage();
+                }
+                self.applet.handle_standard_event(event);
+            }
+        }
+    }
+
     fn settings_changed(&mut self, settings: &Settings) {
         self.applet.settings_changed(settings);
         self.surface.damage();
@@ -430,72 +499,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
         event_loop
             .handle()
             .insert_source(event_queue, |event, &mut (), state| match event {
-                calloop::channel::Event::Msg(StandardEvent::DamageAck(StateKind::Surface)) => {
-                    state.surface.ack();
-                }
-                calloop::channel::Event::Msg(StandardEvent::DamageAck(StateKind::Treeview)) => {
-                    state.treeview.ack();
-                }
-                // `None`: at the focus
-                calloop::channel::Event::Msg(StandardEvent::Pluck(path)) => {
-                    let path = path.unwrap_or_else(|| state.applet.get_focus_path());
-                    if let Answer::Now(plucked) = state.applet.pluck(&path) {
-                        let _ = state
-                            .request_sender
-                            .send(StandardRequest::Plucked(plucked).into());
-                    }
-                }
-                calloop::channel::Event::Msg(StandardEvent::Place(path, position, tree)) => {
-                    let path = path.unwrap_or_else(|| state.applet.get_focus_path());
-                    if let Answer::Now(placed) = state.applet.place(&path, position, tree) {
-                        let _ = state
-                            .request_sender
-                            .send(StandardRequest::Placed(placed.err()).into());
-                    }
-                }
-                calloop::channel::Event::Msg(StandardEvent::Focus(path)) => {
-                    state.applet.focus(&path);
-                }
-                calloop::channel::Event::Msg(StandardEvent::ToggleCollapsed(path)) => {
-                    state.applet.toggle_collapsed(&path);
-                }
-                calloop::channel::Event::Msg(StandardEvent::NodeAction(path, action)) => {
-                    state.applet.node_action(&path, action);
-                }
-                calloop::channel::Event::Msg(StandardEvent::SettingsChanged(settings)) => {
-                    state.settings_changed(&settings);
-                }
-                calloop::channel::Event::Msg(StandardEvent::CloseRequest) => {
-                    if state.applet.close_requested() {
-                        let _ = state.request_sender.send(NodeRequest::Close);
-                    }
-                }
-                calloop::channel::Event::Msg(StandardEvent::Deactivate) => {
-                    state.applet.deactivate()
-                }
-                calloop::channel::Event::Msg(StandardEvent::WlSurfaceRegistered(surface)) => {
-                    if let Err(surface) = state.applet.take_wl_surface(surface) {
-                        let _ = state
-                            .request_sender
-                            .send(NodeRequest::AddWlSurface(*surface));
-                    }
-                }
-                calloop::channel::Event::Msg(StandardEvent::Open(open)) => {
-                    if let Err(open) = state.applet.take_open(open) {
-                        let _ = state.request_sender.send(NodeRequest::Open(open));
-                    }
-                }
-                calloop::channel::Event::Msg(event) => {
-                    if let StandardEvent::UIEvent(UIEvent::WindowResized(size)) = event {
-                        state.size = size;
-                        state.surface.damage();
-                    }
-                    if let StandardEvent::ScreenViews { .. } = event {
-                        state.surface.damage();
-                        state.treeview.damage();
-                    }
-                    state.applet.handle_standard_event(event);
-                }
+                calloop::channel::Event::Msg(event) => state.handle_event(event),
                 // the node dropped this applet's `ClientHandle`
                 calloop::channel::Event::Closed => state.loop_signal.stop(),
             })

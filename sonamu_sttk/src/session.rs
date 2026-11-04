@@ -352,7 +352,7 @@ fn running(pid: u32) -> Option<SavedRunning> {
     if tty == 0 || tty == client_tty || job <= 0 || job == i64::from(child) {
         return None;
     }
-    let job = job as u32;
+    let job = u32::try_from(job).ok()?;
     let argv = command_line(job);
     (!argv.is_empty()).then(|| SavedRunning {
         argv,

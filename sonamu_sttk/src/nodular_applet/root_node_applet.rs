@@ -608,15 +608,30 @@ impl RootNodeApplet {
         if response.damaged {
             self.surface.damage();
         }
-        match response.action {
-            Some(TreeviewAction::Focus(path)) => self.holder.focus(&path),
-            Some(TreeviewAction::ToggleCollapsed(path)) => self.holder.toggle_collapsed(&path),
-            Some(TreeviewAction::Node(path, action)) => self.holder.node_action(&path, action),
-            Some(TreeviewAction::SetViewRoot(path)) => self.set_view_root(&path),
-            Some(TreeviewAction::StartDrag(path)) => {
+        if let Some(action) = response.action {
+            self.apply_treeview_action(action);
+        }
+        if response.consumed {
+            return;
+        }
+
+        // remap window coords -> tree coords
+        mouse_event.position[0] -= f64::from(self.applet_area(&settings)[0]);
+        self.holder
+            .tree
+            .handle_event(StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)));
+    }
+
+    fn apply_treeview_action(&mut self, action: TreeviewAction) {
+        match action {
+            TreeviewAction::Focus(path) => self.holder.focus(&path),
+            TreeviewAction::ToggleCollapsed(path) => self.holder.toggle_collapsed(&path),
+            TreeviewAction::Node(path, action) => self.holder.node_action(&path, action),
+            TreeviewAction::SetViewRoot(path) => self.set_view_root(&path),
+            TreeviewAction::StartDrag(path) => {
                 self.send_request(StandardRequest::RequestPluck(path));
             }
-            Some(TreeviewAction::Drop(target)) => {
+            TreeviewAction::Drop(target) => {
                 let (path, position) = target.unwrap_or_else(|| {
                     (
                         self.holder.tree.get_focus_path(),
@@ -630,17 +645,7 @@ impl RootNodeApplet {
                     .map(|id| (path.clone(), id));
                 self.send_request(StandardRequest::RequestPlace(path, position));
             }
-            None => {}
         }
-        if response.consumed {
-            return;
-        }
-
-        // remap window coords -> tree coords
-        mouse_event.position[0] -= f64::from(self.applet_area(&settings)[0]);
-        self.holder
-            .tree
-            .handle_event(StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)));
     }
 
     /// If this is the last drop, the path to the node it was on now.
@@ -829,7 +834,7 @@ fn treeview_area(
         }
         // in the column's place, with the gap all around
         TreeviewFloating::Side => {
-            let gap = settings.gap.round() as u32;
+            let (gap, _) = settings.gap_and_border_px();
             [
                 column_x + gap,
                 gap,
@@ -871,8 +876,7 @@ fn treeview_frame(
     [x, y, width, height]: [u32; 4],
     place: TreeviewPlace,
 ) -> ([u32; 4], u32) {
-    let gap = settings.gap.round() as u32;
-    let border = settings.border.width.round() as u32;
+    let (gap, border) = settings.gap_and_border_px();
     match place {
         TreeviewPlace::Floating => ([x, y, width, height], border.max(1)),
         _ if !settings.always_frame => ([x, y, width, height], 0),

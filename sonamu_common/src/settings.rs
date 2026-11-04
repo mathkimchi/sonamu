@@ -2,7 +2,7 @@
 
 use notify::Watcher as _;
 use serde::Deserialize;
-use sonamu_ui::color::Color;
+use sonamu_ui::{color::Color, display_units::ToPx};
 use std::{
     collections::HashSet,
     fs, io,
@@ -41,6 +41,14 @@ pub struct Settings {
     /// Shell commands run once when Sonamu starts (eg `dms run`)
     pub startup: Vec<String>,
 }
+impl Settings {
+    /// `gap` and `border.width`, rounded to whole px
+    #[must_use]
+    pub fn gap_and_border_px(&self) -> (u32, u32) {
+        (self.gap.round().to_px(), self.border.width.round().to_px())
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {

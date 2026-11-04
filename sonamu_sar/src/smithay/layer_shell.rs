@@ -24,7 +24,7 @@ use smithay::{
     },
 };
 use sonamu_ui::{
-    display_units::DisplayContainerSize,
+    display_units::{DisplayContainerSize, ToPx},
     ui_element::{Style, UITree},
     ui_event::{MouseEvent, MouseEventKind},
 };
@@ -98,7 +98,7 @@ impl SmithayState {
         let to_px = |logical: i32| (f64::from(logical) * self.scale).round();
         (
             [to_px(usable.loc.x), to_px(usable.loc.y)],
-            DisplayContainerSize::new(to_px(usable.size.w) as u32, to_px(usable.size.h) as u32),
+            DisplayContainerSize::new(to_px(usable.size.w).to_px(), to_px(usable.size.h).to_px()),
         )
     }
 

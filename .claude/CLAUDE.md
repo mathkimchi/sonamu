@@ -12,6 +12,7 @@ Organizes applets and even elements of applets into a large recursive tree hiera
 - `sonamu_sde` contains the main runner
 - `sonamu_sttk` contains tools for clients and necessary clients
 - `sonamu_standard_tabs` contains the native applets (code editor, file manager, image viewer, pdf preview)
+- Floats to px: `display_units::ToPx` (`.to_px()`, clamps to 0) instead of `as u32`; settings' gap/border: `Settings::gap_and_border_px`
 - Check for unused dependencies with `cargo machete` (sttk's `regex` is a build.rs dep it can't see; ignored in its `Cargo.toml`)
 
 DEVLOG.md is 10k+ lines, read it with tail.

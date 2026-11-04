@@ -96,11 +96,9 @@ unsafe_derive_deserialize = "allow"
 cast_possible_wrap = "allow"
 cast_possible_truncation = "allow"
 cast_precision_loss = "allow"
-cast_sign_loss = "allow"                     # pixel casts, like cast_possible_truncation
 items_after_statements = "allow"
 struct_excessive_bools = "allow"
 struct_field_names = "allow"
-too_many_lines = "allow"
 must_use_candidate = "allow"                 # having must_use everywhere is getting kinda ugly
 
 [workspace.lints.rust]

@@ -13,7 +13,7 @@ use sonamu_common::{
 };
 use sonamu_ui::{
     PointerGrab,
-    display_units::DisplayContainerSize,
+    display_units::{DisplayContainerSize, ToPx},
     ui_element::{PrimitiveScene, Style, UIElement, UITree},
     ui_event::{KeyModifiers, KeySymbol, MouseEventKind, UIEvent},
 };
@@ -258,7 +258,7 @@ impl AppletRunner {
         }
         // the output's origin is the main screen's
         let [x, y, ..] = screens[0];
-        screens[0] = [x + left as u32, y + top as u32, size.width, size.height];
+        screens[0] = [x + left.to_px(), y + top.to_px(), size.width, size.height];
         self.root_client.send_event(StandardEvent::Screens(screens));
     }
 

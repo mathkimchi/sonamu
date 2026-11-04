@@ -183,6 +183,12 @@ impl From<DisplayContainerSize> for DisplaySize {
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct DisplayAreaPx(pub [[u32; 2]; 2]);
 impl DisplayAreaPx {
+    /// From edges in fractional px, each cut to whole px like [`ToPx`]
+    #[must_use]
+    pub fn from_f32(left: f32, top: f32, right: f32, bot: f32) -> Self {
+        Self::new(left.to_px(), top.to_px(), right.to_px(), bot.to_px())
+    }
+
     #[must_use]
     pub const fn new(left: u32, top: u32, right: u32, bot: u32) -> Self {
         Self([[left, top], [right, bot]])
@@ -353,5 +359,22 @@ impl DisplayArea {
             == (coord_y <= self.1.y.pixels(container_pixels[1]));
 
         contains_x && contains_y
+    }
+}
+
+/// A float to whole px, like `as u32`: the fraction is cut, negatives and NaN become 0, too large saturates
+pub trait ToPx {
+    fn to_px(self) -> u32;
+}
+impl ToPx for f32 {
+    #[expect(clippy::cast_sign_loss, reason = "clamped to 0")]
+    fn to_px(self) -> u32 {
+        self.max(0.0) as u32
+    }
+}
+impl ToPx for f64 {
+    #[expect(clippy::cast_sign_loss, reason = "clamped to 0")]
+    fn to_px(self) -> u32 {
+        self.max(0.0) as u32
     }
 }

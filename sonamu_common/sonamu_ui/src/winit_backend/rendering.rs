@@ -2,7 +2,7 @@
 
 use super::{CapturedFrame, UIDisplay};
 use crate::{
-    display_units::DisplayAreaPx,
+    display_units::{DisplayAreaPx, ToPx},
     ui_element::{
         CharGrid, Clip, Image, InternalCharCell, PrimitiveScene, RoundRect, UIPrimitiveElement,
         font_size,
@@ -1413,7 +1413,7 @@ impl DrawingSharedData<'_> {
     /// Only the elements on the surface (eg not another monitor's), each scissored to its visible part:
     /// the pipelines draw one triangle over the whole surface, so otherwise every element shades every pixel
     fn draw_primitive_scene(&mut self, scene: &PrimitiveScene, size: [u32; 2]) {
-        let [x, y] = self.origin.map(|coord| coord as u32);
+        let [x, y] = self.origin.map(ToPx::to_px);
         let shown = DisplayAreaPx::new(x, y, x + size[0], y + size[1]);
         for (element, display_area_px, clip) in &scene.elements {
             let mut visible = display_area_px.intersection(shown);
