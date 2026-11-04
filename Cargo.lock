@@ -3061,65 +3061,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
-name = "singularity_common"
-version = "0.1.0"
-dependencies = [
- "calloop",
- "log",
- "notify",
- "serde",
- "serde_json",
- "slotmap",
- "sonamu_sync",
- "sonamu_ui",
- "uuid",
-]
-
-[[package]]
-name = "singularity_sar"
-version = "0.1.0"
-dependencies = [
- "ash",
- "calloop",
- "libc",
- "pollster",
- "singularity_common",
- "slotmap",
- "smithay",
- "sonamu_sync",
- "sonamu_ui",
- "wayland-protocols",
- "wgpu",
-]
-
-[[package]]
-name = "singularity_standard_tabs"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "hayro",
- "image",
- "log",
- "ropey",
- "singularity_common",
- "singularity_sttk",
- "sonamu_ui",
-]
-
-[[package]]
-name = "singularity_sttk"
-version = "0.1.0"
-dependencies = [
- "calloop",
- "log",
- "regex",
- "serde_json",
- "singularity_common",
- "slotmap",
- "sonamu_ui",
-]
-
-[[package]]
 name = "siphasher"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3293,14 +3234,73 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonamu_common"
+version = "0.1.0"
+dependencies = [
+ "calloop",
+ "log",
+ "notify",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "sonamu_sync",
+ "sonamu_ui",
+ "uuid",
+]
+
+[[package]]
+name = "sonamu_sar"
+version = "0.1.0"
+dependencies = [
+ "ash",
+ "calloop",
+ "libc",
+ "pollster",
+ "slotmap",
+ "smithay",
+ "sonamu_common",
+ "sonamu_sync",
+ "sonamu_ui",
+ "wayland-protocols",
+ "wgpu",
+]
+
+[[package]]
 name = "sonamu_sde"
 version = "0.1.0"
 dependencies = [
- "singularity_common",
- "singularity_sar",
- "singularity_standard_tabs",
- "singularity_sttk",
+ "sonamu_common",
+ "sonamu_sar",
+ "sonamu_standard_tabs",
+ "sonamu_sttk",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "sonamu_standard_tabs"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "hayro",
+ "image",
+ "log",
+ "ropey",
+ "sonamu_common",
+ "sonamu_sttk",
+ "sonamu_ui",
+]
+
+[[package]]
+name = "sonamu_sttk"
+version = "0.1.0"
+dependencies = [
+ "calloop",
+ "log",
+ "regex",
+ "serde_json",
+ "slotmap",
+ "sonamu_common",
+ "sonamu_ui",
 ]
 
 [[package]]

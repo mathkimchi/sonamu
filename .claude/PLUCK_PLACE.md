@@ -7,7 +7,7 @@ Alt+P does both (first global keybind). The user then said: make the decisions, 
 
 ## Decisions (mine, not yet reviewed)
 
-### Protocol (`singularity_common::sap`)
+### Protocol (`sonamu_common::sap`)
 
 - **`detached.rs`**: `DetachedClient` (a client with no holder: event sender, shared states, and its request channel with queued requests)
   and `DetachedTree { main, wl_surface, children }`.
@@ -90,7 +90,7 @@ Alt+P does both (first global keybind). The user then said: make the decisions, 
   place at focus; drag-pluck a node with a child (`RequestPluck`, tree comes with its child) and drop on the root row;
   re-attached clients still work (retitle shows up, Ctrl+W closes the right node, so requests carry the new `NodeId`);
   a fast drag whose drop arrives before the pluck lands on the right node; plucking the root answers `None`.
-- Ran `singularity_sde` live twice (~12 s): no panics, and screenshots show the new treeview.
+- Ran `sonamu_sde` live twice (~12 s): no panics, and screenshots show the new treeview.
 - **Not checked**: Alt+P in sar, the drag ghost, hover and drop-target looks, and plucking wl tiles, since I can't send
   input to the live window. sar's pluck/place state machine only ran through the fake server's copy of it.
 

@@ -1,14 +1,14 @@
 [workspace]
 members = [
-    "singularity_common",
-    "singularity_common/sonamu_ui",
+    "sonamu_common",
+    "sonamu_common/sonamu_ui",
 
     "sonamu_sde",
-    "singularity_sttk",
-    "singularity_standard_tabs",
-    # "singularity_standard_tabs/*", # TODO: make the asterisk work
-    # "singularity_standard_tabs/dylib_math_game",
-    "singularity_sar",
+    "sonamu_sttk",
+    "sonamu_standard_tabs",
+    # "sonamu_standard_tabs/*", # TODO: make the asterisk work
+    # "sonamu_standard_tabs/dylib_math_game",
+    "sonamu_sar",
 ]
 resolver = "2"
 
@@ -61,9 +61,9 @@ calloop = { version = "^0.14.4", features = ["executor"] }
 
 pollster = "^0.4.0"
 
-singularity_common = { path = "./singularity_common" }
-sonamu_ui = { path = "./singularity_common/sonamu_ui" }
-sonamu_sync = { path = "./singularity_common/sonamu_sync" }
+sonamu_common = { path = "./sonamu_common" }
+sonamu_ui = { path = "./sonamu_common/sonamu_ui" }
+sonamu_sync = { path = "./sonamu_common/sonamu_sync" }
 
 # [[members]]
 # singularity_ui = { features = ["iced_backend"] }

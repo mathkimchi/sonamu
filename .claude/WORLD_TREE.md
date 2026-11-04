@@ -6,7 +6,7 @@ Background: DEVLOG 2026-02-03 to 2026-02-22 (the original design), `.claude/PROJ
 
 ## The data structure
 
-`WorldTree<T>` (`singularity_common/src/utils/tree/world_tree.rs`) is either:
+`WorldTree<T>` (`sonamu_common/src/utils/tree/world_tree.rs`) is either:
 
 - `Base(T)`: a raw value, or
 - `World(RecursiveTreeNode<WorldTree<T>>)`: a tree whose nodes each have a **value** and a list of **children**.

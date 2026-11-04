@@ -7,11 +7,11 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-singularity_common = { workspace = true }
-singularity_standard_tabs = { path = "../singularity_standard_tabs" }
+sonamu_common = { workspace = true }
+sonamu_standard_tabs = { path = "../sonamu_standard_tabs" }
 # sonamu_ui = { workspace = true }
-singularity_sar = { path = "../singularity_sar" }
-singularity_sttk = { path = "../singularity_sttk" }
+sonamu_sar = { path = "../sonamu_sar" }
+sonamu_sttk = { path = "../sonamu_sttk" }
 
 # serde = { workspace = true }
 # serde_json = { workspace = true }

@@ -1,0 +1,21 @@
+[package]
+name = "sonamu_sttk"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+sonamu_common = { path = "../sonamu_common" }
+sonamu_ui = { workspace = true }
+
+serde_json = { workspace = true }
+
+calloop = { workspace = true }
+slotmap = { workspace = true }
+
+log = { workspace = true }
+
+[build-dependencies]
+regex = "1.12"

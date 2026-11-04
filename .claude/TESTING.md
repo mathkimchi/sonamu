@@ -15,6 +15,6 @@ Found while debugging #60; nothing here is in the repo's code.
   Move absolutely with `wlrctl pointer move -5000 -5000` then the target.
 - X11/Xvfb doesn't work: winit is built for Wayland only here.
 - sway may not be installed: `nix-shell -p sway --run 'which sway'` gives a store path to run directly.
-- Rebuild the binary (`cargo build --bin sonamu_sde`), not just `-p singularity_sar`, or the old one runs.
+- Rebuild the binary (`cargo build --bin sonamu_sde`), not just `-p sonamu_sar`, or the old one runs.
 - Clipboard: `wayland-info | grep data_control`, then `wl-copy x; wl-paste` against Sonamu's socket; "Handling new
   toplevel surface" in the log means wl-copy fell back to a window (#113).

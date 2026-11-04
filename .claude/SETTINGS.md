@@ -21,11 +21,11 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 - Watch the settings file/program and every `watch` path (`notify`). On change: re-run/re-read.
 - Program gets a timeout. On spawn failure, timeout, non-zero exit or parse error: keep the previous settings and log.
 - Also the command hub's `reload_settings` (`settings::reload()` on a thread).
-- Settings live in a global in `singularity_common` readable from every applet thread; a settings-changed event is broadcast so applets redraw.
+- Settings live in a global in `sonamu_common` readable from every applet thread; a settings-changed event is broadcast so applets redraw.
 
 ## Implemented
 
-- `singularity_common::settings`: `Settings` (palette, border, gap, radius, font_size), `load(dir)`, `config_dir()` (`$SONAMU_CONFIG` overrides), global `get()`/`reload()`/`subscribe()`. `load_and_watch()` (called in `singularity_sde` main) loads once, then a `notify` thread reloads on changes. Applets get them through `StandardApplet::settings_changed` (#94); the root and the node tree still read `settings::get()` when they draw.
+- `sonamu_common::settings`: `Settings` (palette, border, gap, radius, font_size), `load(dir)`, `config_dir()` (`$SONAMU_CONFIG` overrides), global `get()`/`reload()`/`subscribe()`. `load_and_watch()` (called in `sonamu_sde` main) loads once, then a `notify` thread reloads on changes. Applets get them through `StandardApplet::settings_changed` (#94); the root and the node tree still read `settings::get()` when they draw.
 - Watching goes through parent dirs (non-recursive), so atomically replaced files are seen. Watched: `settings`, `settings.json` (only while there is no program), and `watch` paths (relative ones resolve against the config dir). Changes are debounced 100 ms.
 - A change during a program run (+100 ms) causes another reload.
 - Loop detection is commented out in `Watcher::run`: it ignored a `watch` path that changed during program runs (first after 1 run, then after 3 in a row), but DMS writes its `settings.json` on theme changes and continuously while a slider is dragged, so it kept ignoring DMS's settings. A program that changes its own `watch` files now reloads forever.
@@ -44,7 +44,7 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 - `border.focused`: border and treeview marker when focus is inside the pane's applet. `border.unfocused`: other panes. `border.width`: pane borders.
 - `gap`: around the tiled area and between split siblings (`NodeTree::push_panes`). Nested trees (projects) add their own.
 - `radius`: pane corners; the pane's content (rects, char grids, wl textures) is clipped to the rounded inside; glyphon text only to its bounding rect.
-- `font_size`: physical px (Sonamu's UI isn't scaled). Mirrored into `sonamu_ui::ui_element::font_size()` on load, since `sonamu_ui` can't depend on `singularity_common`; used by glyphon text, char grid cell size (width = size / 1.933, ceil), and row heights in treeview, project overview, file manager and the pluck ghost.
+- `font_size`: physical px (Sonamu's UI isn't scaled). Mirrored into `sonamu_ui::ui_element::font_size()` on load, since `sonamu_ui` can't depend on `sonamu_common`; used by glyphon text, char grid cell size (width = size / 1.933, ceil), and row heights in treeview, project overview, file manager and the pluck ghost.
 - `always_frame` (default true): a pane alone in its tree also gets border, gap and radius, and the treeview is framed like a pane (gap left/top/bottom, the panes' gap on its right; `border.unfocused`; mouse coords shifted by gap + border in `RootNodeApplet::handle_mouse`). False: a lone pane fills its tree and the treeview is flush. The treeview's border is `border.treeview` (DMS `secondary` in the example config).
 - `treeview.side` (`left`, `right`; default `left`): where a pinned treeview's column is (`treeview.width`% of the width, default 20, capped at 100; the panes
   get the rest). `treeview.floating` (`center`, `side`; default `center`): where an unpinned one floats over the panes

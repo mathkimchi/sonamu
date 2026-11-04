@@ -5,21 +5,19 @@ Organizes applets and even elements of applets into a large recursive tree hiera
 
 # Repo Structure
 
-- `singularity_common` contains things used by both the compositor and native applets
-  - `singularity_common/singularity_ui` contains custom UI protocol
-- `singularity_sar` is general server-side framework
-- `singularity_sde` is containst main runner
-- `singularity_sttk` contains tools for clients and necessary clients
-- `singularity_standard_tabs`
-
-Try not to look beyond these crates.
-The rest are mostly deprecated.
+- `sonamu_common` contains things used by both the compositor and native applets
+  - `sonamu_common/sonamu_ui` contains custom UI protocol
+  - `sonamu_common/sonamu_sync` contains sync primitives
+- `sonamu_sar` is general server-side framework
+- `sonamu_sde` is containst main runner
+- `sonamu_sttk` contains tools for clients and necessary clients
+- `sonamu_standard_tabs`
 
 DEVLOG.md is 10k+ lines, read it with tail.
 
 # Architecture
 
-- The sar runner holds only the root client's `ClientHandle` (`singularity_common::sap::client_handle`). The applet tree (`NodeTree`, a slotmap of nodes with parent/children ids, in `nodular_applet/node_tree.rs`) lives in the root client's thread (`RootNodeApplet`).
+- The sar runner holds only the root client's `ClientHandle` (`sonamu_common::sap::client_handle`). The applet tree (`NodeTree`, a slotmap of nodes with parent/children ids, in `nodular_applet/node_tree.rs`) lives in the root client's thread (`RootNodeApplet`).
 - Every node's main is an applet on its own thread, behind a `ClientHandle`; wl tiles are `WlSurfaceApplet`s, and `NodeTree::wl_surfaces` maps each surface to its node. Keys for the focused wl tile go straight from the runner to its client unless `root_node_applet::is_keybind` (#56); a tile sends other `WlSurfaceRequest`s to the compositor on `wl_request_queue` and gets `WlSurfaceEvent`s (focus, destroyed, title) on its own `wl_event_queue`. Applets talk to their node only through `NodeRequest`s, sent via `AppletContext`; their requests are tagged with the node's `NodeId`.
 - Fullscreen (#121) is runner-only (`SmithayState::fullscreen`): a wl toplevel that asks is drawn over the whole window (only overlay layers above it) and gets the mouse, until it asks to stop or Sonamu focus leaves its tile (`focus_wl_keyboard`); the tree doesn't know about it.
 - Multiple screens (#60): DRM shows each connected monitor (side by side, one scene); in a window `SONAMU_SCREENS=N` splits it. The runner sends the root `StandardEvent::Screens` (rects in its area); each screen shows the one tree with its own focus and view root/layer, and the last clicked screen is active (keys, treeview); the one wl output (layer surfaces, capture) is the main screen. Holders send applets `ScreenViews`, and projects keep their own per-screen focus and draw a window per screen. See `.claude/WORLD_TREE.md` (Screens).
@@ -27,7 +25,7 @@ DEVLOG.md is 10k+ lines, read it with tail.
 - An applet owns its inner tree directly; it changes its children only by requests to its node.
 - Sessions: applets publish `StandardApplet::save` with their treeview; the root saves the tree every 2 s and restores it on start (wl clients by command line, matched back by pid/app id). See `.claude/SESSIONS.md`.
 - Settings (#63): JSON, or JSON printed by an executable settings program, live-reloaded. See `.claude/SETTINGS.md`.
-- Other processes reach the runner over `$SONAMU_SOCKET` (`singularity_common::msg`, `singularity_sar/src/msg_socket.rs`): `sonamu-msg open <applet> [args]` becomes `StandardEvent::Open` to the root, which places that registered applet like a new wl surface: into the focused applet if focus is inside it (`StandardApplet::take_open`, else `NodeRequest::Open` back), otherwise as the focused node's child (`NodeHolder::open`). `assets/sonamu-file-manager.desktop` makes the file manager the default for folders.
+- Other processes reach the runner over `$SONAMU_SOCKET` (`sonamu_common::msg`, `sonamu_sar/src/msg_socket.rs`): `sonamu-msg open <applet> [args]` becomes `StandardEvent::Open` to the root, which places that registered applet like a new wl surface: into the focused applet if focus is inside it (`StandardApplet::take_open`, else `NodeRequest::Open` back), otherwise as the focused node's child (`NodeHolder::open`). `assets/sonamu-file-manager.desktop` makes the file manager the default for folders.
 - No Xwayland: the runner sets `XDG_SESSION_TYPE=wayland`, `ELECTRON_OZONE_PLATFORM_HINT=auto` and `NIXOS_OZONE_WL=1` in its own env at start, so clients inherit them (and on the tty exports them to D-Bus with `WAYLAND_DISPLAY`). `WAYLAND_DISPLAY` can't be set that way (see `AppletRunner::run`), so each launch sets it from `SONAMU_WAYLAND_DISPLAY`.
 - Testing with input and screenshots without a monitor (headless sway): `.claude/TESTING.md`.
 - World tree, paths ("inside" a node), focus, selectors, and who owns what (incl. projects, which are plain applets holding a `NodeTree`): `.claude/WORLD_TREE.md`.

@@ -1,0 +1,32 @@
+[package]
+name = "sonamu_standard_tabs"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+sonamu_common = { path = "../sonamu_common" }
+sonamu_ui = { workspace = true }
+sonamu_sttk = { path = "../sonamu_sttk" }
+
+log = { workspace = true }
+
+# serde = { workspace = true }
+# serde_json = { workspace = true }
+
+# below are sad failed attempts...
+# alacritty_terminal = "0.25"
+# libservo = { git = "https://github.com/servo/servo", tag = "v0.0.5" }
+
+# printpdf = "^0.9.1"
+
+arboard = { version = "^3.6.1", features = ["wayland-data-control"] }
+
+image = { workspace = true }
+
+# things needed for editor
+ropey = { version = "1.6.1" } # TODO:  checkout version 2 whiich is in beta rn
+hayro = "0.8"
+
