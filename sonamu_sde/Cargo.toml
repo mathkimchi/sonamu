@@ -8,16 +8,10 @@ workspace = true
 
 [dependencies]
 singularity_common = { workspace = true }
-# singularity_macros = { path = "../singularity_common/singularity_macros" }
 singularity_standard_tabs = { path = "../singularity_standard_tabs" }
 # sonamu_ui = { workspace = true }
-# singularity_sap = { path = "../singularity_sap", features = [
-#     "standard_packets",
-# ] }
-# singularity_sporg = { path = "../singularity_sporg" }
 singularity_sar = { path = "../singularity_sar" }
 singularity_sttk = { path = "../singularity_sttk" }
-# singularity_wl_compositor = { path = "../singularity_wl_compositor" }
 
 # serde = { workspace = true }
 # serde_json = { workspace = true }
@@ -26,6 +20,3 @@ singularity_sttk = { path = "../singularity_sttk" }
 tracing-subscriber = { workspace = true }
 # log = { workspace = true }
 
-[dev-dependencies]
-calloop = { workspace = true }
-sonamu_ui = { workspace = true }

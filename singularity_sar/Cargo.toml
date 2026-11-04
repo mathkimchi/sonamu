@@ -7,7 +7,6 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-# singularity_macros = { path = "../singularity_common/singularity_macros" }
 singularity_common = { workspace = true }
 sonamu_ui = { workspace = true }
 sonamu_sync = { workspace = true }

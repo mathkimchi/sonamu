@@ -1,5 +1,4 @@
 pub mod command_hub;
-pub mod components;
 pub mod creatable_applet;
 pub mod man_page;
 pub mod nodular_applet;

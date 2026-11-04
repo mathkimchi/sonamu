@@ -98,7 +98,7 @@ published treeviews.
     sends `NodeRequest::Unwrap(contents)`, so they take its place.
 - A **split** is a `SplitApplet` the same way: its inner tree's root is the split (`Layout::Split`, no main) and its
   children are the panes. Super+Shift+| / _ wraps the node into one (`SplitApplet::wrapper`) with a new pane; closing it
-  gives its panes back, and one left with a single pane is replaced by it. See `.claude/FM_SPLITS_UDEV.md`.
+  gives its panes back, and one left with a single pane is replaced by it.
 
 Generic hooks that make this possible (`StandardApplet`, run by `AppletClient`):
 

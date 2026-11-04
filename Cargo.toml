@@ -2,9 +2,7 @@
 members = [
     "singularity_common",
     "singularity_common/sonamu_ui",
-    "singularity_common/singularity_macros",
 
-    "singularity_sporg",
     "sonamu_sde",
     "singularity_sttk",
     "singularity_standard_tabs",

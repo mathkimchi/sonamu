@@ -3,8 +3,6 @@
 //!
 //! If a util was really big and I wanted to organize properly, I would give it a new crate.
 
-// pub mod object_stream;
 pub mod id_map;
 pub mod timer;
 pub mod tree;
-// pub mod usock_tools;

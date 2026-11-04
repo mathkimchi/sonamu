@@ -3076,15 +3076,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "singularity_macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "singularity_sar"
 version = "0.1.0"
 dependencies = [
@@ -3099,16 +3090,6 @@ dependencies = [
  "sonamu_ui",
  "wayland-protocols",
  "wgpu",
-]
-
-[[package]]
-name = "singularity_sporg"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "singularity_common",
- "sonamu_ui",
 ]
 
 [[package]]
@@ -3315,12 +3296,10 @@ dependencies = [
 name = "sonamu_sde"
 version = "0.1.0"
 dependencies = [
- "calloop",
  "singularity_common",
  "singularity_sar",
  "singularity_standard_tabs",
  "singularity_sttk",
- "sonamu_ui",
  "tracing-subscriber",
 ]
 

@@ -3,8 +3,6 @@ use std::{
     sync::{Arc, Mutex, RwLock, atomic::AtomicUsize},
 };
 
-// pub mod shared_graph;
-// pub mod shared_state; // shared_graph mogs
 
 /// Lock (RwLock) but you can only call getter and setter,
 /// so this is guranteed to prevent deadlocks.
