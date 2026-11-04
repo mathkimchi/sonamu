@@ -2,7 +2,7 @@
 
 > Organize everything.
 
-Sonamu let's you organize all your apps and their elements into one large hierarchy.
+Sonamu lets you organize all your apps and their elements into one large hierarchy.
 
 ## The Problem
 
