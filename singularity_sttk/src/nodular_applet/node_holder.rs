@@ -444,7 +444,6 @@ impl NodeHolder {
             NodeRequest::AddChild(initializer) => {
                 self.tree.add_child(id, initializer);
             }
-            NodeRequest::ChangeFocus(operation) => self.tree.change_focus(id, operation),
             // and the holder's node likewise
             NodeRequest::FocusSelf => {
                 self.tree.focus(id, true);

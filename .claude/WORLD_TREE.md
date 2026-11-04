@@ -44,31 +44,26 @@ The saved session's `focus` falls back to the root if it can't be read (eg saved
 ## Traversal keys
 
 The treeview selector shows when focus is on a node rather than inside an applet taking input.
-Keys (`WorldTreeTraversalOperation`):
+Traversal is the root's (#83, `nodular_applet/traversal.rs`): it moves by the **shown rows** (`view_tree_rows`, the
+view root's subtree without collapsed parts), so it crosses into and out of applets' inner trees like any other level,
+then focuses the target with `Focus(path)` (`NodeTree::focus_path`, passed down to the applet owning the row).
+Applets have no traversal of their own.
 
-- `e`: **into** a layer (NextLayer): from a node into its inner world, at its root
-  (the node becomes `Inner` and its main gets `Focus([])`).
-- `q`: **out of** a layer (PrevLayer): from anywhere in an inner world back to the node holding that world
-  (from the outermost world: up to its root).
-- `a` / `0`: parent; `d`, `1`-`8`, `9`: first, nth, last child; `w` / `s`: previous/next sibling.
-  These all stay in the same world.
-- Space (or clicking its `▾`/`▸`, outer-world nodes only for now) collapses/expands the selected node's inner world in the treeview; Enter confirms (into the applet, resuming
-  where it was, without `Focus`). Modifiers on their own don't leave the selector; other keys go into the applet.
+- While traversing (`NodeTree::is_traversing`), plain keys; otherwise with Alt (`is_keybind`, so wl clients don't get them):
+  Tab / Shift+Tab: next / previous row (wrapping); `w` / `s`: previous / next sibling (shown rows at the same depth
+  under the same parent: a node's inner children come before its own, so `s` on the last inner one goes to the first
+  outer one); `a` / `0`: parent (past the view root: its parent, widening the view); `d`, `1`-`8`, `9`: first, nth, last child.
+- Swipes (DRM backend only: `UIEvent::Swipe`, a step each time the fingers move `SWIPE_DISTANCE`): 3 fingers up / down
+  is Shift+Tab / Tab, every step; 4 fingers up selects the focused row (out of its applet), 4 down is Enter; once a swipe.
+- In the selector (the deepest holder's `NodeTree::handle_event`, or an applet's own, eg the file manager's documents):
+  Space (or clicking its `▾`/`▸`, outer-world nodes only for now) collapses/expands; Enter confirms (into the applet,
+  resuming where it was; a split's first pane). Modifiers on their own don't leave the selector; other keys go into the applet.
 - The standard keybinds (Ctrl+W, Ctrl+Shift++, splits, Super+P) act on the selected node.
   Ctrl+W asks its main to close (`CloseRequest`, see below) rather than closing it.
-  A selected project is a node like any other, so Ctrl+Shift++ on it gives it a child. Inside it at its inner root,
-  Ctrl+Shift++ adds to the project's contents instead.
+  A selected project is a node like any other, so Ctrl+Shift++ on it gives it a child.
 
-An applet with an inner world can have its own selector over it, with the same keys (the project via its `NodeTree`,
-the file manager by hand over its root and documents). While it does, it publishes `traversing: true`.
-Alt+Q inside an applet goes to its own selector if it has one (eg the file manager's list or a document), else to its node.
-
-Touchpad swipes (DRM backend only: `UIEvent::Swipe`, a step each time the fingers move `SWIPE_DISTANCE`, like
-scrolling; 3 finger swipes act on every step, 4 finger ones only on the first) map to
-keybinds in `standard_keybind_request`: 4 fingers up / down is Alt+Q / `e` (out of / into a layer), 3 fingers up / down
-is Alt+Shift+Tab / Alt+Tab (previous / next node in depth-first order, landing on the node, not inside its applet).
-3 finger swipes skip the applet: its loop (`AppletClient`) sends them straight to its node, unless it
-`handles_dfs_swipes` (a project, to move through its own tree). The file manager passes its documents' ones to its node.
+An applet with an inner world can still be selecting in it (a project's `NodeTree`, the file manager over its root
+and documents) when focus is on one of its rows; it publishes `traversing: true` then.
 
 ## Who owns what
 
@@ -124,20 +119,14 @@ The full focus path is built bottom-up:
 - A `Child(i)` node prefixes `i` to its child's node path.
 - An `Inner` node appends its main's published focus path (`push_inner`), so at its main's root it is just the node.
 
-Moving focus is recursive too:
-
-- A traversal starts at the focused node and is passed up to parents as needed (`calculate_new_focus`).
-- If it passes the root of a world, it **escapes** (`NodeTree::escaped`). A project sends it to its own node
-  as `ChangeFocus`, which continues in the outer world. That is how `q` from inside a project lands on the project.
-  Other applets do the same by hand (`AppletContext::change_focus`).
-- Going into a deeper world is done by the node holding it. `NextLayer` makes the node `Inner` and sends `Focus([])`,
-  and from then on keys go to its main, which moves focus inside its own world.
-- `Inner` + `Parent`/`PrevLayer` (from the main) makes the node `Focusing` again: the inner root is the node's own row.
+Moving focus goes down the same way: the root picks the target row (see Traversal keys) and sends `Focus(path)`;
+each holder focuses its node (`Focusing` if the path ends there, else `Inner` with the rest sent to its main).
+Enter makes a `Focusing` node `Inner`, and from then on keys go to its main.
 
 ## Screens (#60)
 
 - The root's tree is shown on every screen (`StandardEvent::Screens`), each with its own focus, view root
-  (`NodeTree`) and view layer and treeview state (`RootNodeApplet`). The **active** screen's are the usual fields
+  (`NodeTree`) and inner view root (`view_path`) and treeview state (`RootNodeApplet`). The **active** screen's are the usual fields
   (nodes' `FocusIndex`, `view_root`, `panes`, ...); the others are kept in `screens` and swapped in by
   `activate_screen`, which puts focus back on the node it was left on (`NodeTree::activate_screen`).
 - An inactive screen shows the panes toward its focus (`displayed_node_toward`), with no focus border, and the
@@ -176,11 +165,11 @@ The holder above stitches these in:
   rest of the width) or floating (default: centered over the panes, which keep their size; always framed), and
   `pinned` (always shown) or not (default: only while `NodeTree::is_traversing`, or a treeview drag or menu is open).
   Floating is never pinned. See `treeview_area`, `applet_area` and `treeview_frame` in `root_node_applet.rs`.
-- The treeview shows the **view layer**'s world (`RootNodeApplet::view_layer`, the holder's path; `None` is the
-  outermost), chosen by the user: Alt+R sets it to the world focus is in, a row's right click › Set as view layer to
-  the world that row is in, as does a double click on it. Focus going out of it (or its holder going away) moves it out to the next world focus is
-  inside (`update_view_layer`). An inner view layer is shown under a `‹ holder` row (`inner_layer_rows`): a click on its `‹` focuses the holding node (out), on its name the inner
-  world's root (eg a project's overview; `TreeviewRow::inner_root`). Else it shows the view root's subtree (Super+V).
+- The treeview shows the **view root**'s subtree, any row (#83): the `NodeTree`'s view root for a node of the root's
+  tree (it also picks the panes), else `RootNodeApplet::view_path` for a row inside an applet (its `NodeTree` view root
+  is then the node holding it). Set by a double click on a row, its right click › Set as view root, Super+V (the focused
+  row, or back to the whole tree) and Alt+R (the focused row's parent). Above it is a dim `‹ parent` row; focusing it
+  (or focus leaving the view any other way) widens the view (`update_view_root`, `update_view_path`).
   Expanded inner worlds are drawn in a box; the panel scrolls with the wheel and follows focus.
 - `is_traversing` follows `Inner` nodes down into
   their mains' `traversing`, since a path inside a project can still be a selection (eg `[Child(p)]` with the project selecting its root).
@@ -200,8 +189,8 @@ The holder converts them:
   documents). The treeview's `×` button, shown on the hovered row (not the root, not `‹` rows), sends `NodeAction::Close`,
   which asks the node's main to close like Ctrl+W.
 - A right click in the treeview opens a menu (#103, `Menu` in `treeview.rs`). On a node's row: New child ›,
-  New sibling below ›, Make project (Wrap, like Super+P), Set as view layer, Deactivate, Close, Close with children (asks every node
-  in the subtree, parents first). On the root's row only the first, Make project and Set as view layer; on empty space or a `‹` row,
+  New sibling below ›, Make project (Wrap, like Super+P), Set as view root, Deactivate, Close, Close with children (asks every node
+  in the subtree, parents first). On the root's row only the first, Make project and Set as view root; on empty space or a `‹` row,
   the applet list for the shown world's root (the view root, or the inner root of the applet whose inner world is
   shown). New › lists command hub, terminal, browser, file manager (in the holder's directory) and an empty
   project, all as `NodeAction::Spawn`. Native ones are added there and focused inside; for a program, the holder

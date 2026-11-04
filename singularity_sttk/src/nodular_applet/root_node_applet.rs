@@ -6,8 +6,9 @@ use crate::{
         node_tree::{NodeId, NodeTree},
         project_applet::ProjectApplet,
         split_applet::SplitApplet,
+        traversal::{self, Traversal},
         treeview::{
-            BTN_LEFT, TreeviewAction, TreeviewPointer, TreeviewRow, close_width, inner_layer_rows,
+            BTN_LEFT, TreeviewAction, TreeviewPointer, TreeviewRow, close_width, focused_row,
             treeview_rows, with_opacity,
         },
     },
@@ -28,8 +29,8 @@ use singularity_common::{
     },
     settings::{self, Settings, TreeviewFloating, TreeviewSide},
     utils::tree::{
-        recursive_tree::RecursiveTreeNode,
-        world_tree::{Step, WorldTree, WorldTreePath},
+        tree_node_path::TreeNodePath,
+        world_tree::{WorldTree, WorldTreePath},
     },
 };
 use sonamu_ui::{
@@ -63,12 +64,12 @@ pub struct RootNodeApplet {
     treeview_shown: bool,
     /// Always shown, beside the panes; toggled by its pin button and saved in the session
     treeview_pinned: bool,
-    /// The node whose inner tree the treeview shows (right click › Set as view layer, Alt+R);
-    /// `None` for the outermost tree. Moves out with focus (see `update_view_layer`).
-    view_layer: Option<WorldTreePath>,
-    /// The focus path `update_view_layer` last saw: it only moves the view layer out when focus moves, since right
+    /// The view root when it is a row inside an applet (double click, right click › Set as view root, Alt+R);
+    /// `None`: the `NodeTree`'s view root. Moves out with focus (see `update_view_path`).
+    view_path: Option<WorldTreePath>,
+    /// The focus path `update_view_path` last saw: it only moves the view out when focus moves, since right
     /// after switching screens an applet's published focus (eg a project's) is still the other screen's
-    view_layer_focus: Option<WorldTreePath>,
+    view_path_focus: Option<WorldTreePath>,
     /// The applets' area's left edge and width, as last sent to them
     applet_area: [u32; 2],
     /// Where the session is saved, if anywhere
@@ -76,7 +77,7 @@ pub struct RootNodeApplet {
     /// The last one written, so unchanged ones aren't written again
     saved_session: Option<Session>,
     /// Every screen (#60), each with its own focus (see `NodeTree::activate_screen`).
-    /// The active one's view is the fields above (`latest_size`, `view_layer`, `treeview_pointer`).
+    /// The active one's view is the fields above (`latest_size`, `view_path`, `treeview_pointer`).
     screens: Vec<Screen>,
 }
 
@@ -85,7 +86,7 @@ pub struct RootNodeApplet {
 struct Screen {
     /// `[x, y, width, height]`
     rect: [u32; 4],
-    view_layer: Option<WorldTreePath>,
+    view_path: Option<WorldTreePath>,
     treeview_pointer: TreeviewPointer,
 }
 
@@ -165,7 +166,7 @@ impl RootNodeApplet {
         let Self {
             holder,
             treeview_pointer,
-            view_layer,
+            view_path,
             screens,
             ..
         } = self;
@@ -176,10 +177,10 @@ impl RootNodeApplet {
                     let [x, y, width, height] = screen.rect;
                     let size = DisplayContainerSize::new(width, height);
                     // the active one's view is the root's own
-                    let (shown, view_layer, treeview_pointer) = if index == active {
-                        (shown, &*view_layer, &mut *treeview_pointer)
+                    let (shown, view_path, treeview_pointer) = if index == active {
+                        (shown, &*view_path, &mut *treeview_pointer)
                     } else {
-                        (pinned, &screen.view_layer, &mut screen.treeview_pointer)
+                        (pinned, &screen.view_path, &mut screen.treeview_pointer)
                     };
                     let treeview_area = treeview_area(&settings, size, shown, pinned);
                     let [left, width] =
@@ -192,7 +193,7 @@ impl RootNodeApplet {
                         window.push(Self::get_treeview(
                             &holder.tree,
                             index,
-                            view_layer.as_ref(),
+                            view_path.as_ref(),
                             treeview_pointer,
                             area,
                             pinned,
@@ -240,10 +241,10 @@ impl RootNodeApplet {
             return;
         }
         let left = &mut self.screens[active];
-        left.view_layer = self.view_layer.take();
+        left.view_path = self.view_path.take();
         left.treeview_pointer = std::mem::take(&mut self.treeview_pointer);
         let screen = &mut self.screens[index];
-        self.view_layer = screen.view_layer.take();
+        self.view_path = screen.view_path.take();
         self.treeview_pointer = std::mem::take(&mut screen.treeview_pointer);
         let [_, _, width, height] = screen.rect;
         self.latest_size = DisplayContainerSize::new(width, height);
@@ -354,8 +355,8 @@ impl RootNodeApplet {
             treeview_pinned: saved_session
                 .as_ref()
                 .is_some_and(|saved| saved.treeview_pinned),
-            view_layer: None,
-            view_layer_focus: None,
+            view_path: None,
+            view_path_focus: None,
             applet_area: [0, 800],
             session_path,
             saved_session,
@@ -441,7 +442,7 @@ impl RootNodeApplet {
                             root.quit();
                         }
                         root.holder.tree.update_view_root();
-                        root.update_view_layer();
+                        root.update_view_path();
                         root.damage_if_tree_changed();
                         root.update_treeview_visibility();
                         root.holder.tree.update_layout();
@@ -465,9 +466,20 @@ impl RootNodeApplet {
         {
             match keybind {
                 RootKeybind::Help => self.toggle_help(),
-                RootKeybind::ViewRoot => self.holder.tree.toggle_view_root(),
-                RootKeybind::ViewLayer => self.set_view_layer(&self.holder.tree.get_focus_path()),
+                RootKeybind::ViewRoot => self.toggle_view_root(),
+                RootKeybind::ViewParent => {
+                    let mut parent = self.holder.tree.get_focus_path();
+                    parent.0.pop();
+                    self.set_view_root(&parent);
+                }
             }
+            self.damage_if_tree_changed();
+            return;
+        }
+        if let StandardEvent::UIEvent(ui_event) = &event
+            && let Some(traversal) = Traversal::of(ui_event, self.holder.tree.is_traversing())
+        {
+            self.traverse(traversal);
             self.damage_if_tree_changed();
             return;
         }
@@ -572,7 +584,7 @@ impl RootNodeApplet {
         let (rows, general) = if treeview_area.is_some() {
             view_rows(
                 &self.holder.tree,
-                self.view_layer.as_ref(),
+                self.view_path.as_ref(),
                 self.holder.tree.active_screen(),
             )
         } else {
@@ -624,7 +636,7 @@ impl RootNodeApplet {
             Some(TreeviewAction::Focus(path)) => self.holder.focus(&path),
             Some(TreeviewAction::ToggleCollapsed(path)) => self.holder.toggle_collapsed(&path),
             Some(TreeviewAction::Node(path, action)) => self.holder.node_action(&path, action),
-            Some(TreeviewAction::SetViewLayer(path)) => self.set_view_layer(&path),
+            Some(TreeviewAction::SetViewRoot(path)) => self.set_view_root(&path),
             Some(TreeviewAction::StartDrag(path)) => {
                 self.send_request(StandardRequest::RequestPluck(path));
             }
@@ -682,36 +694,84 @@ impl RootNodeApplet {
         self.damage_if_tree_changed();
     }
 
-    /// Shows the tree that `path` is in
-    fn set_view_layer(&mut self, path: &WorldTreePath) {
-        self.view_layer = holder_of(path);
+    /// Moves focus by the shown rows (#83), across applets' inner trees
+    fn traverse(&mut self, traversal: Traversal) {
+        let focus = self.holder.tree.get_focus_path();
+        let target = match traversal {
+            // its row's node itself
+            Traversal::Select => Some(focus),
+            // like Enter in the selector, wherever it is
+            Traversal::Enter => {
+                let _ = self
+                    .holder
+                    .handle_ui_event(StandardEvent::UIEvent(UIEvent::Key {
+                        symbol: Some(KeySymbol::Enter),
+                        modifiers: KeyModifiers::NONE,
+                        raw_keycode: 0,
+                        pressed: true,
+                    }));
+                None
+            }
+            _ => {
+                let rows = view_tree_rows(
+                    &self.holder.tree,
+                    self.view_path.as_ref(),
+                    self.holder.tree.active_screen(),
+                    false,
+                );
+                let from = rows
+                    .iter()
+                    .position(|row| row.path == focused_row(&rows, &focus));
+                traversal::target(&rows, from, traversal)
+            }
+        };
+        if let Some(target) = target {
+            self.holder.focus(&target);
+            self.surface.damage();
+        }
+    }
+
+    /// Super+V: the focused row as the view root, or back to the whole tree
+    fn toggle_view_root(&mut self) {
+        let tree = &self.holder.tree;
+        let path = if self.view_path.is_some()
+            || tree.view_root_path(tree.active_screen()) != TreeNodePath::new_root()
+        {
+            WorldTreePath::root()
+        } else {
+            tree.get_focus_path()
+        };
+        self.set_view_root(&path);
+    }
+
+    /// Shows the row's subtree: the `NodeTree`'s view root for a node of it, else `view_path`
+    fn set_view_root(&mut self, path: &WorldTreePath) {
+        let (node_path, inner) = path.split_world();
+        self.holder.tree.set_view_root(&node_path);
+        self.view_path = inner.map(|_| path.clone());
         self.surface.damage();
     }
 
-    /// Moves the view layer out until focus is inside it (eg focus went out of it), and out of gone nodes
-    fn update_view_layer(&mut self) {
-        let Some(mut holder) = self.view_layer.clone() else {
+    /// Moves the view out until focus is inside it (eg focus went out of it), and out of gone rows
+    fn update_view_path(&mut self) {
+        let Some(mut view) = self.view_path.clone() else {
             return;
         };
         let focus = self.holder.tree.get_focus_path();
-        let focus_moved = self.view_layer_focus.as_ref() != Some(&focus);
-        self.view_layer_focus = Some(focus.clone());
+        let focus_moved = self.view_path_focus.as_ref() != Some(&focus);
+        self.view_path_focus = Some(focus.clone());
         let treeview = self.holder.tree.get_treeview();
-        while !((!focus_moved || focus.starts_with(&holder))
-            && matches!(
-                treeview.safe_get(&holder).map(RecursiveTreeNode::get_value),
-                Some(WorldTree::World(_))
-            ))
-        {
-            let Some(outer) = holder_of(&holder) else {
-                self.view_layer = None;
+        while !((!focus_moved || focus.starts_with(&view)) && treeview.safe_get(&view).is_some()) {
+            view.0.pop();
+            if !view.is_inner() {
+                self.view_path = None;
+                self.holder.tree.set_view_root(&view.split_world().0);
                 self.surface.damage();
                 return;
-            };
-            holder = outer;
+            }
         }
-        if self.view_layer.as_ref() != Some(&holder) {
-            self.view_layer = Some(holder);
+        if self.view_path.as_ref() != Some(&view) {
+            self.view_path = Some(view);
             self.surface.damage();
         }
     }
@@ -726,12 +786,12 @@ impl RootNodeApplet {
     fn get_treeview(
         tree: &NodeTree,
         screen: usize,
-        view_layer: Option<&WorldTreePath>,
+        view_path: Option<&WorldTreePath>,
         treeview_pointer: &mut TreeviewPointer,
         (area, place): ([u32; 4], TreeviewPlace),
         pinned: bool,
     ) -> UITree {
-        let (rows, _) = view_rows(tree, view_layer, screen);
+        let (rows, _) = view_rows(tree, view_path, screen);
         let settings = settings::get();
         let ([x, y, width, height], border) = treeview_frame(&settings, area, place);
         let inner_width = width.saturating_sub(2 * border) as f32;
@@ -866,35 +926,44 @@ fn treeview_frame(
     }
 }
 
-/// The treeview's rows: the view layer's inner tree, else the view root's subtree.
-/// Also where its menu adds things when opened on no row: that inner tree's root, else the view root.
-fn view_rows(
+/// The treeview's rows: the view root's subtree (`view_path`, else the `NodeTree`'s),
+/// under a `‹` row for its parent with `up`.
+fn view_tree_rows(
     tree: &NodeTree,
-    view_layer: Option<&WorldTreePath>,
+    view_path: Option<&WorldTreePath>,
     screen: usize,
-) -> (Vec<TreeviewRow>, WorldTreePath) {
-    if let Some(rows) = view_layer.and_then(|holder| inner_layer_rows(&tree.get_treeview(), holder))
-    {
-        // the first row is the node holding it
-        let general = rows[0].path.clone();
-        return (rows, general);
+    up: bool,
+) -> Vec<TreeviewRow> {
+    if let Some(view) = view_path {
+        let treeview = tree.get_treeview();
+        if let Some(node) = treeview.safe_get(view) {
+            let mut parent = view.clone();
+            parent.0.pop();
+            let up = up
+                .then(|| treeview.safe_get(&parent))
+                .flatten()
+                .map(|parent_node| (parent, parent_node.get_value().get_root_value().clone()));
+            return treeview_rows(&WorldTree::World(Box::new(node.clone())), view, up);
+        }
     }
-    let base = tree.view_root_path(screen);
-    let rows = treeview_rows(
-        &tree.get_view_treeview(screen),
-        &base,
-        tree.view_parent(screen),
-    );
-    (rows, WorldTreePath::from_tree_path(&base))
+    let base = WorldTreePath::from_tree_path(&tree.view_root_path(screen));
+    let up = up
+        .then(|| tree.view_parent(screen))
+        .flatten()
+        .map(|(path, label)| (WorldTreePath::from_tree_path(&path), label));
+    treeview_rows(&tree.get_view_treeview(screen), &base, up)
 }
 
-/// The node whose inner world the path ends in, `None` for the outermost world
-fn holder_of(path: &WorldTreePath) -> Option<WorldTreePath> {
-    let last_inner = path
-        .0
-        .iter()
-        .rposition(|step| matches!(step, Step::Inner(_)))?;
-    Some(WorldTreePath(path.0[..last_inner].to_vec()))
+/// The treeview's rows, and where its menu adds things when opened on no row (the view root)
+fn view_rows(
+    tree: &NodeTree,
+    view_path: Option<&WorldTreePath>,
+    screen: usize,
+) -> (Vec<TreeviewRow>, WorldTreePath) {
+    let general = view_path
+        .cloned()
+        .unwrap_or_else(|| WorldTreePath::from_tree_path(&tree.view_root_path(screen)));
+    (view_tree_rows(tree, view_path, screen, true), general)
 }
 
 /// The root's own keybinds
@@ -904,7 +973,7 @@ enum RootKeybind {
     /// Super+V
     ViewRoot,
     /// Alt+r
-    ViewLayer,
+    ViewParent,
 }
 impl RootKeybind {
     fn of(ui_event: &UIEvent) -> Option<Self> {
@@ -920,7 +989,7 @@ impl RootKeybind {
         match c {
             '?' if modifiers.logo => Some(Self::Help),
             'v' | 'V' if modifiers.logo => Some(Self::ViewRoot),
-            'r' if modifiers == KeyModifiers::ALT => Some(Self::ViewLayer),
+            'r' if modifiers == KeyModifiers::ALT => Some(Self::ViewParent),
             _ => None,
         }
     }
@@ -929,5 +998,7 @@ impl RootKeybind {
 /// Whether the root or a node acts on this key, rather than a focused wl client.
 /// The runner sends other keys straight to the client (#56).
 pub fn is_keybind(ui_event: &UIEvent) -> bool {
-    RootKeybind::of(ui_event).is_some() || standard_keybind_request(ui_event).is_some()
+    RootKeybind::of(ui_event).is_some()
+        || standard_keybind_request(ui_event).is_some()
+        || Traversal::of(ui_event, false).is_some()
 }

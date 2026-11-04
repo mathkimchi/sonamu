@@ -15,17 +15,15 @@ use singularity_common::{
     settings,
     utils::tree::{
         recursive_tree::RecursiveTreeNode,
-        tree_node_path::{TreeNodePath, TreeTraverseOperation},
-        world_tree::{
-            Step, WorldTree, WorldTreePath, world_tree_traversal::WorldTreeTraversalOperation,
-        },
+        tree_node_path::TreeNodePath,
+        world_tree::{Step, WorldTree, WorldTreePath},
     },
 };
 use slotmap::SlotMap;
 use sonamu_ui::{
     display_units::DisplayContainerSize,
     ui_element::{Length, Style, UIElement, UITree},
-    ui_event::{KeySymbol, KeyTrait, MouseEvent, MouseEventKind, UIEvent},
+    ui_event::{KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::collections::HashMap;
 
@@ -87,103 +85,6 @@ impl Node {
             screen_views: None,
         }
     }
-
-    /// Doesn't actually change anything.
-    /// Just returns the new focus and what to call for the parent.
-    fn calculate_new_focus(
-        &self,
-        operation: WorldTreeTraversalOperation,
-    ) -> (Option<FocusIndex>, Option<WorldTreeTraversalOperation>) {
-        match self.focus {
-            FocusIndex::Focusing => match operation {
-                WorldTreeTraversalOperation::GlobalRoot
-                | WorldTreeTraversalOperation::PrevLayer
-                | WorldTreeTraversalOperation::Layerwise(
-                    TreeTraverseOperation::Parent | TreeTraverseOperation::RelShiftSibling(_),
-                ) => {
-                    // With PrevLayer, propagate the prev layer until the lowest level of prev layer gets this message
-                    (None, Some(operation))
-                }
-                // a split has no main to go into, so into its first pane
-                WorldTreeTraversalOperation::NextLayer if self.main.is_none() => (
-                    (!self.children.is_empty()).then_some(FocusIndex::Child(0)),
-                    None,
-                ),
-                WorldTreeTraversalOperation::NextLayer => (Some(FocusIndex::Inner), None),
-                // TODO: no key makes these (`q`/`e` are the layer keys)
-                WorldTreeTraversalOperation::Layerwise(
-                    TreeTraverseOperation::BfsPrev | TreeTraverseOperation::BfsNext,
-                ) => (None, None),
-                WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::Child(
-                    child_index,
-                )) => {
-                    if child_index < self.children.len() {
-                        (Some(FocusIndex::Child(child_index)), None)
-                    } else {
-                        (None, None)
-                    }
-                }
-                WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::LastChild) => {
-                    let num_children = self.children.len();
-                    if num_children > 0 {
-                        (Some(FocusIndex::Child(num_children - 1)), None)
-                    } else {
-                        (None, None)
-                    }
-                }
-            },
-            FocusIndex::Inner => match operation {
-                WorldTreeTraversalOperation::GlobalRoot => {
-                    (Some(FocusIndex::Focusing), Some(operation))
-                }
-                // the applet's inner tree root is this node's row, so its parent is this node
-                WorldTreeTraversalOperation::PrevLayer
-                | WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::Parent) => {
-                    (Some(FocusIndex::Focusing), None)
-                }
-                // the applet moves focus inside its inner tree itself
-                WorldTreeTraversalOperation::NextLayer
-                | WorldTreeTraversalOperation::Layerwise(_) => (None, None),
-            },
-            FocusIndex::Child(child_index) => match operation {
-                WorldTreeTraversalOperation::GlobalRoot
-                | WorldTreeTraversalOperation::PrevLayer => {
-                    (Some(FocusIndex::Focusing), Some(operation))
-                }
-                // WorldTreeTraversalOperation::PrevLayer => {
-                //     // If I don't change this guy's focus,
-                //     // then it will automatically focus to
-                //     // the previous spot when it comes here next time
-                //     // self.focus_index.set(FocusIndex::Focusing);
-                //     (None, Some(operation))
-                // }
-                // focus is already below this node; only a stale request (eg from an applet whose
-                // node lost focus meanwhile) gets these here
-                WorldTreeTraversalOperation::NextLayer => (None, None),
-                WorldTreeTraversalOperation::Layerwise(tree_traverse_operation) => {
-                    match tree_traverse_operation {
-                        TreeTraverseOperation::Parent => (
-                            // the child wants to focus on parent, so just focus on self
-                            Some(FocusIndex::Focusing),
-                            None,
-                        ),
-                        TreeTraverseOperation::RelShiftSibling(shift) => (
-                            Some(FocusIndex::Child(
-                                (child_index as isize + shift)
-                                    .clamp(0, self.children.len() as isize - 1)
-                                    .cast_unsigned(),
-                            )),
-                            None,
-                        ),
-                        TreeTraverseOperation::BfsPrev
-                        | TreeTraverseOperation::BfsNext
-                        | TreeTraverseOperation::Child(_)
-                        | TreeTraverseOperation::LastChild => (None, None),
-                    }
-                }
-            },
-        }
-    }
 }
 
 /// Runs an applet as a client whose requests are tagged with the given node
@@ -210,8 +111,6 @@ pub struct NodeTree {
     attach_client: AttachClient,
     /// Set when the tree changed in a way that needs a redraw
     damaged: bool,
-    /// A traversal that went up past the root, for the holder to pass on to its own node
-    escaped: Option<WorldTreeTraversalOperation>,
     /// A standard keybind pressed on the selected node (in the treeview selector), for the holder to do as if from it
     keybind_request: Option<(NodeId, NodeRequest)>,
 
@@ -308,7 +207,6 @@ impl NodeTree {
             spawn_client,
             attach_client,
             damaged: true,
-            escaped: None,
             keybind_request: None,
             view_root: NodeId::default(),
             screens: Vec::new(),
@@ -336,11 +234,6 @@ impl NodeTree {
 
     pub const fn damage(&mut self) {
         self.damaged = true;
-    }
-
-    /// A traversal that went up past the root since the last call
-    pub const fn take_escaped(&mut self) -> Option<WorldTreeTraversalOperation> {
-        self.escaped.take()
     }
 
     /// A standard keybind pressed on a node with no main, since the last call
@@ -1043,6 +936,12 @@ impl NodeTree {
         self.damaged = true;
     }
 
+    /// The node at `path` (or the deepest one along it) as the view root
+    pub fn set_view_root(&mut self, path: &TreeNodePath) {
+        self.view_root = self.closest_node_at(path).0;
+        self.damaged = true;
+    }
+
     /// Widens the view root if focus left it. Run after each batch of changes.
     pub fn update_view_root(&mut self) {
         let old = self.view_root;
@@ -1390,65 +1289,6 @@ impl NodeTree {
         true
     }
 
-    /// Changes focus from the perspective of the node,
-    /// passing the operation on to its ancestors as needed (past the root: `take_escaped`).
-    pub fn change_focus(&mut self, id: NodeId, operation: WorldTreeTraversalOperation) {
-        if let WorldTreeTraversalOperation::Layerwise(
-            op @ (TreeTraverseOperation::BfsPrev | TreeTraverseOperation::BfsNext),
-        ) = operation
-        {
-            self.focus_next_in_order(id, matches!(op, TreeTraverseOperation::BfsNext));
-            return;
-        }
-        let mut id = id;
-        let mut operation = Some(operation);
-        while let Some(current_operation) = operation
-            && let Some(node) = self.nodes.get_mut(id)
-        {
-            let (new_focus, parent_call) = node.calculate_new_focus(current_operation);
-            if let Some(new_focus) = new_focus {
-                node.focus = new_focus;
-                match new_focus {
-                    FocusIndex::Child(index) => node.last_child = index,
-                    // into its main's inner tree, at its root
-                    FocusIndex::Inner => {
-                        if let Some(main) = &node.main {
-                            main.send_event(StandardEvent::Focus(WorldTreePath::root()));
-                        }
-                    }
-                    FocusIndex::Focusing => {}
-                }
-                self.damaged = true;
-            }
-            operation = parent_call;
-
-            // the root has no parent to pass it to, but the holder's node may
-            let Some(parent) = node.parent else {
-                self.escaped = operation;
-                break;
-            };
-            id = parent;
-        }
-    }
-
-    /// Focuses the node after (or before) `from` in depth-first order of the shown subtree, wrapping around.
-    /// Lands on the node (the selector), not inside its main.
-    fn focus_next_in_order(&mut self, from: NodeId, forward: bool) {
-        let mut order = Vec::new();
-        let mut stack = vec![self.view_root];
-        while let Some(id) = stack.pop() {
-            order.push(id);
-            stack.extend(self.nodes[id].children.iter().rev());
-        }
-        let Some(position) = order.iter().position(|&id| id == from) else {
-            return;
-        };
-        let len = order.len();
-        let target = order[(position + if forward { 1 } else { len - 1 }) % len];
-        self.focus_node(target);
-        self.nodes[target].focus = FocusIndex::Focusing;
-    }
-
     /// Follows focused children down to the node that is focusing or focused on its main
     pub fn focused_node(&self) -> NodeId {
         let mut id = self.root;
@@ -1515,18 +1355,18 @@ impl NodeTree {
         else {
             return;
         };
+        // traversal keys are the root's (`traversal`)
         if matches!(key, KeySymbol::Char(' ')) {
             self.toggle_collapsed(id);
         } else if matches!(key, KeySymbol::Enter) {
-            // confirms the selection: into its main
+            // confirms the selection: into its main, or a split's first pane
             if node.main.is_some() {
                 node.focus = FocusIndex::Inner;
                 self.damaged = true;
+            } else if let Some(&first) = node.children.first() {
+                self.focus_node(first);
+                self.nodes[first].focus = FocusIndex::Focusing;
             }
-        } else if let Some(key_char) = key.to_char()
-            && let Some(operation) = WorldTreeTraversalOperation::from_char(key_char)
-        {
-            self.change_focus(id, operation);
         } else if let Some(main) = &node.main {
             // any other key goes into the main
             node.focus = FocusIndex::Inner;

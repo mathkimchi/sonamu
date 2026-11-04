@@ -1,11 +1,5 @@
-use singularity_common::{
-    sap::{detached::Axis, packets::StandardRequest},
-    utils::tree::{
-        tree_node_path::TreeTraverseOperation,
-        world_tree::world_tree_traversal::WorldTreeTraversalOperation,
-    },
-};
-use sonamu_ui::ui_event::{KeyModifiers, KeyTrait, SwipeDirection, UIEvent};
+use singularity_common::sap::{detached::Axis, packets::StandardRequest};
+use sonamu_ui::ui_event::{KeyModifiers, KeyTrait, UIEvent};
 
 use crate::{
     command_hub::CommandHubApplet,
@@ -24,10 +18,9 @@ pub const BROWSER: &str = "firefox";
 /// - `Ctrl+Shift+Plus` - Add child
 /// - `Ctrl+Shift+|` / `Ctrl+Shift+_` - Split side by side / stacked
 /// - `Super+P` - Put the node in a project
-/// - `Alt+<traversal key>` - traversal
 /// - `Alt+Shift+W` / `Alt+Shift+S` - swap with the previous / next sibling
-/// - Touchpad 4 fingers up / down - out of / into a layer (`Alt+q` / `e`);
-///   3 fingers up / down - prev / next node (`Alt+Shift+Tab` / `Alt+Tab`)
+///
+/// Traversal (`Alt+<traversal key>`, swipes) is the root's (`nodular_applet::traversal`).
 ///
 /// Returns whether or not the keypress was used.
 ///
@@ -120,19 +113,6 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
         })
     } else if let UIEvent::Key {
         symbol: Some(key),
-        modifiers: KeyModifiers::ALT,
-        pressed: true,
-        ..
-    } = &ui_event
-        && key.to_char() == Some('q')
-    {
-        // Alt+q -> exit focus
-        // NOTE: this might interfere with applets that have its own hierarchy
-        Some(NodeRequest::ChangeFocus(
-            WorldTreeTraversalOperation::PrevLayer,
-        ))
-    } else if let UIEvent::Key {
-        symbol: Some(key),
         modifiers,
         pressed: true,
         ..
@@ -149,67 +129,7 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
     {
         // Alt+Shift+W / Alt+Shift+S -> swap with the previous / next sibling
         Some(NodeRequest::SwapSibling(shift))
-    } else if let UIEvent::Key {
-        symbol: Some(key),
-        modifiers,
-        pressed: true,
-        ..
-    } = &ui_event
-        && modifiers.alt
-        && !modifiers.ctrl
-        && !modifiers.logo
-        && key.to_char() == Some('\t')
-    {
-        // Alt+Tab / Alt+Shift+Tab -> next / prev node in tree order
-        Some(NodeRequest::ChangeFocus(
-            WorldTreeTraversalOperation::Layerwise(if modifiers.shift {
-                TreeTraverseOperation::BfsPrev
-            } else {
-                TreeTraverseOperation::BfsNext
-            }),
-        ))
     } else {
-        swipe_request(ui_event)
+        None
     }
-}
-
-/// 4 fingers up / down -> out of / into a layer, like Alt+q / `e`;
-/// 3 fingers up / down -> prev / next node in tree order, a node per step (see `is_dfs_swipe`)
-fn swipe_request(ui_event: &UIEvent) -> Option<NodeRequest> {
-    let UIEvent::Swipe {
-        fingers,
-        direction,
-        repeat,
-    } = *ui_event
-    else {
-        return None;
-    };
-    let operation = match (fingers, direction) {
-        // once per swipe
-        (4, _) if repeat => return None,
-        (4, SwipeDirection::Up) => WorldTreeTraversalOperation::PrevLayer,
-        (4, SwipeDirection::Down) => WorldTreeTraversalOperation::NextLayer,
-        (3, SwipeDirection::Up) => {
-            WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::BfsPrev)
-        }
-        (3, SwipeDirection::Down) => {
-            WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::BfsNext)
-        }
-        _ => return None,
-    };
-    Some(NodeRequest::ChangeFocus(operation))
-}
-
-/// 3 fingers up / down: these go to the applet's node even when focus is inside the applet,
-/// so an applet can't swallow them (see `StandardApplet::handles_dfs_swipes`)
-#[must_use]
-pub fn is_dfs_swipe(ui_event: &UIEvent) -> bool {
-    matches!(
-        ui_event,
-        UIEvent::Swipe {
-            fingers: 3,
-            direction: SwipeDirection::Up | SwipeDirection::Down,
-            ..
-        }
-    )
 }

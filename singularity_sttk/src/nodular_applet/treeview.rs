@@ -7,7 +7,7 @@ use singularity_common::{
     sap::packets::{NewApplet, NodeAction, SpawnPosition},
     settings,
     utils::tree::{
-        tree_node_path::{TraversableTree, TreeNodePath},
+        tree_node_path::TraversableTree,
         world_tree::{Step, WorldTree, WorldTreePath},
     },
 };
@@ -64,7 +64,7 @@ const EDGE_ZONE: f32 = 0.25;
 const INSERT_LINE_HEIGHT: f32 = 3.0;
 const MENU_BG: Color = Color([0x20, 0x22, 0x2A, 0xF0]);
 const MENU_PAD: f32 = 12.0;
-/// Two clicks on a row within this are a double click (sets the view layer)
+/// Two clicks on a row within this are a double click (sets the view root)
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// What the menu's `New` items list, and their labels
 const NEW_APPLETS: [(NewApplet, &str); 5] = [
@@ -77,14 +77,12 @@ const NEW_APPLETS: [(NewApplet, &str); 5] = [
 
 pub struct TreeviewRow {
     pub path: WorldTreePath,
-    depth: usize,
+    pub(crate) depth: usize,
     label: String,
     /// Inside an applet's inner tree, rather than a node (or the view root's parent)
     inner: bool,
     /// Has a close button (shown while hovered): not the root, nor a `‹` row
     closable: bool,
-    /// The holder's `‹` row of an inner tree: its name selects that tree's root (this path), its `‹` goes out to the holder
-    inner_root: Option<WorldTreePath>,
 }
 
 /// One row per node of the tree, and per element of each applet's inner tree, in DFS order.
@@ -93,12 +91,11 @@ pub struct TreeviewRow {
 /// `up` is the view root's parent (path and label): a dim first row, to widen the view by focusing it.
 pub fn treeview_rows(
     treeview: &WorldTree<String>,
-    base: &TreeNodePath,
-    up: Option<(TreeNodePath, String)>,
+    base: &WorldTreePath,
+    up: Option<(WorldTreePath, String)>,
 ) -> Vec<TreeviewRow> {
     let mut rows = Vec::new();
     push_rows(treeview, &WorldTreePath::root(), 0, false, 0, &mut rows);
-    let base = WorldTreePath::from_tree_path(base);
     for row in &mut rows {
         row.path.0.splice(0..0, base.0.iter().copied());
     }
@@ -106,40 +103,15 @@ pub fn treeview_rows(
         rows.insert(
             0,
             TreeviewRow {
-                path: WorldTreePath::from_tree_path(&path),
+                path,
                 depth: 0,
                 label: format!("‹ {label}"),
                 inner: true,
                 closable: false,
-                inner_root: None,
             },
         );
     }
     rows
-}
-
-/// The rows of the inner tree of the node at `holder`,
-/// under a first row for that node (focusing it goes back out).
-/// `treeview` is the whole tree.
-pub fn inner_layer_rows(
-    treeview: &WorldTree<String>,
-    holder: &WorldTreePath,
-) -> Option<Vec<TreeviewRow>> {
-    let world = treeview.safe_get(holder)?.get_value();
-    if !matches!(world, WorldTree::World(_)) {
-        return None;
-    }
-    let label = world.get_root_value().trim_start_matches("▾ ");
-    let mut rows = vec![TreeviewRow {
-        label: format!("‹ {label}"),
-        path: holder.clone(),
-        depth: 0,
-        inner: true,
-        closable: false,
-        inner_root: Some(holder.clone()),
-    }];
-    push_rows(world, holder, 0, true, world_depth(holder) + 1, &mut rows);
-    Some(rows)
 }
 
 /// `skip_root`: the world's root is already the row above (`prefix`; an applet's inner tree root is the applet itself).
@@ -174,7 +146,6 @@ fn push_rows(
             label: value.get_root_value().clone(),
             inner: world_depth(&full_path) > layer,
             closable,
-            inner_root: None,
         });
         push_rows(value, &full_path, row_depth, true, layer, rows);
     }
@@ -189,7 +160,7 @@ fn world_depth(path: &WorldTreePath) -> usize {
 }
 
 /// The row showing the focus: its own row, or if that is hidden (inside a collapsed node), the row it is hidden in
-fn focused_row(rows: &[TreeviewRow], focus_path: &WorldTreePath) -> WorldTreePath {
+pub(crate) fn focused_row(rows: &[TreeviewRow], focus_path: &WorldTreePath) -> WorldTreePath {
     if rows.iter().any(|row| &row.path == focus_path) {
         return focus_path.clone();
     }
@@ -244,7 +215,7 @@ impl Menu {
                     items.push(MenuItem::New { sibling: true });
                 }
                 items.push(MenuItem::Action(NodeAction::MakeProject));
-                items.push(MenuItem::ViewLayer);
+                items.push(MenuItem::ViewRoot);
                 if row.closable {
                     items.extend(
                         [
@@ -339,7 +310,7 @@ enum MenuItem {
     },
     Action(NodeAction),
     /// Shows the tree the row is in
-    ViewLayer,
+    ViewRoot,
 }
 impl MenuItem {
     fn label(self) -> String {
@@ -350,7 +321,7 @@ impl MenuItem {
             Self::Action(NodeAction::CloseWithChildren) => "Close with children",
             Self::Action(NodeAction::Deactivate) => "Deactivate",
             Self::Action(NodeAction::MakeProject) => "Make project",
-            Self::ViewLayer => "Set as view layer",
+            Self::ViewRoot => "Set as view root",
             Self::Action(NodeAction::Spawn { applet, .. }) => NEW_APPLETS
                 .iter()
                 .find(|(new, _)| *new == applet)
@@ -419,7 +390,7 @@ pub enum TreeviewAction {
     /// Do this to the node at this path (eg its close button was clicked)
     Node(WorldTreePath, NodeAction),
     /// Show the tree the node at this path is in
-    SetViewLayer(WorldTreePath),
+    SetViewRoot(WorldTreePath),
 }
 
 pub struct TreeviewResponse {
@@ -483,8 +454,8 @@ impl TreeviewPointer {
                     Some(MenuItem::Action(action)) => {
                         Some(TreeviewAction::Node(menu.target.clone(), action))
                     }
-                    Some(MenuItem::ViewLayer) => {
-                        Some(TreeviewAction::SetViewLayer(menu.target.clone()))
+                    Some(MenuItem::ViewRoot) => {
+                        Some(TreeviewAction::SetViewRoot(menu.target.clone()))
                     }
                     // a click elsewhere closes it
                     None => None,
@@ -568,7 +539,7 @@ impl TreeviewPointer {
                         path: row.path.clone(),
                         position: event.position,
                         dragging: false,
-                        on_triangle: (has_triangle(row) || row.inner_root.is_some())
+                        on_triangle: has_triangle(row)
                             && (text_left..text_left + f64::from(triangle_width()))
                                 .contains(&event.position[0]),
                         on_close,
@@ -596,20 +567,14 @@ impl TreeviewPointer {
                             if !press.on_close && !press.on_triangle && !double {
                                 self.last_click = Some((target.clone(), Instant::now()));
                             }
-                            match &row.inner_root {
-                                _ if press.on_close => {
-                                    TreeviewAction::Node(target, NodeAction::Close)
-                                }
-                                // its `‹`: out to the holder
-                                Some(_) if press.on_triangle => TreeviewAction::Focus(target),
-                                None if double && !press.on_triangle => {
-                                    TreeviewAction::SetViewLayer(target)
-                                }
-                                Some(inner_root) => TreeviewAction::Focus(inner_root.clone()),
-                                None if press.on_triangle => {
-                                    TreeviewAction::ToggleCollapsed(target)
-                                }
-                                None => TreeviewAction::Focus(target),
+                            if press.on_close {
+                                TreeviewAction::Node(target, NodeAction::Close)
+                            } else if press.on_triangle {
+                                TreeviewAction::ToggleCollapsed(target)
+                            } else if double {
+                                TreeviewAction::SetViewRoot(target)
+                            } else {
+                                TreeviewAction::Focus(target)
                             }
                         })
                     };
@@ -737,7 +702,7 @@ impl TreeviewPointer {
                     .with_cursor(Some(Cursor::Named(CursorIcon::Pointer))),
                 );
             }
-            if has_triangle(row) || row.inner_root.is_some() {
+            if has_triangle(row) {
                 parts.push(
                     UITree::leaf_styled(
                         UIElement::Nothing,

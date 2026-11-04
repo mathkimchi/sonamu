@@ -15,10 +15,8 @@ use singularity_common::{
     settings::{self, Palette, Settings},
     utils::tree::{
         recursive_tree::RecursiveTreeNode,
-        tree_node_path::{TreeNodePath, TreeTraverseOperation},
-        world_tree::{
-            Step, WorldTree, WorldTreePath, world_tree_traversal::WorldTreeTraversalOperation,
-        },
+        tree_node_path::TreeNodePath,
+        world_tree::{Step, WorldTree, WorldTreePath},
     },
 };
 use singularity_sttk::{
@@ -36,7 +34,7 @@ use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
     ui_element::{Cursor, CursorIcon, Style, UIElement, UITree, font_size},
-    ui_event::{KeyModifiers, KeySymbol, KeyTrait, MouseEvent, MouseEventKind, UIEvent},
+    ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::{
     collections::HashSet,
@@ -605,7 +603,7 @@ impl FileManagerApplet {
         }
     }
 
-    /// A key in its own selector: traversal of its inner tree (the root, then one document per child)
+    /// A key in its own selector (its root, then one document per child); traversal keys are the root's
     fn handle_selector_key(&mut self, selected: Selected, key: KeySymbol, ui_event: UIEvent) {
         // on the selected element: a document closes here, the rest is the file manager's node's
         if let Some(request) = standard_keybind_request(&ui_event) {
@@ -626,71 +624,9 @@ impl FileManagerApplet {
         if matches!(key, KeySymbol::Char(' ')) {
             return;
         }
-        let Some(operation) = key
-            .to_char()
-            .and_then(WorldTreeTraversalOperation::from_char)
-        else {
-            // any other key goes into the selected element
-            self.confirm(selected);
-            self.handle_key(ui_event);
-            return;
-        };
-        self.traverse_selector(selected, operation);
-    }
-
-    /// Moves its own selector, or out of it to its node
-    fn traverse_selector(&mut self, selected: Selected, operation: WorldTreeTraversalOperation) {
-        let last = self.documents.len().checked_sub(1);
-        match (selected, operation) {
-            // out of its inner tree, to its node
-            (
-                Selected::Root,
-                WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::Parent),
-            )
-            | (
-                _,
-                WorldTreeTraversalOperation::PrevLayer | WorldTreeTraversalOperation::GlobalRoot,
-            ) => {
-                self.selecting = None;
-                self.hook.change_focus(operation);
-            }
-            (
-                Selected::Document(_),
-                WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::Parent),
-            ) => self.set_selecting(Some(Selected::Root)),
-            (Selected::Root, WorldTreeTraversalOperation::NextLayer) => self.confirm(selected),
-            // into the document's inner tree, at its root
-            (Selected::Document(index), WorldTreeTraversalOperation::NextLayer) => {
-                self.confirm(selected);
-                self.documents[index]
-                    .handle
-                    .send_event(StandardEvent::Focus(WorldTreePath::root()));
-            }
-            (
-                Selected::Root,
-                WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::Child(index)),
-            ) if index < self.documents.len() => {
-                self.set_selecting(Some(Selected::Document(index)));
-            }
-            (
-                Selected::Root,
-                WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::LastChild),
-            ) => {
-                if let Some(last) = last {
-                    self.set_selecting(Some(Selected::Document(last)));
-                }
-            }
-            (
-                Selected::Document(index),
-                WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::RelShiftSibling(
-                    shift,
-                )),
-            ) => {
-                let index = index.saturating_add_signed(shift).min(last.unwrap_or(0));
-                self.set_selecting(Some(Selected::Document(index)));
-            }
-            _ => {}
-        }
+        // any other key goes into the selected element
+        self.confirm(selected);
+        self.handle_key(ui_event);
     }
 
     fn active_document(&self) -> Option<&Document> {
@@ -698,35 +634,20 @@ impl FileManagerApplet {
     }
 
     /// A standard keybind in the file list; returns whether it was one
-    fn handle_files_keybind(&mut self, ui_event: &UIEvent) -> bool {
-        // eg Alt+q: out of the file list, to its own selector
-        if let Some(NodeRequest::ChangeFocus(WorldTreeTraversalOperation::PrevLayer)) =
-            standard_keybind_request(ui_event)
-        {
-            self.set_selecting(Some(Selected::Root));
-            return true;
-        }
+    fn handle_files_keybind(&self, ui_event: &UIEvent) -> bool {
         handle_standard_keybinds(ui_event, &self.hook)
     }
 
     fn handle_key(&mut self, ui_event: UIEvent) {
         if let Some(selected) = self.selecting {
-            match ui_event {
-                UIEvent::Key {
-                    symbol: Some(key),
-                    pressed: true,
-                    ..
-                } => self.handle_selector_key(selected, key, ui_event),
-                // eg 4 fingers up / down like Alt+q / `e`
-                UIEvent::Swipe { .. } => {
-                    if let Some(NodeRequest::ChangeFocus(operation)) =
-                        standard_keybind_request(&ui_event)
-                    {
-                        self.traverse_selector(selected, operation);
-                    }
-                }
-                // releases, and modifiers on their own, stay in the selector
-                _ => {}
+            // releases, and modifiers on their own, stay in the selector
+            if let UIEvent::Key {
+                symbol: Some(key),
+                pressed: true,
+                ..
+            } = ui_event
+            {
+                self.handle_selector_key(selected, key, ui_event);
             }
             return;
         }
@@ -1302,20 +1223,8 @@ impl StandardApplet for FileManagerApplet {
             | NodeRequest::FocusSelf) => {
                 self.hook.request(request);
             }
-            // eg Alt+q: out of the document, to it in the selector
-            NodeRequest::ChangeFocus(
-                WorldTreeTraversalOperation::PrevLayer
-                | WorldTreeTraversalOperation::Layerwise(TreeTraverseOperation::Parent),
-            ) => self.set_selecting(Some(Selected::Document(index))),
-            // eg 3 finger swipes: prev / next node from this one
-            request @ NodeRequest::ChangeFocus(WorldTreeTraversalOperation::Layerwise(
-                TreeTraverseOperation::BfsPrev | TreeTraverseOperation::BfsNext,
-            )) => self.hook.request(request),
             // TODO: a placed project dissolving here loses its contents (they'd need to be the node's children)
-            NodeRequest::ChangeFocus(_)
-            | NodeRequest::SwapSibling(_)
-            | NodeRequest::Unwrap(_)
-            | NodeRequest::StartWl(_) => {
+            NodeRequest::SwapSibling(_) | NodeRequest::Unwrap(_) | NodeRequest::StartWl(_) => {
                 return;
             }
             NodeRequest::Close => {

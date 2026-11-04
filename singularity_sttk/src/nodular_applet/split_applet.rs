@@ -212,11 +212,6 @@ impl StandardApplet for SplitApplet {
         !self.dissolved
     }
 
-    /// Through its own tree, while focus is in it
-    fn handles_dfs_swipes(&self) -> bool {
-        !self.dissolved
-    }
-
     fn focus(&mut self, path: &WorldTreePath) {
         if !self.dissolved {
             self.holder.focus(path);
@@ -329,10 +324,6 @@ impl StandardApplet for SplitApplet {
         }
         if std::mem::take(&mut self.holder.quit) {
             self.hook.quit();
-        }
-        // eg `q` inside it: out to its node
-        if let Some(operation) = self.holder.tree.take_escaped() {
-            self.hook.change_focus(operation);
         }
         self.holder.tree.update_view_root();
         if self.holder.tree.take_damage() {

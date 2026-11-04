@@ -1,8 +1,6 @@
 use crate::utils::tree::{recursive_tree::RecursiveTreeNode, tree_node_path::TreeNodePath};
 use serde::{Deserialize, Serialize};
 
-pub mod world_tree_traversal;
-
 /// One step of a `WorldTreePath`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Step {

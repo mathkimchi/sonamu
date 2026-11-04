@@ -1,6 +1,5 @@
 //! This is where the hierarchy stuff is implemented.
 
-use crate::standard_keybinds::{is_dfs_swipe, standard_keybind_request};
 use calloop::{EventLoop, LoopHandle, LoopSignal, channel::Sender};
 use singularity_common::{
     sap::{
@@ -15,9 +14,7 @@ use singularity_common::{
         shared_state::{SharedState, StatePublisher},
     },
     settings::{self, Settings},
-    utils::tree::world_tree::{
-        WorldTree, WorldTreePath, world_tree_traversal::WorldTreeTraversalOperation,
-    },
+    utils::tree::world_tree::{WorldTree, WorldTreePath},
 };
 use sonamu_ui::{display_units::DisplayContainerSize, ui_element::UITree, ui_event::UIEvent};
 use std::{
@@ -32,6 +29,7 @@ pub mod node_tree;
 pub mod project_applet;
 pub mod root_node_applet;
 pub mod split_applet;
+mod traversal;
 pub(crate) mod treeview;
 
 pub use treeview::with_opacity;
@@ -92,12 +90,6 @@ pub trait StandardApplet {
     /// Whether it frames what it shows itself (eg its own tree's panes), so its node isn't framed;
     /// published with the treeview
     fn frames_itself(&self) -> bool {
-        false
-    }
-
-    /// Whether it gets 3 finger swipes (`is_dfs_swipe`), eg a project, to move through its own tree.
-    /// Otherwise they go straight to its node, so they work in any applet.
-    fn handles_dfs_swipes(&self) -> bool {
         false
     }
 
@@ -235,8 +227,6 @@ pub enum NodeRequest {
     Standard(StandardRequest),
     /// The child gets its own node under the applet's node
     AddChild(NodularAppletInitializer),
-    /// From the perspective of the applet's node
-    ChangeFocus(WorldTreeTraversalOperation),
     /// Focuses inside the applet's node, and its holder's node and so on up to the root
     FocusSelf,
     /// Closes the applet's node; its children move to the parent
@@ -365,10 +355,6 @@ impl AppletContext {
         self.request(NodeRequest::AddChild(initializer));
     }
 
-    pub fn change_focus(&self, operation: WorldTreeTraversalOperation) {
-        self.request(NodeRequest::ChangeFocus(operation));
-    }
-
     /// Quits everything
     pub fn quit(&self) {
         self.request(StandardRequest::Quit.into());
@@ -478,13 +464,6 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                 calloop::channel::Event::Msg(StandardEvent::Open(open)) => {
                     if let Err(open) = state.applet.take_open(open) {
                         let _ = state.request_sender.send(NodeRequest::Open(open));
-                    }
-                }
-                calloop::channel::Event::Msg(StandardEvent::UIEvent(ui_event))
-                    if is_dfs_swipe(&ui_event) && !state.applet.handles_dfs_swipes() =>
-                {
-                    if let Some(request) = standard_keybind_request(&ui_event) {
-                        let _ = state.request_sender.send(request);
                     }
                 }
                 calloop::channel::Event::Msg(event) => {
