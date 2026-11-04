@@ -6,7 +6,7 @@ use crate::{
         Answer, AppletContext, AppletSpawner, AppletSpawnerTrait, EmbeddedId, NodeRequest,
         NodularAppletInitializer, StandardApplet, WrapInitializer,
         node_holder::NodeHolder,
-        node_tree::{AttachClient, NodeId, NodeTree, SpawnClient},
+        node_tree::{AttachClient, NodeId, NodeTree, SpawnClient, root_label_mut},
     },
     session,
 };
@@ -189,12 +189,17 @@ impl StandardApplet for SplitApplet {
         self.holder.tree.get_window()
     }
 
-    /// Its tree, whose root is labeled like a split (`Split ⇆`)
+    /// Its tree, whose root is labeled like a split (`Split ⇆`); its node's row adds the `▾`
     fn get_treeview(&self) -> WorldTree<String> {
         if self.dissolved {
             return WorldTree::Base(String::new());
         }
-        self.holder.tree.get_treeview()
+        let mut treeview = self.holder.tree.get_treeview();
+        let label = root_label_mut(&mut treeview);
+        if let Some(rest) = label.strip_prefix("▾ ") {
+            *label = rest.to_string();
+        }
+        treeview
     }
 
     fn get_focus_path(&self) -> WorldTreePath {
