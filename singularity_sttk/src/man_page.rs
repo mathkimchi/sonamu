@@ -1,4 +1,4 @@
-//! The basic usage manual (`docs/usage.md`). Super+? opens it under the focused node (the root does that); Esc, q or Super+? closes it.
+//! The basic usage manual (`docs/usage.md`). Super+? opens it where a new wl surface would go (the root does that); Esc or q closes it.
 
 use crate::{
     command_hub::{ACCENT, BAR_BG, BG, CURSOR, DIM, OUTPUT, RUNNING, fill_row, put},

@@ -10,13 +10,14 @@ use crate::{
 pub const TERMINAL: &str = "foot";
 /// Started by Super+N (and a project's `+ browser`)
 pub const BROWSER: &str = "firefox";
+const SUPER_SHIFT: KeyModifiers = KeyModifiers::both(KeyModifiers::LOGO, KeyModifiers::SHIFT);
 
 /// Handle the standard keybinds like:
 /// - `Ctrl+Shift+Q` - Quit
 /// - `Super+W` - Close tab
 /// - `Super+T` / `Super+N` - Start foot / firefox
 /// - `Ctrl+Shift+Plus` - Add child
-/// - `Ctrl+Shift+|` / `Ctrl+Shift+_` - Split side by side / stacked
+/// - `Super+Shift+|` / `Super+Shift+_` - Split side by side / stacked
 /// - `Super+P` - Put the node in a project
 /// - `Alt+Shift+W` / `Alt+Shift+S` - swap with the previous / next sibling
 ///
@@ -96,7 +97,7 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
         ))
     } else if let UIEvent::Key {
         symbol: Some(key),
-        modifiers: KeyModifiers::CTRL_SHIFT,
+        modifiers: SUPER_SHIFT,
         pressed: true,
         ..
     } = &ui_event
@@ -106,7 +107,7 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
             _ => None,
         }
     {
-        // Ctrl+Shift+| / Ctrl+Shift+_ -> split with a CommandHub beside / below
+        // Super+Shift+| / Super+Shift+_ -> split with a CommandHub beside / below
         Some(NodeRequest::Split {
             axis,
             new_pane: CommandHubApplet::get_boxed_initiator(),

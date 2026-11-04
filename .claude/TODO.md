@@ -5,7 +5,7 @@
 Decisions and details: `.claude/FM_SPLITS_UDEV.md`. Delete a line when done.
 
 - [x] File manager with embedded editors in its inner tree (`AppletContext::embed`)
-- [x] 2-way splits (`Layout::Split`, Ctrl+Shift+| / Ctrl+Shift+_)
+- [x] 2-way splits (`Layout::Split`, Super+Shift+| / Super+Shift+_)
 - [x] TTY backend (`run_drm_display`), untested on a real TTY
 - [x] Bug squashing and resolving TODOs (fresh context); see "Bug fixes and TODOs" in that file
 - [ ] Improve the three features

@@ -22,7 +22,7 @@ use calloop::{
 };
 use singularity_common::{
     sap::{
-        packets::{SpawnPosition, StandardEvent, StandardRequest, StateKind, Treeview},
+        packets::{OpenApplet, SpawnPosition, StandardEvent, StandardRequest, StateKind, Treeview},
         raw_client_initializer::RawClientInitializer,
         session::Session,
         shared_state::{SharedState, StatePublisher},
@@ -58,8 +58,6 @@ pub struct RootNodeApplet {
     /// The last treeview drop and the node it was on.
     /// A drop can come before its drag's pluck finishes, which can shift the paths.
     last_drop: Option<(WorldTreePath, NodeId)>,
-    /// The help Super+? opened, to close it on the next one
-    help: Option<OpenHelp>,
     /// Pinned, or traversing (see `update_treeview_visibility`)
     treeview_shown: bool,
     /// Always shown, beside the panes; toggled by its pin button and saved in the session
@@ -99,13 +97,6 @@ enum TreeviewPlace {
     Floating,
 }
 
-/// A help node, and where it was opened
-struct OpenHelp {
-    node: NodeId,
-    parent: NodeId,
-    /// Focus was inside the parent's applet, so it goes back there when the help closes
-    parent_inner: bool,
-}
 impl RootNodeApplet {
     /// How often the session is saved (if it changed), besides before quitting
     const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
@@ -316,6 +307,8 @@ impl RootNodeApplet {
         // saved projects and splits are made again by these
         applet_spawner_registry.insert("project".to_string(), ProjectApplet::get_applet_spawner());
         applet_spawner_registry.insert("split".to_string(), SplitApplet::get_applet_spawner());
+        // Super+? opens it
+        applet_spawner_registry.insert("help".to_string(), ManPageApplet::get_applet_spawner());
         let applet_spawners = Arc::new(RwLock::new(applet_spawner_registry));
         let (spawn_client, attach_client) = client_spawners(
             event_loop,
@@ -349,7 +342,6 @@ impl RootNodeApplet {
             latest_size: DisplayContainerSize::new(800, 600),
             treeview_pointer: TreeviewPointer::default(),
             last_drop: None,
-            help: None,
             // the root node starts focused
             treeview_shown: true,
             treeview_pinned: saved_session
@@ -465,7 +457,10 @@ impl RootNodeApplet {
             && let Some(keybind) = RootKeybind::of(ui_event)
         {
             match keybind {
-                RootKeybind::Help => self.toggle_help(),
+                RootKeybind::Help => self.holder.open(OpenApplet {
+                    applet: "help".to_string(),
+                    args: Vec::new(),
+                }),
                 RootKeybind::ViewRoot => self.toggle_view_root(),
                 RootKeybind::ViewParent => {
                     let mut parent = self.holder.tree.get_focus_path();
@@ -524,35 +519,6 @@ impl RootNodeApplet {
         }
 
         self.damage_if_tree_changed();
-    }
-
-    /// Closes the help, or opens it as a child of the focused node (so it shows there), focused
-    fn toggle_help(&mut self) {
-        let tree = &mut self.holder.tree;
-        if let Some(help) = self.help.take()
-            && tree.close(help.node)
-        {
-            self.help_closed(&help);
-            return;
-        }
-        let parent = tree.focused_node();
-        let parent_inner = tree.is_inner(parent);
-        if let Some(node) = tree.add_child(parent, ManPageApplet::get_boxed_initiator()) {
-            tree.focus(node, true);
-            self.help = Some(OpenHelp {
-                node,
-                parent,
-                parent_inner,
-            });
-        }
-    }
-
-    /// Focus goes back inside the applet it was opened from, if it was there and the help had focus
-    fn help_closed(&mut self, help: &OpenHelp) {
-        let tree = &mut self.holder.tree;
-        if help.parent_inner && tree.focused_node() == help.parent {
-            tree.focus(help.parent, true);
-        }
     }
 
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
@@ -681,15 +647,10 @@ impl RootNodeApplet {
 
     /// From an applet in the tree
     fn handle_node_request(&mut self, id: NodeId, request: NodeRequest) {
-        let closes_help = matches!(request, NodeRequest::Close)
-            && self.help.as_ref().is_some_and(|help| help.node == id);
         // nothing is above the root
         match self.holder.handle_node_request(id, request) {
             None | Some(NodeRequest::FocusSelf) => {}
             Some(_) => log::warn!("The root holder has no node to pass a request to"),
-        }
-        if closes_help && let Some(help) = self.help.take() {
-            self.help_closed(&help);
         }
         self.damage_if_tree_changed();
     }

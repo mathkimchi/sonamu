@@ -78,7 +78,7 @@ is replaced by that pane (it sends `Unwrap`). Saved as the `split` spawner with 
   appending to a parent split of the same axis), so in practice they're 2-way. Closing a pane that has children
   moves them into the split (N-way). **A split left with one pane is replaced by that pane** (`collapse_split`,
   after `close` and `pluck`).
-- Keybinds (standard, applet-side): **Ctrl+Shift+|** splits side by side, **Ctrl+Shift+_** stacked. New request
+- Keybinds (standard, applet-side): **Super+Shift+|** splits side by side, **Super+Shift+_** stacked. New request
   `NodeRequest::Split { axis, new_pane }`; the keybind's new pane is a CommandHub, which gets focus (`Inner`).
   Splitting the root makes the split the new root. The file manager forwards documents' split requests to its node.
 - Every pane has a 1px border: green if focus is inside its applet, yellow if on the node itself, dim otherwise.
@@ -239,9 +239,9 @@ The dead-applet guard and `remove_wl_surface` weren't exercised (no panicking ap
   (global shortcuts, traversal keys, tree view actions, gestures), keys in amber beside wrapped descriptions (stacked when narrow).
   Also registered as the `help` applet in sde (`add_child help`).
 - **Super+? is handled by the root** (before the tree), so it works whatever is focused, including wl clients.
-  It opens the help as a **child of the focused node**, focused inside, so it shows in that pane, like any node
-  (can be plucked, etc). Super+? again, Esc or q (or Ctrl+W) closes it. If focus was inside the applet it was opened
-  from, it goes back inside it (the root remembers `OpenHelp { node, parent, parent_inner }`); otherwise the parent is focused.
+  It opens the `help` applet (registered by the root) with `NodeHolder::open`, placed like a new wl surface
+  (`sonamu-msg open`): inside a focused project/split, else as the focused node's child, focused.
+  Super+? again opens another; Esc or q (or Super+W) closes it.
 - Scrolls with Up/Down, j/k, PageUp/PageDown, Space, the wheel.
 - The list is hand-written, so it can drift from the real bindings (no keybind registry yet).
 - Nested in niri, the host compositor takes Super+Shift+/ (its own hotkey overlay); `add_child help` works there.
