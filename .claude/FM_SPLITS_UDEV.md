@@ -242,6 +242,7 @@ The dead-applet guard and `remove_wl_surface` weren't exercised (no panicking ap
   It opens the `help` applet (registered by the root) with `NodeHolder::open`, placed like a new wl surface
   (`sonamu-msg open`): inside a focused project/split, else as the focused node's child, focused.
   Super+? again opens another; Esc or q (or Super+W) closes it.
+  A clean session (no saved one, or sessions off) starts with it open (`RootNodeApplet::new`).
 - Scrolls with Up/Down, j/k, PageUp/PageDown, Space, the wheel.
 - The list is hand-written, so it can drift from the real bindings (no keybind registry yet).
 - Nested in niri, the host compositor takes Super+Shift+/ (its own hotkey overlay); `add_child help` works there.

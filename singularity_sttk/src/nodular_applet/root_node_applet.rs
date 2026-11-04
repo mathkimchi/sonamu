@@ -334,7 +334,7 @@ impl RootNodeApplet {
             })
         };
 
-        Self {
+        let mut root = Self {
             holder: NodeHolder::new(tree, send, false, applet_spawners),
             surface: StatePublisher::new(surface),
             request_sender,
@@ -356,7 +356,12 @@ impl RootNodeApplet {
                 rect: [0, 0, 800, 600],
                 ..Screen::default()
             }],
+        };
+        // a clean session starts with the help shown
+        if root.saved_session.is_none() {
+            root.open_help();
         }
+        root
     }
 
     /// Restores the session at `session_path` if there is one (else starts with `root_initializer` at the root),
@@ -457,10 +462,7 @@ impl RootNodeApplet {
             && let Some(keybind) = RootKeybind::of(ui_event)
         {
             match keybind {
-                RootKeybind::Help => self.holder.open(OpenApplet {
-                    applet: "help".to_string(),
-                    args: Vec::new(),
-                }),
+                RootKeybind::Help => self.open_help(),
                 RootKeybind::ViewRoot => self.toggle_view_root(),
                 RootKeybind::ViewParent => {
                     let mut parent = self.holder.tree.get_focus_path();
@@ -519,6 +521,14 @@ impl RootNodeApplet {
         }
 
         self.damage_if_tree_changed();
+    }
+
+    /// Where a new wl surface would go, focused
+    fn open_help(&mut self) {
+        self.holder.open(OpenApplet {
+            applet: "help".to_string(),
+            args: Vec::new(),
+        });
     }
 
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
