@@ -56,7 +56,7 @@ Steps:
 
 Open questions:
 - Synchronous hook calls with return values (`get_applet_spawners`, `find_applet_spawner`) need query-response, or the spawner registry moves to the server.
-- Traversal keys handled in the `Focusing` state move to the server; client keybinds become requests (`Close`, `Quit`, `ChangeFocus`, `AddChild`).
+- ~~Traversal keys handled in the `Focusing` state move to the server~~ (#83: the root does all traversal); client keybinds became requests (`Close`, `Quit`, `AddChild`).
 - Granularity: one client per tab; finer structure stays inside the client's treeview.
 - Can native tabs host native child tabs internally, or does the server own all nesting?
 - Thread per client vs a shared loop for native clients.

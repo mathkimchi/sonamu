@@ -1,8 +1,8 @@
 # World Tree and the hierarchy
 
 How Sonamu's one big tree is structured, addressed, focused, and owned.
-Background: DEVLOG 2026-02-03 to 2026-02-22 (the original design), and `.claude/PROJECTS.md` (projects; its
-rounds 1-4 record how the current design was reached, later rounds superseding earlier ones).
+Background: DEVLOG 2026-02-03 to 2026-02-22 (the original design), `.claude/PROJECTS.md` (projects), and #83
+(one tree to the user: canonical paths, the root traverses by shown rows, no layer keys).
 
 ## The data structure
 
@@ -17,8 +17,9 @@ So every node has two directions to go "down":
 - its **children**, in the *same* world (same layer), and
 - its **value's inner world**, one layer *deeper*.
 
-Example (from the DEVLOG): a project node's children are other projects (same layer).
-Its value is the project's own world of applets (deeper layer). An applet's value can in turn be the world of its elements.
+Example: a project node's value is the project's own world of applets (deeper layer); an applet's value can in turn be
+the world of its elements (eg the file manager's documents). The layers are only the backend's: the treeview shows a
+node's inner children and then its own children all as its children, alike (#83).
 
 ## Paths
 

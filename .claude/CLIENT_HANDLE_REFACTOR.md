@@ -54,7 +54,7 @@ sttk + SDE + common + sar first, then the standard tabs that are currently compi
 
 - **Kept old names** to keep the tab diffs small: `StandardApplet`, `NodularAppletInitializer`, `AppletSpawner(Trait)`,
   `CreatableNodularApplet`, the `hook` field name in applets, and the hook method names on `AppletContext`
-  (`damage_window`, `damage_treeview`, `close`, `add_child`, `change_focus`, `quit`, spawner methods).
+  (`damage_window`, `damage_treeview`, `close`, `add_child`, `quit`, spawner methods; `change_focus` went with #83).
   `RecursiveNodeApplet` became `RecursiveNode` since it's no longer an applet; after the revision it's `NodeTree`,
   in `nodular_applet/node_tree.rs` (was `recursive_node_applet.rs`).
 - **`StandardApplet` lost** `get_focus_path`, `contains_wl_surface` and `focused_wl_surface`. The node works these out itself;

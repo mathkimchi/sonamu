@@ -40,8 +40,9 @@ then polishing these features and the treeview. Decide, implement, and log here.
   opens a file or toggles a dir, Left/h collapses or goes to the parent. A click on a row selects and opens it.
   Wheel scrolls the list. Clicking the document area focuses it; mouse events there are forwarded (shifted).
   In the document pane every key goes to the document, so its standard keybinds apply to it:
-  Ctrl+W closes the document (not the file manager), Alt+q goes back to the file list.
-  In the file list, standard keybinds apply to the file manager (Alt+q leaves it, Ctrl+W closes it).
+  Ctrl+W closes the document (not the file manager).
+  In the file list, standard keybinds apply to the file manager (Ctrl+W closes it).
+  Getting out of either is the root's traversal (`.claude/WORLD_TREE.md`).
 - The active document gets `FocusChanged(bool)` when the pane changes (the editor greys its cursor).
 - Documents' requests: `Damage` redraws, `Quit` forwards, `AddChild` adds to the file manager's node,
   `RequestPluck/Place` are prefixed with the document's index and forwarded, `Close` removes the document.
@@ -84,7 +85,7 @@ is replaced by that pane (it sends `Unwrap`). Saved as the `split` spawner with 
   This replaces the root's outer `LIGHT_GREEN` border, and fixes the old "1px border" mouse offset TODO.
 - **Mouse** goes to the pane under the pointer (relative to it); a press focuses that pane's applet (`Inner`) and
   grabs the pointer until release. Before, all mouse events went to the focused node.
-- A focused split (`Focusing`) takes only traversal keys; NextLayer goes into its first pane.
+- Enter on a split's own row (its tree's root, no main) focuses its first pane.
   Pluck/place paths into a split never ask an applet (`NodeTree::has_main`), since it has none (the root would wait forever).
 - Treeview label of a split: `Split ⇆` / `Split ⇅`.
 - Not done: resizing panes (always equal), moving focus between panes by direction (use traversal keys / click),
@@ -159,9 +160,6 @@ Crashes:
 - Code editor / image viewer titles unwrapped `file_name()`/`to_str()` (paths like `/`, non-UTF-8 names). Now lossy.
 - **`image_viewer` render was `todo!()`** (and `new` unwrapped open/decode): spawning it killed its applet. It now loads into
   `Result<RgbaImage, String>` and shows a line describing the image or the error. Drawing it still needs textures for applets (TODO).
-- `NodeTree::calculate_new_focus` `todo!()` arms are no-ops now (`Inner` + `GlobalRoot` leaves like `Child` does).
-  None were reachable by keys (`q`/`e` are layer keys, so `Bfs*` never come; only `PrevLayer` is sent by applets),
-  only by stale `ChangeFocus` requests. Didn't touch the `RelShiftSibling` clamp: `Child(_)` focus implies at least one child.
 - `CloseRequest` (`todo!()` in root, command hub, char test; never sent today): applets close themselves, the root asks sar to quit.
   `WlSurfaceRegistered` (`todo!()` in command hub, char test; only the root gets it) is ignored.
 - `NodeTree::handle_mouse` indexed `nodes[pane.node]` from the last layout; a node closed earlier in the same event batch
@@ -261,26 +259,18 @@ The dead-applet guard and `remove_wl_surface` weren't exercised (no panicking ap
   that's what the request described. Cost: entering/leaving traversal reconfigures wl clients, and a click on a pane
   shifts the layout under the pointer while the button is held.
 
-## Projects and the view root
+## The view root
 
 - **View root** (`NodeTree::view_root`): only its subtree is shown, panes and treeview, as if it were the root.
-  Focus always stays inside it. Paths stay world paths from the real root: treeview rows get the view root's path as
-  a prefix (`treeview_rows(.., base, ..)`); focus/pluck/place paths were already from the real root.
-- **A project is a node flag** (`Node::project`, carried by `DetachedTree::project`, so plucked projects stay projects).
-  Made by **Super+P** (toggles the focused node) or the hub's **`project` / `project off`** (its own node;
-  `NodeRequest::SetProject`, which the file manager forwards for documents). Marking a node makes it the view root
-  (you're working in it).
-- **Narrowing**: when focus moves into a project inside the view (from outside it), the view root becomes the outermost such project.
-  **Widening**: when focus leaves the view root (eg `a` on it goes to its parent, `w`/`s` to a sibling, `q` to the root),
-  it widens to the closest ancestor holding the focus. Both in `NodeTree::update_view_root`, after each event batch
-  (`last_focused` tells focus *moved* into a project, so an explicit widen doesn't snap back).
-- **Super+V** sets the view root to the focused node (any node, no project needed), or back to the real root if it already is.
-- When the view root isn't the real root, the treeview's first row is a dim `‹ <parent>` row (the parent's world path):
+  Paths stay world paths from the real root: treeview rows get the view root's path as a prefix
+  (`treeview_rows(.., base, ..)`). It can also be a row inside an applet (`RootNodeApplet::view_path`, #83).
+- **Widening**: when focus leaves it, it widens to the closest ancestor holding the focus (`NodeTree::update_view_root`,
+  `RootNodeApplet::update_view_path`, after each event batch).
+- Set by Super+V, Alt+R, a double click or the menu; see `.claude/WORLD_TREE.md`. Above it is a dim `‹ <parent>` row:
   clicking it focuses the parent, which widens the view; dropping on it places into the parent.
 - Kept valid: closing the view root moves it to the parent; plucking it (or an ancestor) to the plucked node's parent;
-  splitting it makes the new split the view root, and **a split takes over its node's project flag** (it now stands
-  where the project was) and gives it back if it collapses.
-- Not done: no project indicator while the treeview is hidden; projects placed into the file manager (as documents) lose the flag.
+  splitting it makes the new split the view root.
+- (Projects were a node flag that narrowed the view here; they are applets now, see `.claude/PROJECTS.md`.)
 
 ## Suggested CLAUDE.md updates
 

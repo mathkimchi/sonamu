@@ -26,7 +26,7 @@
 - Keys there, taken before the project's selector: `r` (no modifiers) starts renaming; `n` adds a command hub to the
   inner root and focuses inside it (unlike Ctrl+Shift++, which doesn't focus it); `t`/`b` start `TERMINAL`/`BROWSER`
   (`standard_keybinds`, shared with Super+T/N) with `NodeRequest::Run`, and since focus is at the inner root, the
-  window lands there. Digits/`d`/`e`/`q` stay the selector's.
+  window lands there. Traversal keys stay the root's.
   While renaming: text, Backspace, Enter (saves; empty keeps the old name), Esc (cancels); Ctrl/Alt/Super keys still
   go to the selector. Mouse events are all taken (no panes are shown).
 - Directory (#93): `d` or a click on its row starts editing, prefilled with the current directory (the runner's
@@ -63,5 +63,5 @@
 ## Verified (headless, `singularity_sde/examples/headless.rs hub ...`)
 
 Super+P shows the overview; click on the name / `r`, type, Enter renames (treeview and overview); Esc cancels;
-click `+ command hub` / `n` adds a focused hub; a wl window arriving at the overview lands in the project; Alt+q `a` back to the overview lists both children; clicking one shows its pane;
+click `+ command hub` / `n` adds a focused hub; a wl window arriving at the overview lands in the project; back to the overview lists both children; clicking one shows its pane;
 the name survives a save and restore (`"label"` in the session JSON). Not checked live.
