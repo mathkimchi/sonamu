@@ -1,16 +1,14 @@
 [workspace]
 members = [
-    "singularity_common",
-    "singularity_common/sonamu_ui",
-    "singularity_common/singularity_macros",
+    "sonamu_common",
+    "sonamu_common/sonamu_ui",
 
-    "singularity_sporg",
     "sonamu_sde",
-    "singularity_sttk",
-    "singularity_standard_tabs",
-    # "singularity_standard_tabs/*", # TODO: make the asterisk work
-    # "singularity_standard_tabs/dylib_math_game",
-    "singularity_sar",
+    "sonamu_sttk",
+    "sonamu_standard_tabs",
+    # "sonamu_standard_tabs/*", # TODO: make the asterisk work
+    # "sonamu_standard_tabs/dylib_math_game",
+    "sonamu_sar",
 ]
 resolver = "2"
 
@@ -19,8 +17,6 @@ serde = { version = "^1.0", features = ["derive"] }
 serde_json = "^1.0"
 uuid = { version = "^1.23.3", features = ["v4", "serde"] }
 slotmap = { version = "^1.1" }                             # like a hashmap but it generates the keys
-paste = { version = "1" }
-libloading = { version = "^0.9" }
 libc = { version = "^0.2" }
 
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
@@ -63,9 +59,9 @@ calloop = { version = "^0.14.4", features = ["executor"] }
 
 pollster = "^0.4.0"
 
-singularity_common = { path = "./singularity_common" }
-sonamu_ui = { path = "./singularity_common/sonamu_ui" }
-sonamu_sync = { path = "./singularity_common/sonamu_sync" }
+sonamu_common = { path = "./sonamu_common" }
+sonamu_ui = { path = "./sonamu_common/sonamu_ui" }
+sonamu_sync = { path = "./sonamu_common/sonamu_sync" }
 
 # [[members]]
 # singularity_ui = { features = ["iced_backend"] }

@@ -1,27 +1,8 @@
-// pub mod packets;
-// pub mod project_manager;
-// pub mod tab;
-
-// /// this should be run from cli
-// fn main() -> Result<(), std::io::Error> {
-//     // let args: Vec<String> = std::env::args().collect();
-
-//     // let project_manager = project_manager::ProjectManager::new(
-//     //     args.get(1)
-//     //         .unwrap_or(&"examples/root-project".to_string())
-//     //         .clone(),
-//     // );
-
-//     // project_manager.run()
-
-//     Ok(())
-// }
-
-use singularity_sar::runner::AppletRunner;
-use singularity_standard_tabs::{
+use sonamu_sar::runner::AppletRunner;
+use sonamu_standard_tabs::{
     code_editor::CodeEditorApplet, file_manager::FileManagerApplet, image_viewer::ImageViewerApplet,
 };
-use singularity_sttk::{
+use sonamu_sttk::{
     command_hub::CommandHubApplet,
     man_page::ManPageApplet,
     nodular_applet::root_node_applet::{self, RootNodeApplet},
@@ -32,7 +13,7 @@ use tracing_subscriber::EnvFilter;
 
 fn main() {
     init_logging();
-    singularity_common::settings::load_and_watch();
+    sonamu_common::settings::load_and_watch();
 
     AppletRunner::run(
         RootNodeApplet::get_initializer(

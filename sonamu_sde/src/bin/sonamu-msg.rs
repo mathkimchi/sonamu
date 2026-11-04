@@ -1,7 +1,7 @@
 //! Asks the running Sonamu to open an applet, eg `sonamu-msg open file_manager ~/Documents`
 //! (see `assets/sonamu-file-manager.desktop`). Fails if Sonamu isn't running, so xdg-open can try another.
 
-use singularity_common::msg::{Message, SOCKET_ENV};
+use sonamu_common::msg::{Message, SOCKET_ENV};
 use std::{io::Write, os::unix::net::UnixStream, path::Path, process::ExitCode};
 
 const USAGE: &str = "usage: sonamu-msg open <applet> [args...]";

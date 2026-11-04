@@ -60,7 +60,7 @@
 - `1-9: select` in the hint: `9` is the last child and digits only reach 8 children; beyond that only clicks/`w`/`s`.
 - No hover/pointer cursor on the clickable rows.
 
-## Verified (headless, `singularity_sde/examples/headless.rs hub ...`)
+## Verified (headless)
 
 Super+P shows the overview; click on the name / `r`, type, Enter renames (treeview and overview); Esc cancels;
 click `+ command hub` / `n` adds a focused hub; a wl window arriving at the overview lands in the project; back to the overview lists both children; clicking one shows its pane;

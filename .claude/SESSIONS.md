@@ -5,7 +5,7 @@ Sonamu owns the session; apps' own session restore should be off.
 
 ## How it works
 
-- **Saved form** (`singularity_common/src/sap/session.rs`): `Session { tree: SavedTree, focus, treeview_pinned }` (`treeview_pinned`: the root treeview's pin button).
+- **Saved form** (`sonamu_common/src/sap/session.rs`): `Session { tree: SavedTree, focus, treeview_pinned }` (`treeview_pinned`: the root treeview's pin button).
   `SavedTree { main: Option<SavedApplet>, layout, children, label }` (`label`: only a project's inner root, its name).
   `SavedApplet` is one of `Spawner { name, args }` (made again by the registered applet spawner, like the command hub does)
   or `Wl(SavedWl { argv, cwd, app_id, title })`.
@@ -92,7 +92,7 @@ Sonamu owns the session; apps' own session restore should be off.
 - `StandardEvent::WlSurfaceRegistered` and `NodeRequest::AddWlSurface` now carry a `NewWlSurface`
   (`surface_id`, `wl_request_queue`, `wl_event_queue`, `pid`, `app_id`), and `take_wl_surface` takes and gives back one.
 - Saved paths (code editor, image viewer, file manager root) are made absolute.
-- Spawner names are hardcoded in each applet's `save` and must match `singularity_sde/src/main.rs`.
+- Spawner names are hardcoded in each applet's `save` and must match `sonamu_sde/src/main.rs`.
 - `headless` example reads `SONAMU_SESSION` too (unset: no session).
 
 ## Recommended apps / settings (not installed)
@@ -119,7 +119,7 @@ User-facing setup (incl. NixOS / Home Manager) is in `docs/persistent_apps.md`.
 - Two `kitty -1` windows (one instance): both restored into their tiles (second matched by app id).
 - Alacritty inside a project (hand-written session): restored and claimed inside the project.
 - Headless: Super+P on a wl tile, saved as a project, restored as a project with its placeholder kept saved.
-- `singularity_common/tests/session_test.rs`: `SavedWl::url`.
+- `sonamu_common/tests/session_test.rs`: `SavedWl::url`.
 - Not tested: qutebrowser, foot, the TTY backend, the firefox extension (not loaded yet).
 
 ## Issues found / limits
