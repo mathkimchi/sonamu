@@ -59,7 +59,9 @@ Applets have no traversal of their own.
 - In the selector (the deepest holder's `NodeTree::handle_event`, or an applet's own, eg the file manager's documents):
   Space (or clicking its `▾`/`▸`) collapses/expands all its children, inner and own (the holder owning the row keeps
   the flag, unsaved; `NodeTree::applet_treeview`/`get_treeview_of` leave them out); Enter confirms (into the applet,
-  resuming where it was; a split's first pane). Modifiers on their own don't leave the selector; other keys go into the applet.
+  resuming where it was; a split's first pane). An applet whose row is its own root (`StandardApplet::selected_at_root`:
+  a project, its overview) is sent `Focus([])` whenever its node is selected (`NodeTree::selected`), so the row shows,
+  and Enter goes to, its overview (#123). Modifiers on their own don't leave the selector; other keys go into the applet.
 - The standard keybinds (Ctrl+W, Ctrl+Shift++, splits, Super+P) act on the selected node.
   Ctrl+W asks its main to close (`CloseRequest`, see below) rather than closing it.
   Something new for a node whose applet `holds_children` (projects, splits) goes inside it, at its root (#83):

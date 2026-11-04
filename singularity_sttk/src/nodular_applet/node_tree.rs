@@ -537,6 +537,9 @@ impl NodeTree {
             FocusIndex::Child(focused) if focused > index => FocusIndex::Child(focused - 1),
             focus => focus,
         };
+        if matches!(parent.focus, FocusIndex::Focusing) {
+            self.selected(parent_id);
+        }
         self.damaged = true;
         if self.contains(id, self.view_root) {
             self.view_root = parent_id;
@@ -737,8 +740,19 @@ impl NodeTree {
         };
         // so the path inside goes to the woken applet
         self.wake_focused();
-        if let Some(inner) = inner {
-            self.send_event(id, StandardEvent::Focus(inner));
+        match inner {
+            Some(inner) => self.send_event(id, StandardEvent::Focus(inner)),
+            None => self.selected(id),
+        }
+    }
+
+    /// The node itself was selected: its main goes to its root if that's what its row is
+    /// (`Treeview::selected_at_root`, eg a project shows its overview)
+    fn selected(&self, id: NodeId) {
+        if let Some(main) = &self.nodes[id].main
+            && main.get_treeview().selected_at_root
+        {
+            main.send_event(StandardEvent::Focus(WorldTreePath::root()));
         }
     }
 
@@ -902,6 +916,7 @@ impl NodeTree {
         self.nodes[id].focus = if inner {
             FocusIndex::Inner
         } else {
+            self.selected(id);
             FocusIndex::Focusing
         };
     }
@@ -1295,6 +1310,9 @@ impl NodeTree {
             }
             focus => focus,
         };
+        if matches!(parent.focus, FocusIndex::Focusing) {
+            self.selected(parent_id);
+        }
 
         self.wl_surfaces.retain(|_, node_id| *node_id != id);
         self.damaged = true;
