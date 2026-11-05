@@ -11,6 +11,7 @@ use crate::{
     },
     session,
     standard_keybinds::{browser, terminal},
+    ui::{self, PAD, Rows, row_height},
 };
 use sonamu_common::{
     sap::{
@@ -27,7 +28,7 @@ use sonamu_common::{
 use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
-    ui_element::{Cursor, CursorIcon, Length, Style, UIElement, UITree, font_size},
+    ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::{
@@ -40,11 +41,7 @@ use std::{
 /// Its name until it is renamed: its inner tree root's label
 const LABEL: &str = "Project";
 
-/// The overview's rows: the name, its directory, its icon, a hint, its contents, then `NEW_ROWS`
-fn row_height() -> f32 {
-    font_size() + 14.0
-}
-const PAD: f32 = 16.0;
+// The overview's rows (`overview_rows`): the name, its directory, its icon, a hint, its contents, then `NEW_ROWS`
 const DIRECTORY_ROW: usize = 1;
 const ICON_ROW: usize = 2;
 /// The only row a click does nothing on
@@ -99,6 +96,11 @@ const ERROR: Color = Color([0xE0, 0x6C, 0x75, 0xFF]);
 const BTN_LEFT: u32 = 0x110;
 
 /// The home directory, which paths show as `~`
+/// The overview's rows, each a line of text at its top (above the cards)
+fn overview_rows() -> Rows {
+    Rows::new(PAD)
+}
+
 fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
@@ -441,10 +443,7 @@ impl ProjectApplet {
                     ));
                 }
                 parts.push(UITree::leaf_styled(
-                    UIElement::Text(vec![(
-                        format!("{number}  {}", tree.label(id)),
-                        UIElement::glyphon_attr(settings.palette.fg),
-                    )]),
+                    ui::text(format!("{number}  {}", tree.label(id)), settings.palette.fg),
                     Style::absolute(
                         [
                             PAD / 2.0,
@@ -453,18 +452,14 @@ impl ProjectApplet {
                         [(width - PAD / 2.0).max(0.0), font_size()],
                     ),
                 ));
-                UITree::new_styled(
-                    UIElement::Bordered {
-                        color: settings.border.unfocused,
-                        radius: settings.radius,
-                    },
-                    Style {
-                        border: Length::uniform_rect(Length::Px(1.0)),
-                        ..Style::absolute([x, y], [width, height])
-                    },
+                ui::frame(
+                    settings.border.unfocused,
+                    settings.radius,
+                    1.0,
+                    Style::absolute([x, y], [width, height]),
                     parts,
                 )
-                .with_cursor(Some(Cursor::Named(CursorIcon::Pointer)))
+                .with_pointer()
             })
             .collect()
     }
@@ -645,13 +640,8 @@ impl ProjectApplet {
             self.hook.damage_treeview();
             return;
         }
-        let y = f64::from(y);
         let contents = self.holder.tree.children(root).len();
-        // non-negative, since `y >= PAD`
-        #[allow(clippy::cast_sign_loss)]
-        let row = (y >= f64::from(PAD))
-            .then(|| ((y - f64::from(PAD)) / f64::from(row_height())) as usize);
-        match row {
+        match overview_rows().row_at(f64::from(y)) {
             None => {}
             Some(row) if row >= CONTENTS_ROW && self.picking_icon.is_some() => {
                 if let Some(&(icon, _)) = ICONS.get(row - CONTENTS_ROW) {
@@ -844,17 +834,19 @@ impl ProjectApplet {
         ]
         .into_iter()
         .chain(below);
+        let layout = overview_rows();
         let rows = (0..)
             .zip(rows)
             .map(|(index, (text, color))| {
-                UITree::leaf_styled(
-                    UIElement::Text(vec![(text, UIElement::glyphon_attr(color))]),
-                    Style::absolute(
-                        [PAD, PAD + index as f32 * row_height()],
-                        [(width - PAD).max(0.0), row_height()],
-                    ),
-                )
-                .with_cursor((index != HINT_ROW).then_some(Cursor::Named(CursorIcon::Pointer)))
+                let row = UITree::leaf_styled(
+                    ui::text(text, color),
+                    layout.style(index, PAD, (width - PAD).max(0.0)),
+                );
+                if index == HINT_ROW {
+                    row
+                } else {
+                    row.with_pointer()
+                }
             })
             .chain(self.get_cards())
             .collect();
