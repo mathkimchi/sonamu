@@ -52,7 +52,8 @@ impl Vertex {
     }
 }
 
-/// A `Clip` as instance data; the shaders' `clip_coverage` reads it
+/// A `Clip`'s rounded rect as instance data, for the shaders' `coverage`
+/// (`Clip::area` is cut by the scissor rect in `draw_primitive_scene`)
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Debug)]
 pub(super) struct ClipInstance {
@@ -64,7 +65,11 @@ impl ClipInstance {
     /// `origin`: the surface's top left in scene px (see `DrawingSharedData::origin`)
     fn new(clip: Option<Clip>, [x, y]: [f32; 2]) -> Self {
         match clip {
-            Some(Clip { area, radius }) => Self {
+            Some(Clip {
+                rounded: area,
+                radius,
+                ..
+            }) => Self {
                 origin: [area.0[0][0] as f32 - x, area.0[0][1] as f32 - y],
                 size: [area.size().width as f32, area.size().height as f32],
                 radius,

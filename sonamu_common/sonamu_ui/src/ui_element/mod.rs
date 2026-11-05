@@ -73,10 +73,12 @@ impl PartialEq for Image {
     }
 }
 
-/// A rounded rect that a primitive is cut to, eg the inside of a rounded border
+/// What a primitive is cut to: `area`, and the rounded rect `rounded` with corners `radius`
+/// (eg the inside of a rounded border, which an inner box can cut further without losing its corners)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Clip {
     pub area: DisplayAreaPx,
+    pub rounded: DisplayAreaPx,
     pub radius: f32,
 }
 
@@ -379,23 +381,20 @@ impl PrimitiveScene {
                     DisplayAreaPx::new(left + width, top + width, right - width, bot - width);
                 Some(Clip {
                     area: clip.map_or(inside, |clip| clip.area.intersection(inside)),
+                    rounded: inside,
                     radius: (rect.corner_radius - rect.border_width).max(0.0),
                 })
             }
             _ if is_box => Some(match clip {
-                Some(clip) => {
-                    let inside = clip.area.intersection(area);
-                    Clip {
-                        area: inside,
-                        // the rounded corners are only still the edge if nothing cut them off
-                        radius: if inside == clip.area {
-                            clip.radius
-                        } else {
-                            0.0
-                        },
-                    }
-                }
-                None => Clip { area, radius: 0.0 },
+                Some(clip) => Clip {
+                    area: clip.area.intersection(area),
+                    ..clip
+                },
+                None => Clip {
+                    area,
+                    rounded: area,
+                    radius: 0.0,
+                },
             }),
             _ => clip,
         };
