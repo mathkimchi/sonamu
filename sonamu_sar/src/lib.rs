@@ -1,3 +1,4 @@
+pub mod battery;
 mod msg_socket;
 mod pluck_place;
 pub mod runner;

@@ -17,6 +17,7 @@ use tracing_subscriber::EnvFilter;
 fn main() {
     init_logging();
     sonamu_common::settings::load_and_watch();
+    sonamu_sar::battery::watch();
 
     AppletRunner::run(
         RootNodeApplet::get_initializer(
