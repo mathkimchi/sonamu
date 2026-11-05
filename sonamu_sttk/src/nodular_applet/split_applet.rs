@@ -47,6 +47,7 @@ impl SplitApplet {
                     main: None,
                     layout: Layout::Split(axis),
                     wl_surface: None,
+                    hibernated: None,
                     children: vec![subtree],
                 };
                 let mut split = Self::with_tree(hook, |spawn_client, attach_client| {
@@ -141,6 +142,7 @@ impl SplitApplet {
                 main: None,
                 layout: Layout::Single,
                 wl_surface: None,
+                hibernated: None,
                 children: tree.children,
             },
             // already collapsed into its pane

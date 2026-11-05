@@ -278,6 +278,8 @@ pub enum NodeRequest {
     GetDirectory,
     /// Starts the saved wl client in the applet's node, in place of the applet (eg a prompt to restore it)
     StartWl(SavedWl),
+    /// Runs this applet in the applet's node in its place, keeping the node's children (eg the command hub's `open`)
+    Replace(NodularAppletInitializer),
 }
 
 /// Makes an applet from a detached subtree (`NodeRequest::Wrap`) and the directory of the tree it is in

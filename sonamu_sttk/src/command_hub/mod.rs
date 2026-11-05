@@ -7,7 +7,10 @@ use crate::{
     },
     standard_keybinds::handle_standard_keybinds,
 };
-use sonamu_common::{sap::packets::StandardEvent, settings};
+use sonamu_common::{
+    sap::{packets::StandardEvent, session::SavedWl},
+    settings,
+};
 use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
@@ -16,8 +19,9 @@ use sonamu_ui::{
 };
 use std::{fmt::Write as _, path::PathBuf, sync::mpsc};
 
-const VERBS: [&str; 10] = [
+const VERBS: [&str; 11] = [
     "add_child",
+    "open",
     "run",
     "$",
     "set_title",
@@ -31,6 +35,8 @@ const VERBS: [&str; 10] = [
 const TESTS: [&str; 5] = ["image", "wl", "editor", "text_editor", "char"];
 const HELP: &str = "\
 add_child [applet] [args]  open an applet as a child (default: command_hub)
+open <applet> [args]       replace this hub with an applet
+open wl <program> [args]   replace this hub with a program's window
 run <program> [args]       start a program without waiting (eg a Wayland client)
 $ <program> [args]         run a program and show its output
 set_title <title>          rename this hub
@@ -219,6 +225,9 @@ impl CommandHubApplet {
                     )),
                 },
             },
+            // Replaces the hub in its node (#116)
+            "open" => self.open(args),
+
             "set_title" => {
                 self.title = command
                     .trim()
@@ -282,6 +291,37 @@ impl CommandHubApplet {
                 "`{verb}` is an unknown command. Commands: {}. Try `help`.",
                 VERBS.join(", ")
             )),
+        }
+    }
+
+    /// `open`: replaces the hub with an applet, or with a program's window (`wl`)
+    fn open(&self, args: &[&str]) -> Result<String, String> {
+        match args {
+            [] => Err("Must specify an applet, or `wl` and a program.".to_string()),
+            ["wl"] => Err("Must specify a program.".to_string()),
+            ["wl", argv @ ..] => {
+                self.hook.request(NodeRequest::StartWl(SavedWl {
+                    argv: argv.iter().map(ToString::to_string).collect(),
+                    cwd: self.directory.clone(),
+                    app_id: None,
+                    title: String::new(),
+                    running: None,
+                }));
+                Ok(format!("Starting {}", argv[0]))
+            }
+            [app_name, args @ ..] => {
+                let spawner = self.hook.find_applet_spawner(app_name).ok_or_else(|| {
+                    format!(
+                        "Couldn't find app {app_name}. Known applets: {}.",
+                        self.applet_names().join(", ")
+                    )
+                })?;
+                let initializer = spawner
+                    .create_initializer(args)
+                    .ok_or_else(|| format!("Couldn't create initializer from args {args:?}."))?;
+                self.hook.request(NodeRequest::Replace(initializer));
+                Ok(String::new())
+            }
         }
     }
 
@@ -369,6 +409,9 @@ impl CommandHubApplet {
             None => VERBS.iter().map(ToString::to_string).collect(),
             Some(words) => match words.as_slice() {
                 ["add_child"] => self.applet_names(),
+                ["open"] => std::iter::once("wl".to_string())
+                    .chain(self.applet_names())
+                    .collect(),
                 ["test"] => TESTS.iter().map(ToString::to_string).collect(),
                 ["help"] => VERBS.iter().map(ToString::to_string).collect(),
                 _ => Vec::new(),

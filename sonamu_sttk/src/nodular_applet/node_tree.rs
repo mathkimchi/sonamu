@@ -274,8 +274,10 @@ impl NodeTree {
     /// Attaches the tree's clients under `parent` (not added to its children), with new ids
     fn attach_subtree(&mut self, parent: Option<NodeId>, tree: DetachedTree) -> NodeId {
         let attach_client = &self.attach_client;
-        let id = self.nodes.insert_with_key(|id| {
-            Node::new(
+        let id = self.nodes.insert_with_key(|id| Node {
+            inactive: tree.hibernated.is_some(),
+            hibernated: tree.hibernated,
+            ..Node::new(
                 tree.main.map(|main| attach_client(id, main)),
                 tree.layout,
                 parent,
@@ -449,6 +451,7 @@ impl NodeTree {
             main: node.main.map(ClientHandle::detach),
             layout: node.layout,
             wl_surface,
+            hibernated: node.hibernated,
             children: node
                 .children
                 .into_iter()
@@ -1238,6 +1241,13 @@ impl NodeTree {
         }
         let (initializer, awaiting) = session::start(wl);
         self.replace_main(id, initializer, awaiting);
+    }
+
+    /// Runs `initializer` in the node in place of its main
+    pub fn replace_applet(&mut self, id: NodeId, initializer: NodularAppletInitializer) {
+        if self.nodes.contains_key(id) {
+            self.replace_main(id, initializer, None);
+        }
     }
 
     fn replace_main(

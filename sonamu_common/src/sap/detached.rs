@@ -4,6 +4,7 @@ use crate::{
     sap::{
         client_handle::ClientHandle,
         packets::{StandardEvent, Treeview, WlSurfaceId},
+        session::SavedApplet,
         shared_state::SharedState,
     },
     utils::tree::{recursive_tree::RecursiveTreeNode, world_tree::WorldTree},
@@ -94,6 +95,8 @@ pub struct DetachedTree {
     pub layout: Layout,
     /// Set if `main` shows this wl surface
     pub wl_surface: Option<WlSurfaceId>,
+    /// `main` stands in for this saved applet, which starts when the node is focused (hibernating, #102)
+    pub hibernated: Option<SavedApplet>,
     pub children: Vec<Self>,
 }
 impl DetachedTree {
@@ -103,6 +106,7 @@ impl DetachedTree {
             main: Some(main),
             layout: Layout::Single,
             wl_surface: None,
+            hibernated: None,
             children: Vec::new(),
         }
     }

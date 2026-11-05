@@ -1255,7 +1255,10 @@ impl StandardApplet for FileManagerApplet {
                 self.hook.request(request);
             }
             // TODO: a placed project dissolving here loses its contents (they'd need to be the node's children)
-            NodeRequest::SwapSibling(_) | NodeRequest::Unwrap(_) | NodeRequest::StartWl(_) => {
+            NodeRequest::SwapSibling(_)
+            | NodeRequest::Unwrap(_)
+            | NodeRequest::StartWl(_)
+            | NodeRequest::Replace(_) => {
                 return;
             }
             NodeRequest::Close => {

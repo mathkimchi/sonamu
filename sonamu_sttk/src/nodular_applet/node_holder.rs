@@ -504,6 +504,7 @@ impl NodeHolder {
                 .tree
                 .send_event(id, StandardEvent::Directory(self.directory.clone())),
             NodeRequest::StartWl(wl) => self.tree.start_wl(id, &wl),
+            NodeRequest::Replace(initializer) => self.tree.replace_applet(id, initializer),
         }
         None
     }
