@@ -18,6 +18,9 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 
 ## Reload
 
+- A failed load is shown as a notice by the root (`settings::subscribe_errors`, #143); the last error is kept until a
+  load succeeds, and given to new subscribers right away.
+
 - Watch the settings file/program and every `watch` path (`notify`). On change: re-run/re-read.
 - Program gets a timeout. On spawn failure, timeout, non-zero exit or parse error: keep the previous settings and log.
 - Also the command hub's `reload_settings` (`settings::reload()` on a thread).

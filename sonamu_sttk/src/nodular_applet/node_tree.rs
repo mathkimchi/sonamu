@@ -1824,6 +1824,14 @@ impl NodeTree {
         let (Some(swipe), Some(size)) = (&self.swipe, self.latest_size) else {
             return view(focused, &self.panes);
         };
+        // an end closed during the swipe
+        if [Some(swipe.from), swipe.to]
+            .into_iter()
+            .flatten()
+            .any(|id| !self.nodes.contains_key(id))
+        {
+            return view(focused, &self.panes);
+        }
         let [from_panes, to_panes] = &swipe.panes;
         // ends that show the same panes (eg both in a split) don't move, the focus ring does
         let nodes = |panes: &[Pane]| panes.iter().map(|pane| pane.node).collect::<Vec<_>>();

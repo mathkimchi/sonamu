@@ -360,6 +360,9 @@ fn run(program: &Path) -> Result<String, LoadError> {
 
 static CURRENT: LazyLock<RwLock<Settings>> = LazyLock::new(Default::default);
 static SUBSCRIBERS: Mutex<Vec<calloop::channel::Sender<()>>> = Mutex::new(Vec::new());
+static ERROR_SUBSCRIBERS: Mutex<Vec<calloop::channel::Sender<String>>> = Mutex::new(Vec::new());
+/// Why the last load failed, until one succeeds
+static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
 
 /// The current settings.
 pub fn get() -> Settings {
@@ -372,6 +375,22 @@ pub fn get() -> Settings {
 /// `sender` gets a message whenever the settings change.
 pub fn subscribe(sender: calloop::channel::Sender<()>) {
     SUBSCRIBERS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(sender);
+}
+
+/// `sender` gets why loading the settings failed, whenever it does (the previous ones are kept), eg to show it;
+/// right away if the last load failed (eg at startup)
+pub fn subscribe_errors(sender: calloop::channel::Sender<String>) {
+    if let Some(err) = LAST_ERROR
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+    {
+        let _ = sender.send(err);
+    }
+    ERROR_SUBSCRIBERS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .push(sender);
@@ -390,6 +409,7 @@ fn reload_from(dir: &Path) -> Option<Vec<PathBuf>> {
         Ok(Loaded { settings, watch }) => {
             // read by sonamu_ui itself (eg char grid sizes), which can't see the settings
             sonamu_ui::ui_element::set_font_size(settings.font_size);
+            *LAST_ERROR.lock().unwrap_or_else(PoisonError::into_inner) = None;
             let changed = {
                 let mut current = CURRENT.write().unwrap_or_else(PoisonError::into_inner);
                 std::mem::replace(&mut *current, settings) != *current
@@ -408,6 +428,12 @@ fn reload_from(dir: &Path) -> Option<Vec<PathBuf>> {
                 "Keeping previous settings, could not load from {}: {err}",
                 dir.display()
             );
+            let err = err.to_string();
+            ERROR_SUBSCRIBERS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retain(|sender| sender.send(err.clone()).is_ok());
+            *LAST_ERROR.lock().unwrap_or_else(PoisonError::into_inner) = Some(err);
             None
         }
     }
