@@ -23,3 +23,6 @@ Found while debugging #60; nothing here is in the repo's code.
 - `wtype -M alt -M shift -k b` arrived as Escape (raw keycode 1) in one run (#141): check what the root actually got
   before trusting injected keys. Gestures can't be injected at all (DRM only); a temporary timer in the root calling
   `handle_swipe` with scripted `SwipePhase`s worked.
+- Session state stands in for input when only static looks matter: a file manager's `inner` children open documents,
+  a `Wl` main restores as a placeholder. In one run (2026-11-05) `wtype` keys never reached Sonamu and `wlrctl`
+  wasn't installed; same-binary screenshots were byte-identical, so `cmp` on two `grim` PNGs checks a refactor.
