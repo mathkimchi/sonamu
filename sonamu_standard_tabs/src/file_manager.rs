@@ -28,12 +28,13 @@ use sonamu_sttk::{
     },
     session,
     standard_keybinds::{handle_standard_keybinds, pdf_viewer, standard_keybind_request},
+    ui::{self, Rows, compact_row_height as row_height},
     wl_surface_applet::WlSurfaceApplet,
 };
 use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
-    ui_element::{Cursor, CursorIcon, Style, UIElement, UITree, font_size},
+    ui_element::{Style, UIElement, UITree},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::{
@@ -43,9 +44,6 @@ use std::{
     sync::mpsc,
 };
 
-fn row_height() -> f32 {
-    font_size() + 10.0
-}
 const INDENT: f32 = 28.0;
 const LEFT_PAD: f32 = 12.0;
 /// Of the width, for the file list
@@ -258,19 +256,18 @@ impl FileManagerApplet {
         )
     }
 
+    /// The entries' rows, under the header
+    fn list_rows(&self) -> Rows {
+        Rows::with_height(row_height(), row_height()).scrolled(self.scroll)
+    }
+
     /// Entries that fit under the header
-    #[allow(clippy::cast_sign_loss)]
     fn visible_rows(&self) -> usize {
-        ((self.size.height as f32 / row_height()) as usize)
-            .saturating_sub(1)
-            .max(1)
+        self.list_rows().fitting(self.size.height as f32)
     }
 
     fn clamp_scroll(&mut self) {
-        let rows = self.visible_rows();
-        self.scroll = self
-            .scroll
-            .clamp((self.selected + 1).saturating_sub(rows), self.selected);
+        self.scroll = ui::scroll_to(self.scroll, self.selected, self.visible_rows());
     }
 
     fn resize_documents(&self) {
@@ -740,10 +737,9 @@ impl FileManagerApplet {
         let in_header = y < f64::from(row_height());
         let in_list = x < list_width && (in_header || !self.list_collapsed);
 
-        // non-negative, since it's past the header
-        #[allow(clippy::cast_sign_loss)]
         let row = (in_list && !in_header)
-            .then(|| ((y / f64::from(row_height())) as usize - 1) + self.scroll)
+            .then(|| self.list_rows().row_at(y))
+            .flatten()
             .filter(|&index| index < self.entries.len());
         self.hovered = row;
 
@@ -777,7 +773,7 @@ impl FileManagerApplet {
                 }
             }
             MouseEventKind::Scroll { delta, .. } => {
-                let max_scroll = self.entries.len().saturating_sub(self.visible_rows());
+                let max_scroll = ui::max_scroll(self.entries.len(), self.visible_rows());
                 self.scroll = if delta[1] > 0.0 {
                     (self.scroll + 1).min(max_scroll)
                 } else if delta[1] < 0.0 {
@@ -792,56 +788,44 @@ impl FileManagerApplet {
 
     fn render_list(&self, width: f32) -> UITree {
         let toggle = if self.list_collapsed { '▴' } else { '▾' };
-        let header = row(
-            0,
-            width,
-            HEADER_BG,
-            // the clickable area (`handle_mouse`)
-            UITree::new_styled(
-                UIElement::Nothing,
-                Style::absolute([0.0, 0.0], [LEFT_PAD + INDENT, row_height()]),
-                vec![text(
+        let header_row = Rows::with_height(0.0, row_height());
+        // the clickable area (`handle_mouse`)
+        let toggle = header_row
+            .row(
+                0,
+                LEFT_PAD + INDENT,
+                None,
+                vec![header_row.text(
+                    ui::text(toggle, self.palette.fg),
                     LEFT_PAD,
-                    toggle.to_string(),
-                    self.palette.fg,
                     LEFT_PAD + INDENT,
                 )],
             )
-            .with_cursor(Some(Cursor::Named(CursorIcon::Pointer))),
-        );
-        let header_title = row(
-            0,
+            .with_pointer();
+        let title = header_row.text(
+            ui::text(self.title(), self.palette.inactive),
+            LEFT_PAD + INDENT,
             width,
-            Color::TRANSPARENT,
-            text(
-                LEFT_PAD + INDENT,
-                self.title(),
-                self.palette.inactive,
-                width,
-            ),
         );
+        let header = header_row.row(0, width, Some(HEADER_BG), vec![toggle, title]);
         if self.list_collapsed {
-            return UITree::new_styled(
-                UIElement::Nothing,
-                Style::full_size(),
-                vec![header, header_title],
-            );
+            return UITree::new_styled(UIElement::Nothing, Style::full_size(), vec![header]);
         }
-        let mut rows = vec![header, header_title];
-        for (row_index, (index, entry)) in self
+        let list_rows = self.list_rows();
+        let mut rows = vec![header];
+        for (index, entry) in self
             .entries
             .iter()
             .enumerate()
             .skip(self.scroll)
             .take(self.visible_rows())
-            .enumerate()
         {
             let background = if index != self.selected {
-                Color::TRANSPARENT
+                None
             } else if self.pane == Pane::Files {
-                SELECTED_BG
+                Some(SELECTED_BG)
             } else {
-                SELECTED_UNFOCUSED_BG
+                Some(SELECTED_UNFOCUSED_BG)
             };
             let name = entry
                 .path
@@ -869,12 +853,12 @@ impl FileManagerApplet {
                     },
                 )
             };
-            rows.push(row(
-                row_index + 1,
+            let label = list_rows.text(
+                ui::text(label, color),
+                LEFT_PAD + entry.depth as f32 * INDENT,
                 width,
-                background,
-                text(LEFT_PAD + entry.depth as f32 * INDENT, label, color, width),
-            ));
+            );
+            rows.push(list_rows.row(index, width, background, vec![label]));
         }
         UITree::new_styled(UIElement::Backgrounded(LIST_BG), Style::full_size(), rows)
     }
@@ -882,10 +866,10 @@ impl FileManagerApplet {
     /// The open documents' names (right of `header_left`), then the active document
     fn render_documents(&self, width: f32, header_left: f32) -> UITree {
         let header = match &self.status {
-            Some(status) => vec![(status.clone(), UIElement::glyphon_attr(Color::RED))],
+            Some(status) => vec![(status.clone(), Color::RED)],
             None if self.documents.is_empty() => vec![(
                 "Open a file (Enter or click)".to_string(),
-                UIElement::glyphon_attr(self.palette.inactive),
+                self.palette.inactive,
             )],
             None => self
                 .documents
@@ -898,20 +882,15 @@ impl FileManagerApplet {
                     } else {
                         self.palette.inactive
                     };
-                    (format!(" {name} "), UIElement::glyphon_attr(color))
+                    (format!(" {name} "), color)
                 })
                 .collect(),
         };
+        let header_row = Rows::with_height(0.0, row_height());
         let header = UITree::new_styled(
             UIElement::Backgrounded(HEADER_BG),
-            Style::absolute([header_left, 0.0], [width - header_left, row_height()]),
-            vec![UITree::leaf_styled(
-                UIElement::Text(header),
-                Style::absolute(
-                    [LEFT_PAD, text_top()],
-                    [width - header_left, row_height() - text_top()],
-                ),
-            )],
+            header_row.style(0, header_left, width - header_left),
+            vec![header_row.text(ui::spans(header), LEFT_PAD, width - header_left)],
         );
 
         let size = self.document_size();
@@ -930,10 +909,9 @@ impl FileManagerApplet {
                 Err(note) => UITree::new_styled(
                     UIElement::Backgrounded(DOCUMENT_BG),
                     Style::full_size(),
-                    vec![text(
+                    vec![header_row.text(
+                        ui::text(note, self.palette.inactive),
                         LEFT_PAD,
-                        note.to_string(),
-                        self.palette.inactive,
                         size.width as f32,
                     )],
                 ),
@@ -1313,31 +1291,4 @@ fn push_entries(dir: &Path, depth: usize, expanded: &HashSet<PathBuf>, entries: 
             push_entries(&path, depth + 1, expanded, entries);
         }
     }
-}
-
-fn text_top() -> f32 {
-    (row_height() - font_size()) / 2.0
-}
-
-fn text(left: f32, label: String, color: Color, width: f32) -> UITree {
-    UITree::leaf_styled(
-        UIElement::Text(vec![(label, UIElement::glyphon_attr(color))]),
-        Style::absolute(
-            [left, text_top()],
-            [(width - left).max(0.0), row_height() - text_top()],
-        ),
-    )
-}
-
-fn row(index: usize, width: f32, background: Color, content: UITree) -> UITree {
-    let background = if background == Color::TRANSPARENT {
-        UIElement::Nothing
-    } else {
-        UIElement::Backgrounded(background)
-    };
-    UITree::new_styled(
-        background,
-        Style::absolute([0.0, index as f32 * row_height()], [width, row_height()]),
-        vec![content],
-    )
 }
