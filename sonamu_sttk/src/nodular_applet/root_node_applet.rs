@@ -90,6 +90,8 @@ pub struct RootNodeApplet {
     select_swipe: Option<[f64; 2]>,
     /// The child row each row last had focus under, for swipes into children (#142); not saved
     remembered: HashMap<WorldTreePath, WorldTreePath>,
+    /// When Ctrl+Shift+Q was pressed, while it asks to press it again (#139)
+    quit_asked: Option<Instant>,
     loop_handle: LoopHandle<'static, Self>,
 }
 
@@ -118,6 +120,9 @@ impl RootNodeApplet {
     const SETTLE_FRAME: Duration = Duration::from_millis(8);
     /// How far (px) a 4 finger swipe moves to act
     const SELECT_DISTANCE: f64 = 50.0;
+    /// How long Ctrl+Shift+Q waits to be pressed again
+    const QUIT_CONFIRM: Duration = Duration::from_secs(3);
+    const QUIT_NOTICE: &str = "Press Ctrl+Shift+Q again to quit";
 
     /// Where the treeview is drawn (`[x, y, width, height]`, frame included), and how;
     /// `None` while hidden
@@ -172,6 +177,7 @@ impl RootNodeApplet {
         let settings = settings::get();
         let shown = self.treeview_shown;
         let pinned = self.treeview_pinned;
+        let quit_asked = self.quit_asked.is_some();
         let Self {
             holder,
             treeview_pointer,
@@ -207,6 +213,9 @@ impl RootNodeApplet {
                             area,
                             pinned,
                         ));
+                    }
+                    if quit_asked && index == active {
+                        window.push(notice(&settings, Self::QUIT_NOTICE, size));
                     }
                     UITree::new_container_styled(
                         Style::absolute([x as f32, y as f32], [size.width as f32, height as f32]),
@@ -306,6 +315,35 @@ impl RootNodeApplet {
         }
     }
 
+    /// Ctrl+Shift+Q: quits if pressed again within `QUIT_CONFIRM`, else shows a notice asking for that (#139)
+    fn ask_quit(&mut self) {
+        if self
+            .quit_asked
+            .is_some_and(|asked| asked.elapsed() < Self::QUIT_CONFIRM)
+        {
+            self.quit();
+            return;
+        }
+        self.quit_asked = Some(Instant::now());
+        self.surface.damage();
+        self.loop_handle
+            .insert_source(
+                Timer::from_duration(Self::QUIT_CONFIRM),
+                |_, &mut (), root: &mut Self| {
+                    // not asked again meanwhile
+                    if root
+                        .quit_asked
+                        .is_some_and(|asked| asked.elapsed() >= Self::QUIT_CONFIRM)
+                    {
+                        root.quit_asked = None;
+                        root.surface.damage();
+                    }
+                    TimeoutAction::Drop
+                },
+            )
+            .unwrap();
+    }
+
     /// Saves first, since the runner may end the process right after
     fn quit(&mut self) {
         self.save_session();
@@ -380,6 +418,7 @@ impl RootNodeApplet {
             settling: false,
             select_swipe: None,
             remembered: HashMap::new(),
+            quit_asked: None,
             loop_handle: event_loop.clone(),
         };
         // a clean session starts with the help shown
@@ -461,7 +500,7 @@ impl RootNodeApplet {
                     .run(None, &mut root, |root| {
                         root.holder.finish();
                         if std::mem::take(&mut root.holder.quit) {
-                            root.quit();
+                            root.ask_quit();
                         }
                         root.holder.tree.update_view_root();
                         root.update_view_path();
@@ -1065,6 +1104,41 @@ fn treeview_frame(
 
 /// The treeview's rows: the view root's subtree (`view_path`, else the `NodeTree`'s),
 /// under a `‹` row for its parent with `up`.
+/// A line of text framed in the middle of `size` (eg asking to confirm quitting)
+fn notice(settings: &Settings, text: &str, size: DisplayContainerSize) -> UITree {
+    let pad = font_size();
+    // monospace: about this wide a character
+    let width = text.chars().count() as f32 * font_size() * 0.6 + 2.0 * pad;
+    // room for descenders
+    let line = font_size() * 1.4;
+    let height = line + 2.0 * pad;
+    let [left, top] = [
+        (size.width as f32 - width) / 2.0,
+        (size.height as f32 - height) / 2.0,
+    ];
+    UITree::new_styled(
+        UIElement::Bordered {
+            color: settings.palette.accent,
+            radius: settings.radius,
+        },
+        Style {
+            border: Length::uniform_rect(Length::Px(settings.border.width)),
+            ..Style::absolute([left, top], [width, height])
+        },
+        vec![UITree::new_styled(
+            UIElement::Backgrounded(with_opacity(settings.palette.bg)),
+            Style::full_size(),
+            vec![UITree::leaf_styled(
+                UIElement::Text(vec![(
+                    text.to_string(),
+                    UIElement::glyphon_attr(settings.palette.fg),
+                )]),
+                Style::absolute([pad, pad], [width - 2.0 * pad, line]),
+            )],
+        )],
+    )
+}
+
 fn view_tree_rows(
     tree: &NodeTree,
     view_path: Option<&WorldTreePath>,
