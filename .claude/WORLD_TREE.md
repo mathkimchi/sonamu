@@ -74,7 +74,8 @@ Applets have no traversal of their own.
     different worlds: inner ↔ own sibling, no animation). The holder lays out each end as if focused
     (`layout_swipe`, which also sizes and so shows their applets) and slides the two windows in a clipped box
     (`swipe::slide`); ends showing the same panes (eg a split's) stay, and a focus ring stretches between their panes
-    like a liquid drop instead (`swipe::ring`: leading edges ease out, trailing ones ease in). A project draws its
+    like a liquid drop instead (`swipe::ring`: leading edges ease out, trailing ones ease in). Past a split's first / last
+    pane the ring squashes against the split's edge (rubber-banded) instead of the panes sliding. A project draws its
     overview for its root (`get_window_with`). The file manager slides its documents (not its root). Only the active
     screen's tree draws it.
 - In the selector (the deepest holder's `NodeTree::handle_event`, or an applet's own, eg the file manager's documents):

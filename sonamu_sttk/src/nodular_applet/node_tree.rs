@@ -1842,7 +1842,14 @@ impl NodeTree {
             && (at_root.is_none() || (swipe.from != self.root && to != self.root))
             && nodes(from_panes) == nodes(to_panes)
         {
-            return self.ring_window(from_panes, swipe.from, to, swipe.progress);
+            return self.ring_window(from_panes, swipe.from, Some(to), swipe.progress);
+        }
+        // past a split's first / last pane: the ring pushes against its edge rather than the panes sliding
+        if swipe.to.is_none()
+            && let Some(parent) = self.nodes[swipe.from].parent
+            && matches!(self.nodes[parent].layout, Layout::Split(_))
+        {
+            return self.ring_window(from_panes, swipe.from, None, swipe.progress);
         }
         swipe::slide(
             size,
@@ -1853,8 +1860,16 @@ impl NodeTree {
         )
     }
 
-    /// `panes` without focus, and a focus ring partway from `from`'s pane to `to`'s
-    fn ring_window(&self, panes: &[Pane], from: NodeId, to: NodeId, progress: f32) -> UITree {
+    /// `panes` without focus, and a focus ring partway from `from`'s pane to `to`'s.
+    /// With no `to` (past a split's first / last pane, `progress` rubber-banded, negative before the first), the ring
+    /// squashes against the split's edge: its leading edge stays and its trailing edge follows.
+    fn ring_window(
+        &self,
+        panes: &[Pane],
+        from: NodeId,
+        to: Option<NodeId>,
+        progress: f32,
+    ) -> UITree {
         let rect = |id: NodeId| {
             let shown = self.displayed_node_toward(id, id);
             panes
@@ -1863,8 +1878,30 @@ impl NodeTree {
                 .map(|pane| (pane.rect.map(|value| value as f32), pane))
         };
         let window = self.window(panes, None, self.active_screen);
-        let (Some((from_rect, pane)), Some((to_rect, _))) = (rect(from), rect(to)) else {
+        let Some((from_rect, pane)) = rect(from) else {
             return window;
+        };
+        let (to_rect, progress) = if let Some(to) = to {
+            let Some((to_rect, _)) = rect(to) else {
+                return window;
+            };
+            (to_rect, progress)
+        } else {
+            let axis = match self.nodes[from]
+                .parent
+                .map(|parent| self.nodes[parent].layout)
+            {
+                Some(Layout::Split(Axis::Vertical)) => 1,
+                _ => 0,
+            };
+            let mut squashed = from_rect;
+            let pushed = progress.abs() * from_rect[axis + 2];
+            squashed[axis + 2] -= pushed;
+            if progress > 0.0 {
+                // toward the end: the start edge follows
+                squashed[axis] += pushed;
+            }
+            (squashed, 1.0)
         };
         let settings = settings::get();
         let color = match self.nodes[self.focused_node()].focus {
