@@ -59,9 +59,8 @@ fn installed(program: &str) -> bool {
     if program.contains('/') {
         return std::path::Path::new(program).is_file();
     }
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|dir| dir.join(program).is_file())
-    })
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
 }
 const SUPER_SHIFT: KeyModifiers = KeyModifiers::both(KeyModifiers::LOGO, KeyModifiers::SHIFT);
 

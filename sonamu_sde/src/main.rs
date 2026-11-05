@@ -5,7 +5,10 @@ use sonamu_standard_tabs::{
 use sonamu_sttk::{
     command_hub::CommandHubApplet,
     man_page::ManPageApplet,
-    nodular_applet::root_node_applet::{self, RootNodeApplet},
+    nodular_applet::{
+        project_applet::ProjectApplet,
+        root_node_applet::{self, RootNodeApplet},
+    },
     session,
 };
 use std::collections::BTreeMap;
@@ -17,7 +20,7 @@ fn main() {
 
     AppletRunner::run(
         RootNodeApplet::get_initializer(
-            CommandHubApplet::get_boxed_initiator(),
+            ProjectApplet::empty(None),
             BTreeMap::from_iter(vec![
                 (
                     "command_hub".to_string(),

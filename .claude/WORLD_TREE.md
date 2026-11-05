@@ -170,7 +170,7 @@ The holder above stitches these in:
 - Its focus path appends the published focus.
 - The root shows the treeview per the `treeview` setting (#106): `position` left / right (a column, the panes get the
   rest of the width) or floating (default: centered over the panes, which keep their size; always framed), and
-  `pinned` (always shown) or not (default: only while `NodeTree::is_traversing`, or a treeview drag or menu is open).
+  `pinned` (always shown) or not (pinned by default in a new session; unpinned: only while `NodeTree::is_traversing`, or a treeview drag or menu is open).
   Floating is never pinned. See `treeview_area`, `applet_area` and `treeview_frame` in `root_node_applet.rs`.
 - The treeview shows the **view root**'s subtree, any row (#83): the `NodeTree`'s view root for a node of the root's
   tree (it also picks the panes), else `RootNodeApplet::view_path` for a row inside an applet (its `NodeTree` view root

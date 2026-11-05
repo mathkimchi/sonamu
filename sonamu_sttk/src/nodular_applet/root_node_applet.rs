@@ -344,9 +344,10 @@ impl RootNodeApplet {
             last_drop: None,
             // the root node starts focused
             treeview_shown: true,
+            // a clean session starts pinned
             treeview_pinned: saved_session
                 .as_ref()
-                .is_some_and(|saved| saved.treeview_pinned),
+                .is_none_or(|saved| saved.treeview_pinned),
             view_path: None,
             view_path_focus: None,
             applet_area: [0, 800],

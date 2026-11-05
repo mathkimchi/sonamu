@@ -5,7 +5,7 @@ Sonamu owns the session; apps' own session restore should be off.
 
 ## How it works
 
-- **Saved form** (`sonamu_common/src/sap/session.rs`): `Session { tree: SavedTree, focus, treeview_pinned }` (`treeview_pinned`: the root treeview's pin button).
+- **Saved form** (`sonamu_common/src/sap/session.rs`): `Session { tree: SavedTree, focus, treeview_pinned }` (`treeview_pinned`: the root treeview's pin button). Without a saved session, the root is an empty project with the help (Manual) opened in it, and the treeview is pinned.
   `SavedTree { main: Option<SavedApplet>, layout, children, label }` (`label`: only a project's inner root, its name).
   `SavedApplet` is one of `Spawner { name, args }` (made again by the registered applet spawner, like the command hub does)
   or `Wl(SavedWl { argv, cwd, app_id, title })`.
