@@ -46,7 +46,8 @@ print(json.dumps({
         "distance_x": 600.0,
         "distance_y": 1200.0,
         "rubber_band": 0.15,
-        "snap_ms": 250,
+        "stiffness": 1000.0,
+        "damping_ratio": 1.0,
     },
     # evdev key codes
     "keybinds": [
