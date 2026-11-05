@@ -48,7 +48,7 @@ Basic Usage Manual:
 Niche keybinds not included,
 and these can be configured as well.
 
-## Configuration TODO
+## Configuration
 
 Settings can be configured with
 a simple json `~/.config/sonamu/settings.json`
@@ -56,7 +56,10 @@ or
 an executable `~/.config/sonamu/settings`,
 which should print a json.
 
-My personal configuration can be found in
+The default configuration (that has every key shown) is in
+`../assets/default_settings.json`
+and my personal configuration can be found in
 `../examples/config/settings`.
 
-TODO
+JSON schema is found in `../assets/settings.schema.json`.
+The default configuration shows how to import it.
