@@ -178,19 +178,20 @@ impl From<DisplayContainerSize> for DisplaySize {
     }
 }
 
-/// In exclusively pixels.
+/// In exclusively pixels; signed, so something placed partly off the top/left keeps its size.
 /// `[[left, top], [right, bot]]`
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
-pub struct DisplayAreaPx(pub [[u32; 2]; 2]);
+pub struct DisplayAreaPx(pub [[i32; 2]; 2]);
 impl DisplayAreaPx {
-    /// From edges in fractional px, each cut to whole px like [`ToPx`]
+    /// From edges in fractional px, each floored (so a shift doesn't change the size)
     #[must_use]
     pub fn from_f32(left: f32, top: f32, right: f32, bot: f32) -> Self {
-        Self::new(left.to_px(), top.to_px(), right.to_px(), bot.to_px())
+        let px = |x: f32| x.floor() as i32;
+        Self::new(px(left), px(top), px(right), px(bot))
     }
 
     #[must_use]
-    pub const fn new(left: u32, top: u32, right: u32, bot: u32) -> Self {
+    pub const fn new(left: i32, top: i32, right: i32, bot: i32) -> Self {
         Self([[left, top], [right, bot]])
     }
 
@@ -212,10 +213,12 @@ impl DisplayAreaPx {
     //     }
     // }
 
+    /// Zero if right/bot is before left/top
     pub fn size(&self) -> DisplayContainerSize {
+        let [[left, top], [right, bot]] = self.0;
         DisplayContainerSize {
-            width: self.0[1][0] - self.0[0][0],
-            height: self.0[1][1] - self.0[0][1],
+            width: right.saturating_sub(left).max(0).cast_unsigned(),
+            height: bot.saturating_sub(top).max(0).cast_unsigned(),
         }
     }
 }
@@ -337,12 +340,12 @@ impl DisplayArea {
     pub fn map_onto_px_size(&self, screen_size: DisplayContainerSize) -> DisplayAreaPx {
         DisplayAreaPx([
             [
-                self.0.x.pixels(screen_size.width as i32).cast_unsigned(),
-                self.0.y.pixels(screen_size.height as i32).cast_unsigned(),
+                self.0.x.pixels(screen_size.width as i32),
+                self.0.y.pixels(screen_size.height as i32),
             ],
             [
-                self.1.x.pixels(screen_size.width as i32).cast_unsigned(),
-                self.1.y.pixels(screen_size.height as i32).cast_unsigned(),
+                self.1.x.pixels(screen_size.width as i32),
+                self.1.y.pixels(screen_size.height as i32),
             ],
         ])
     }

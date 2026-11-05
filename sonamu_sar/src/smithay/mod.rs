@@ -242,7 +242,8 @@ impl SmithayState {
             .copied()
             .find(|&[x, y, width, height]| {
                 center.is_some_and(|[center_x, center_y]| {
-                    (x..x + width).contains(&center_x) && (y..y + height).contains(&center_y)
+                    let [x, y, right, bottom] = [x, y, x + width, y + height].map(u32::cast_signed);
+                    (x..right).contains(&center_x) && (y..bottom).contains(&center_y)
                 })
             })
             .or_else(|| self.screens.first().copied())

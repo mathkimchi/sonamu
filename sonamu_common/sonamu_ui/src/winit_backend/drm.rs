@@ -619,9 +619,7 @@ impl DrmDisplay {
             }
             // software cursor
             let mut scene = self.scene.clone();
-            // the pointer is clamped to the screen, so non-negative
-            #[allow(clippy::cast_sign_loss)]
-            let [x, y] = self.pointer.map(|value| value as u32);
+            let [x, y] = self.pointer.map(|value| value as i32);
             scene.elements.push(
                 match self
                     .cursor_image
@@ -629,11 +627,12 @@ impl DrmDisplay {
                     .and_then(|(_, image)| image.as_ref())
                 {
                     Some(image) => {
-                        let x = x.saturating_sub(image.hotspot[0]);
-                        let y = y.saturating_sub(image.hotspot[1]);
+                        let [w, h] = image.size.map(u32::cast_signed);
+                        let x = x - image.hotspot[0].cast_signed();
+                        let y = y - image.hotspot[1].cast_signed();
                         (
                             UIPrimitiveElement::Texture(image.texture.clone()),
-                            DisplayAreaPx::new(x, y, x + image.size[0], y + image.size[1]),
+                            DisplayAreaPx::new(x, y, x + w, y + h),
                             None,
                         )
                     }
@@ -645,7 +644,12 @@ impl DrmDisplay {
                             main_color: [1.0, 1.0, 1.0, 1.0],
                             border_color: [0.0, 0.0, 0.0, 1.0],
                         }),
-                        DisplayAreaPx::new(x, y, x + CURSOR_SIZE[0], y + CURSOR_SIZE[1]),
+                        DisplayAreaPx::new(
+                            x,
+                            y,
+                            x + CURSOR_SIZE[0].cast_signed(),
+                            y + CURSOR_SIZE[1].cast_signed(),
+                        ),
                         None,
                     ),
                 },

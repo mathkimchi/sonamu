@@ -2,7 +2,7 @@
 
 use super::{CapturedFrame, UIDisplay};
 use crate::{
-    display_units::{DisplayAreaPx, ToPx},
+    display_units::DisplayAreaPx,
     ui_element::{
         CharGrid, Clip, Image, InternalCharCell, PrimitiveScene, RoundRect, UIPrimitiveElement,
         font_size,
@@ -869,10 +869,10 @@ impl DrawingSharedData<'_> {
     fn display_area_to_text_bounds(&self, display_area_px: DisplayAreaPx) -> glyphon::TextBounds {
         let [x, y] = self.origin.map(|coord| coord as i32);
         glyphon::TextBounds {
-            left: display_area_px.0[0][0] as i32 - x,
-            top: display_area_px.0[0][1] as i32 - y,
-            right: display_area_px.0[1][0] as i32 - x,
-            bottom: display_area_px.0[1][1] as i32 - y,
+            left: display_area_px.0[0][0] - x,
+            top: display_area_px.0[0][1] - y,
+            right: display_area_px.0[1][0] - x,
+            bottom: display_area_px.0[1][1] - y,
         }
     }
     fn draw_text_with_glyphon(
@@ -1413,8 +1413,9 @@ impl DrawingSharedData<'_> {
     /// Only the elements on the surface (eg not another monitor's), each scissored to its visible part:
     /// the pipelines draw one triangle over the whole surface, so otherwise every element shades every pixel
     fn draw_primitive_scene(&mut self, scene: &PrimitiveScene, size: [u32; 2]) {
-        let [x, y] = self.origin.map(ToPx::to_px);
-        let shown = DisplayAreaPx::new(x, y, x + size[0], y + size[1]);
+        let [x, y] = self.origin.map(|coord| coord as i32);
+        let [width, height] = size.map(u32::cast_signed);
+        let shown = DisplayAreaPx::new(x, y, x + width, y + height);
         for (element, display_area_px, clip) in &scene.elements {
             let mut visible = display_area_px.intersection(shown);
             if let Some(clip) = clip {
@@ -1425,9 +1426,10 @@ impl DrawingSharedData<'_> {
                 continue;
             }
             let [[left, top], _] = visible.0;
+            // inside `shown`, so non-negative
             self.render_pass.set_scissor_rect(
-                left - x,
-                top - y,
+                (left - x).cast_unsigned(),
+                (top - y).cast_unsigned(),
                 visible_size.width,
                 visible_size.height,
             );

@@ -373,14 +373,10 @@ impl PrimitiveScene {
         let is_box = !style.size.width.is_auto() && !style.size.height.is_auto();
         let child_clip = match &primitive {
             Some(UIPrimitiveElement::RoundRect(rect)) if rect.corner_radius > 0.0 => {
-                let width = rect.border_width.to_px();
+                let width = rect.border_width.to_px().cast_signed();
                 let DisplayAreaPx([[left, top], [right, bot]]) = area;
-                let inside = DisplayAreaPx::new(
-                    left + width,
-                    top + width,
-                    right.saturating_sub(width),
-                    bot.saturating_sub(width),
-                );
+                let inside =
+                    DisplayAreaPx::new(left + width, top + width, right - width, bot - width);
                 Some(Clip {
                     area: clip.map_or(inside, |clip| clip.area.intersection(inside)),
                     radius: (rect.corner_radius - rect.border_width).max(0.0),

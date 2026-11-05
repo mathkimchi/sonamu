@@ -66,7 +66,7 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 
 - Colors are sRGB everywhere now. Rects and char grids used to write `Color`s straight to the sRGB surface (so they acted linear and showed lighter); their shaders now decode sRGB. Hand-tuned "drawn as linear" constants (treeview, command hub, file manager, pluck ghost) were converted to the sRGB they showed as, so they look the same. Plain named colors like `Color::DARK_GRAY` used as rect/char grid colors (eg in editors) now show darker, as named.
 - The rect shader now honors `corner_radius` (antialiased SDF). `UIElement::Bordered { color, radius }` (`UIElement::border(color)` for square); radius > 0 clips its children.
-- `PrimitiveScene::elements` carry an `Option<Clip>`; rect, image and char grid shaders multiply by clip coverage.
+- `PrimitiveScene::elements` carry an `Option<Clip>`; rect, image and char grid shaders multiply by clip coverage. Every element is also scissored to its clip's rect, so text (glyphon only cuts to a rect) and textures follow it too. `DisplayAreaPx` is signed, so an element off the top/left (eg a sliding window) keeps its size and is just cut.
 
 ## Issues found
 
