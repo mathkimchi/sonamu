@@ -29,7 +29,7 @@ pub mod node_tree;
 pub mod project_applet;
 pub mod root_node_applet;
 pub mod split_applet;
-mod swipe;
+pub mod swipe;
 mod traversal;
 pub(crate) mod treeview;
 
@@ -75,6 +75,11 @@ pub trait StandardApplet {
 
     /// With `screen_windows`, where focus is on each screen (`Treeview::screen_focus`)
     fn screen_focus(&self) -> Vec<WorldTreePath> {
+        Vec::new()
+    }
+
+    /// Paths of its inner tree whose children are all shown at once (`Treeview::shown_at_once`, eg a split's panes)
+    fn shown_at_once(&self) -> Vec<WorldTreePath> {
         Vec::new()
     }
 
@@ -576,6 +581,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         screen_windows: state.applet.screen_windows(),
                         screen_frames_itself: state.applet.screen_frames_itself(),
                         screen_focus: state.applet.screen_focus(),
+                        shown_at_once: state.applet.shown_at_once(),
                     },
                     &state.request_sender,
                 );

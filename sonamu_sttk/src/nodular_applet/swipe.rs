@@ -1,12 +1,18 @@
 //! 3 finger swipes between nodes (#141, #142): the view follows the fingers along a strip of shown rows
 //! (siblings up / down, parent and child left / right) and settles on one when they lift.
-//! Natural direction: the content moves with the fingers, so fingers up bring in the next sibling.
+//! Natural direction: the content moves with the fingers, so fingers up bring in the next sibling; where the rows are
+//! all shown at once (eg a split's panes), the focus moves with the fingers instead.
+//! `slide` and `ring` draw a swipe for holders (`StandardEvent::Swipe`).
 
 use super::treeview::TreeviewRow;
 use sonamu_common::{
     sap::packets::SwipeView, settings::SwipeSettings, utils::tree::world_tree::WorldTreePath,
 };
-use sonamu_ui::display_units::ToPx;
+use sonamu_ui::{
+    color::Color,
+    display_units::{DisplayContainerSize, ToPx},
+    ui_element::{Length, Style, UIElement, UITree},
+};
 use std::{
     collections::{HashMap, VecDeque},
     time::{Duration, Instant},
@@ -26,6 +32,8 @@ pub struct Strip {
     pub paths: Vec<WorldTreePath>,
     /// Where focus was
     pub start: usize,
+    /// Its rows are all shown at once (`Treeview::shown_at_once`): the focus follows the fingers, not the content
+    pub reversed: bool,
 }
 impl Strip {
     /// Its siblings (rows under the same parent row: inner children, then the node's own), or the row alone
@@ -43,6 +51,7 @@ impl Strip {
             vertical: true,
             paths,
             start,
+            reversed: false,
         }
     }
 
@@ -76,6 +85,7 @@ impl Strip {
             vertical: false,
             paths,
             start,
+            reversed: false,
         }
     }
 
@@ -178,9 +188,10 @@ impl Swipe {
             delta
         };
         let (strip, position) = self.lane.as_mut()?;
-        // the content follows the fingers, so moving them up (or left) goes on
-        let along = -if strip.vertical { delta[1] } else { delta[0] }
-            / f64::from(settings.distance.max(1.0));
+        // the content follows the fingers, so moving them up (or left) goes on; a focus ring follows them itself
+        let moved = if strip.vertical { delta[1] } else { delta[0] };
+        let along =
+            if strip.reversed { moved } else { -moved } / f64::from(settings.distance.max(1.0));
         *position += along;
         let now = Instant::now();
         self.moves.push_back((now, along));
@@ -208,10 +219,7 @@ impl Swipe {
                 .max(Duration::from_millis(10));
             let velocity =
                 self.moves.iter().map(|&(_, along)| along).sum::<f64>() / span.as_secs_f64();
-            (shown + velocity * PROJECTION.as_secs_f64())
-                .round()
-                .clamp(0.0, strip.last())
-                .to_px() as usize
+            settle_target(shown, velocity, strip.last())
         };
         Some(Settle {
             strip,
@@ -221,6 +229,78 @@ impl Swipe {
             duration: Duration::from_millis(u64::from(settings.snap_ms)),
         })
     }
+}
+
+/// `from` moved `progress` of the way out (up, or left), and `to` right after it, cut to `size` (#141)
+pub fn slide(
+    size: DisplayContainerSize,
+    vertical: bool,
+    progress: f32,
+    from: UITree,
+    to: Option<UITree>,
+) -> UITree {
+    let [width, height] = [size.width as f32, size.height as f32];
+    let at = |offset: f32, window| {
+        let corner = if vertical {
+            [0.0, offset * height]
+        } else {
+            [offset * width, 0.0]
+        };
+        UITree::new_container_styled(Style::absolute(corner, [width, height]), vec![window])
+    };
+    let mut windows = vec![at(-progress, from)];
+    windows.extend(to.map(|to| at(1.0 - progress, to)));
+    // a box, so nothing is drawn outside it
+    UITree::new_container_styled(Style::absolute([0.0, 0.0], [width, height]), windows)
+}
+
+/// A focus ring `progress` of the way from `from` to `to` (`[x, y, width, height]`), stretching like a drop of liquid:
+/// its leading edges get there early and its trailing edges late, so it is longest halfway (#141)
+pub fn ring(
+    from: [f32; 4],
+    to: [f32; 4],
+    progress: f32,
+    color: Color,
+    border: f32,
+    radius: f32,
+) -> UITree {
+    let progress = progress.clamp(0.0, 1.0);
+    let lead = 1.0 - (1.0 - progress).powi(2);
+    let trail = progress.powi(2);
+    // each axis's start (left / top) and end (right / bottom) edge
+    let edges = |axis: usize| {
+        let [start, end] = [from[axis], from[axis] + from[axis + 2]];
+        let [to_start, to_end] = [to[axis], to[axis] + to[axis + 2]];
+        let forward = to_start + to_end > start + end;
+        let (start_t, end_t) = if forward {
+            (trail, lead)
+        } else {
+            (lead, trail)
+        };
+        let start = start + (to_start - start) * start_t;
+        [start, (end + (to_end - end) * end_t).max(start)]
+    };
+    let [[left, right], [top, bottom]] = [edges(0), edges(1)];
+    UITree::leaf_styled(
+        UIElement::Bordered { color, radius },
+        Style {
+            border: Length::uniform_rect(Length::Px(border)),
+            ..Style::absolute([left, top], [right - left, bottom - top])
+        },
+    )
+}
+
+/// The row a swipe at `shown` moving at `velocity` (rows / s) settles on: one of the two shown, the one the speed
+/// carries it nearer to, so a fast lift doesn't skip rows
+fn settle_target(shown: f64, velocity: f64, last: f64) -> usize {
+    let lower = shown.floor().clamp(0.0, last);
+    let projected = shown + velocity * PROJECTION.as_secs_f64();
+    let target = if projected - lower >= 0.5 {
+        lower + 1.0
+    } else {
+        lower
+    };
+    target.min(last).to_px() as usize
 }
 
 /// Easing onto a row after the fingers lifted
@@ -340,6 +420,19 @@ mod tests {
                 vec![Child(0), Child(1), Child(0)],
             ]
         );
+    }
+
+    #[test]
+    fn settles_on_a_shown_row() {
+        // a fast lift still only goes to the next row
+        assert_eq!(super::settle_target(2.2, 20.0, 5.0), 3);
+        assert_eq!(super::settle_target(2.8, -20.0, 5.0), 2);
+        // slow: the nearer one
+        assert_eq!(super::settle_target(2.4, 0.0, 5.0), 2);
+        assert_eq!(super::settle_target(2.6, 0.0, 5.0), 3);
+        // past the ends
+        assert_eq!(super::settle_target(5.1, 3.0, 5.0), 5);
+        assert_eq!(super::settle_target(-0.1, -3.0, 5.0), 0);
     }
 
     #[test]

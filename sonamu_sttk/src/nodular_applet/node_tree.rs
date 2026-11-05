@@ -1,6 +1,6 @@
 use crate::{
     creatable_applet::CreatableNodularApplet,
-    nodular_applet::{NodeRequest, NodularAppletInitializer},
+    nodular_applet::{NodeRequest, NodularAppletInitializer, swipe},
     session,
     standard_keybinds::standard_keybind_request,
     wl_surface_applet::WlSurfaceApplet,
@@ -1815,21 +1815,70 @@ impl NodeTree {
             return view(focused, &self.panes);
         };
         let [from_panes, to_panes] = &swipe.panes;
-        // ends that show the same panes (eg both in a split) don't move
+        // ends that show the same panes (eg both in a split) don't move, the focus ring does
         let nodes = |panes: &[Pane]| panes.iter().map(|pane| pane.node).collect::<Vec<_>>();
         if let Some(to) = swipe.to
             && (at_root.is_none() || (swipe.from != self.root && to != self.root))
             && nodes(from_panes) == nodes(to_panes)
         {
-            return view(focused, &self.panes);
+            return self.ring_window(from_panes, swipe.from, to, swipe.progress);
         }
-        slide(
+        swipe::slide(
             size,
             swipe.vertical,
             swipe.progress,
             view(swipe.from, from_panes),
             swipe.to.map(|to| view(to, to_panes)),
         )
+    }
+
+    /// `panes` without focus, and a focus ring partway from `from`'s pane to `to`'s
+    fn ring_window(&self, panes: &[Pane], from: NodeId, to: NodeId, progress: f32) -> UITree {
+        let rect = |id: NodeId| {
+            let shown = self.displayed_node_toward(id, id);
+            panes
+                .iter()
+                .find(|pane| pane.node == shown)
+                .map(|pane| (pane.rect.map(|value| value as f32), pane))
+        };
+        let window = self.window(panes, None, self.active_screen);
+        let (Some((from_rect, pane)), Some((to_rect, _))) = (rect(from), rect(to)) else {
+            return window;
+        };
+        let settings = settings::get();
+        let color = match self.nodes[self.focused_node()].focus {
+            FocusIndex::Inner => settings.border.focused,
+            _ => settings.palette.accent,
+        };
+        let radius = if pane.framed { settings.radius } else { 0.0 };
+        // at least the usual width, so an unframed pane's focus still shows
+        let border = (pane.border as f32).max(settings.border.width).max(2.0);
+        UITree::new_container(vec![
+            window,
+            swipe::ring(from_rect, to_rect, progress, color, border, radius),
+        ])
+    }
+
+    /// Paths whose children are all shown at once (`Treeview::shown_at_once`): its splits, and its applets' own
+    pub fn shown_at_once(&self) -> Vec<WorldTreePath> {
+        let mut paths = Vec::new();
+        for (id, node) in &self.nodes {
+            let Some(path) = self.path_of(id) else {
+                continue;
+            };
+            if matches!(node.layout, Layout::Split(_)) {
+                paths.push(WorldTreePath::from_tree_path(&path));
+            }
+            if let Some(main) = &node.main {
+                paths.extend(
+                    main.get_treeview()
+                        .shown_at_once
+                        .iter()
+                        .map(|inner| WorldTreePath::join(&path, inner)),
+                );
+            }
+        }
+        paths
     }
 
     /// Like `get_window`, for the screen (an inactive one shows no focus)
@@ -2191,29 +2240,6 @@ fn has_inner_elements(treeview: &WorldTree<String>) -> bool {
 //         }
 //     };
 // }
-
-/// `from` moved `progress` of the way out (up, or left), and `to` right after it, cut to `size` (#141)
-fn slide(
-    size: DisplayContainerSize,
-    vertical: bool,
-    progress: f32,
-    from: UITree,
-    to: Option<UITree>,
-) -> UITree {
-    let [width, height] = [size.width as f32, size.height as f32];
-    let at = |offset: f32, window| {
-        let corner = if vertical {
-            [0.0, offset * height]
-        } else {
-            [offset * width, 0.0]
-        };
-        UITree::new_container_styled(Style::absolute(corner, [width, height]), vec![window])
-    };
-    let mut windows = vec![at(-progress, from)];
-    windows.extend(to.map(|to| at(1.0 - progress, to)));
-    // a box, so nothing is drawn outside it
-    UITree::new_container_styled(Style::absolute([0.0, 0.0], [width, height]), windows)
-}
 
 /// What the client shows on `screen`: its window for it, if it has one per screen (`Treeview::screen_windows`)
 fn screen_surface(main: &ClientHandle, screen: usize) -> UITree {

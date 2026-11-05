@@ -959,6 +959,13 @@ impl StandardApplet for ProjectApplet {
             .collect()
     }
 
+    fn shown_at_once(&self) -> Vec<WorldTreePath> {
+        if self.dissolved {
+            return Vec::new();
+        }
+        self.holder.tree.shown_at_once()
+    }
+
     /// Its tree, whose root (a container) is labeled with the project's name
     fn get_treeview(&self) -> WorldTree<String> {
         if self.dissolved {

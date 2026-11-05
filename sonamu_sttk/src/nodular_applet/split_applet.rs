@@ -179,9 +179,16 @@ impl StandardApplet for SplitApplet {
             StandardEvent::Capturing(_) | StandardEvent::Screens(_) => {}
             // shown the same on every screen
             StandardEvent::ScreenViews { .. } => {}
-            // its panes are all shown, so they don't slide (#141)
-            StandardEvent::Swipe(_) => {}
+            // its panes are all shown, so the focus ring moves between them (#141)
+            StandardEvent::Swipe(view) => self.holder.tree.set_swipe(view),
         }
+    }
+
+    fn shown_at_once(&self) -> Vec<WorldTreePath> {
+        if self.dissolved {
+            return Vec::new();
+        }
+        self.holder.tree.shown_at_once()
     }
 
     fn get_window_standard_applet(&self, _container_size: DisplayContainerSize) -> UITree {

@@ -62,15 +62,20 @@ Applets have no traversal of their own.
     remembered child (`RootNodeApplet::remembered`, the child row focus was last under, by path, unsaved; else the
     first); fingers left bring in the child.
   - The view is a position in rows (`swipe.distance` px each), rubber-banded past the ends (`swipe.rubber_band`). On
-    lift it projects the speed 200 ms ahead, rounds to a row, focuses it, then eases there (`Settle`, `swipe.snap_ms`,
-    ticked by a calloop timer). A new swipe during that carries on from where it was.
+    lift it settles on one of the two rows shown, the one the speed projected 200 ms ahead is nearer (`settle_target`;
+    it never skips rows), focuses it, then eases there (`Settle`, `swipe.snap_ms`, ticked by a calloop timer). A new
+    swipe during that carries on from where it was.
+  - Rows whose children are all shown at once (`Treeview::shown_at_once`: a split's panes; `NodeTree::shown_at_once`
+    gathers its `Layout::Split` nodes and its mains' lists) are swiped `reversed`: the focus ring follows the fingers.
   - Drawing: the root sends its tree `StandardEvent::Swipe(SwipeView { from, to, progress })` (the two rows the view is
     between). `NodeTree::set_swipe` draws it if both are its nodes, else passes it into the node whose inner world has
     both (a node and its inner root are one, so project ↔ its inner child is the project's), else drops it (ends in
     different worlds: inner ↔ own sibling, no animation). The holder lays out each end as if focused
-    (`layout_swipe`, which also sizes and so shows their applets) and slides the two windows in a clipped box (`slide`);
-    ends showing the same panes (eg in a split) don't move. A project draws its overview for its root
-    (`get_window_with`). Splits ignore it. Only the active screen's tree draws it.
+    (`layout_swipe`, which also sizes and so shows their applets) and slides the two windows in a clipped box
+    (`swipe::slide`); ends showing the same panes (eg a split's) stay, and a focus ring stretches between their panes
+    like a liquid drop instead (`swipe::ring`: leading edges ease out, trailing ones ease in). A project draws its
+    overview for its root (`get_window_with`). The file manager slides its documents (not its root). Only the active
+    screen's tree draws it.
 - In the selector (the deepest holder's `NodeTree::handle_event`, or an applet's own, eg the file manager's documents):
   Space (or clicking its `▾`/`▸`) collapses/expands all its children, inner and own (the holder owning the row keeps
   the flag, unsaved; `NodeTree::applet_treeview`/`get_treeview_of` leave them out); Enter confirms (into the applet,

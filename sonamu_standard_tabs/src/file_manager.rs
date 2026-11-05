@@ -8,7 +8,7 @@ use sonamu_common::{
         detached::DetachedTree,
         packets::{
             AwaitedWl, NewWlSurface, NodeAction, SpawnPosition, StandardEvent, StandardRequest,
-            WlSurfaceId,
+            SwipeView, WlSurfaceId,
         },
         session::{SavedApplet, SavedTree},
     },
@@ -24,7 +24,7 @@ use sonamu_sttk::{
     creatable_applet::CreatableNodularApplet,
     nodular_applet::{
         Answer, AppletContext, AppletSpawner, AppletSpawnerTrait, EmbeddedId, NodeRequest,
-        NodularAppletInitializer, StandardApplet, with_opacity,
+        NodularAppletInitializer, StandardApplet, swipe, with_opacity,
     },
     session,
     standard_keybinds::{handle_standard_keybinds, standard_keybind_request},
@@ -137,6 +137,9 @@ pub struct FileManagerApplet {
     exited_sender: mpsc::Sender<u32>,
     exited: mpsc::Receiver<u32>,
 
+    /// A swipe between two documents, drawn instead of the shown one (#141)
+    swipe: Option<SwipeView>,
+
     size: DisplayContainerSize,
     hook: AppletContext,
 }
@@ -157,6 +160,7 @@ impl CreatableNodularApplet<PathBuf> for FileManagerApplet {
             status: None,
             follows_directory: false,
             palette: Palette::default(),
+            swipe: None,
             preview: None,
             hovered: None,
             starting: Vec::new(),
@@ -495,6 +499,20 @@ impl FileManagerApplet {
 
     /// What the document area shows: the previewed file's document, else the active one;
     /// `Err` shows a note instead
+    /// The swipe and the documents it is between, if it is between documents (not eg the file manager itself)
+    fn swiped_documents(&self) -> Option<(&SwipeView, &Document, Option<&Document>)> {
+        let swipe = self.swipe.as_ref()?;
+        let document = |path: &WorldTreePath| match path.0.as_slice() {
+            &[Step::Child(index)] => self.documents.get(index),
+            _ => None,
+        };
+        let to = match &swipe.to {
+            Some(to) => Some(document(to)?),
+            None => None,
+        };
+        Some((swipe, document(&swipe.from)?, to))
+    }
+
     fn shown_document(&self) -> Result<&Document, &'static str> {
         let Some(file) = self.previewed() else {
             return self.active_document().ok_or("");
@@ -896,18 +914,29 @@ impl FileManagerApplet {
         );
 
         let size = self.document_size();
-        let body = match self.shown_document() {
-            Ok(document) => document.handle.get_surface(),
-            Err(note) => UITree::new_styled(
-                UIElement::Backgrounded(DOCUMENT_BG),
-                Style::full_size(),
-                vec![text(
-                    LEFT_PAD,
-                    note.to_string(),
-                    self.palette.inactive,
-                    size.width as f32,
-                )],
-            ),
+        let body = if let Some((swipe, from, to)) = self.swiped_documents() {
+            let surface = |document: &Document| document.handle.get_surface();
+            swipe::slide(
+                size,
+                swipe.vertical,
+                swipe.progress,
+                surface(from),
+                to.map(surface),
+            )
+        } else {
+            match self.shown_document() {
+                Ok(document) => document.handle.get_surface(),
+                Err(note) => UITree::new_styled(
+                    UIElement::Backgrounded(DOCUMENT_BG),
+                    Style::full_size(),
+                    vec![text(
+                        LEFT_PAD,
+                        note.to_string(),
+                        self.palette.inactive,
+                        size.width as f32,
+                    )],
+                ),
+            }
         };
         let body = UITree::new_styled(
             UIElement::Nothing,
@@ -936,6 +965,7 @@ impl StandardApplet for FileManagerApplet {
                 self.rebuild_entries();
                 self.hook.damage_treeview();
             }
+            StandardEvent::Swipe(view) => self.swipe = view,
             _ => return,
         }
         self.hook.damage_window();
