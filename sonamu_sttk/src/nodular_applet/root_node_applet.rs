@@ -15,6 +15,7 @@ use crate::{
     },
     session,
     standard_keybinds::standard_keybind_request,
+    ui::{self, Rows},
 };
 use calloop::{
     EventLoop, LoopHandle,
@@ -36,7 +37,7 @@ use sonamu_common::{
 };
 use sonamu_ui::{
     display_units::DisplayContainerSize,
-    ui_element::{Cursor, CursorIcon, Length, Style, UIElement, UITree, font_size},
+    ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, SwipePhase, UIEvent},
 };
 use std::{
@@ -1030,30 +1031,24 @@ impl RootNodeApplet {
             &tree.screen_focus_path(screen),
             tree.screen_focus_inside(screen),
         );
+        // the top row's close button's place
         let size = close_width();
-        let pin_button = UITree::leaf_styled(
-            UIElement::Text(vec![(
-                if pinned { "●" } else { "○" }.to_string(),
-                UIElement::glyphon_attr(with_opacity(settings.palette.fg)),
-            )]),
-            Style::absolute(
-                [
-                    inner_width - size + (size - font_size()) / 2.0,
-                    (size - font_size()) / 2.0,
-                ],
-                [size, size],
-            ),
-        )
-        .with_cursor(Some(Cursor::Named(CursorIcon::Pointer)));
-        UITree::new_styled(
-            UIElement::Bordered {
-                color: settings.border.treeview,
-                radius: if border > 0 { settings.radius } else { 0.0 },
-            },
-            Style {
-                border: Length::uniform_rect(Length::Px(border as f32)),
-                ..Style::absolute([x as f32, y as f32], [width as f32, height as f32])
-            },
+        let left = inner_width - size + (size - font_size()) / 2.0;
+        let pin_button = Rows::new(0.0)
+            .text(
+                ui::text(
+                    if pinned { "●" } else { "○" },
+                    with_opacity(settings.palette.fg),
+                ),
+                left,
+                left + size,
+            )
+            .with_pointer();
+        ui::frame(
+            settings.border.treeview,
+            if border > 0 { settings.radius } else { 0.0 },
+            border as f32,
+            Style::absolute([x as f32, y as f32], [width as f32, height as f32]),
             vec![treeview, pin_button],
         )
     }
@@ -1170,23 +1165,16 @@ fn notice(settings: &Settings, text: &str, size: DisplayContainerSize, middle: b
         size.height as f32 - height - 2.0 * settings.gap.max(pad)
     };
     let left = (size.width as f32 - width) / 2.0;
-    UITree::new_styled(
-        UIElement::Bordered {
-            color: settings.palette.accent,
-            radius: settings.radius,
-        },
-        Style {
-            border: Length::uniform_rect(Length::Px(settings.border.width)),
-            ..Style::absolute([left, top], [width, height])
-        },
+    ui::frame(
+        settings.palette.accent,
+        settings.radius,
+        settings.border.width,
+        Style::absolute([left, top], [width, height]),
         vec![UITree::new_styled(
             UIElement::Backgrounded(with_opacity(settings.palette.bg)),
             Style::full_size(),
             vec![UITree::leaf_styled(
-                UIElement::Text(vec![(
-                    text.to_string(),
-                    UIElement::glyphon_attr(settings.palette.fg),
-                )]),
+                ui::text(text, settings.palette.fg),
                 Style::absolute([pad, pad], [width - 2.0 * pad, line]),
             )],
         )],

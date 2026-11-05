@@ -3,6 +3,7 @@
 //! Rows are placed at a fixed height, so the root can hit-test them itself.
 
 use super::node_tree::INACTIVE_MARK;
+use crate::ui::{self, Rows, rect, row_height};
 use sonamu_common::{
     sap::packets::{NewApplet, NodeAction, SpawnPosition},
     settings::{self, Settings},
@@ -15,13 +16,10 @@ use std::time::{Duration, Instant};
 
 use sonamu_ui::{
     color::Color,
-    ui_element::{Cursor, CursorIcon, Length, Style, UIElement, UITree, font_size},
+    ui_element::{Length, Style, UIElement, UITree, font_size},
     ui_event::{MouseEvent, MouseEventKind},
 };
 
-fn row_height() -> f32 {
-    font_size() + 14.0
-}
 const TOP_PAD: f32 = 8.0;
 const LEFT_PAD: f32 = 16.0;
 const INDENT: f32 = 32.0;
@@ -153,13 +151,6 @@ pub(crate) fn focused_row(rows: &[TreeviewRow], focus_path: &WorldTreePath) -> W
         .map_or_else(|| focus_path.clone(), |row| row.path.clone())
 }
 
-fn rect(color: Color, position: [f32; 2], size: [f32; 2]) -> UITree {
-    UITree::leaf_styled(
-        UIElement::Backgrounded(color),
-        Style::absolute(position, size),
-    )
-}
-
 /// Mouse state over the treeview
 #[derive(Default)]
 pub struct TreeviewPointer {
@@ -236,51 +227,30 @@ impl Menu {
 
     fn item_at(&self, [x, y]: [f64; 2], size: [f32; 2]) -> Option<usize> {
         let [left, top, width, height] = self.rect(size).map(f64::from);
-        // non-negative, since `y >= top`
-        #[allow(clippy::cast_sign_loss)]
         ((left..left + width).contains(&x) && (top..top + height).contains(&y))
-            .then(|| ((y - top) / f64::from(row_height())) as usize)
+            .then(|| Rows::new(0.0).row_at(y - top))
+            .flatten()
     }
 
     fn render(&self, size: [f32; 2]) -> UITree {
         let [x, y, width, height] = self.rect(size);
         let text = with_opacity(settings::get().palette.fg);
+        let rows = Rows::new(0.0);
         let items = self
             .items
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                let background = if self.hovered == Some(index) {
-                    UIElement::Backgrounded(HOVER_BG)
-                } else {
-                    UIElement::Nothing
-                };
-                let text_top = (row_height() - font_size()) / 2.0;
-                UITree::new_styled(
-                    background,
-                    Style::absolute([0.0, index as f32 * row_height()], [width, row_height()]),
-                    vec![UITree::leaf_styled(
-                        UIElement::Text(vec![(item.label(), UIElement::glyphon_attr(text))]),
-                        Style::absolute(
-                            [MENU_PAD, text_top],
-                            [(width - MENU_PAD).max(0.0), row_height() - text_top],
-                        ),
-                    )],
-                )
-                .with_cursor(Some(Cursor::Named(CursorIcon::Pointer)))
+                let background = (self.hovered == Some(index)).then_some(HOVER_BG);
+                let label = rows.text(ui::text(item.label(), text), MENU_PAD, width);
+                rows.row(index, width, background, vec![label])
+                    .with_pointer()
             })
             .collect();
         UITree::new_styled(
             UIElement::Backgrounded(MENU_BG),
             Style::absolute([x, y], [width, height]),
-            vec![UITree::new_styled(
-                UIElement::border(GUIDE),
-                Style {
-                    border: Length::uniform_rect(Length::Px(1.0)),
-                    ..Style::full_size()
-                },
-                items,
-            )],
+            vec![ui::frame(GUIDE, 0.0, 1.0, Style::full_size(), items)],
         )
     }
 }
@@ -491,13 +461,13 @@ impl TreeviewPointer {
         [width, height]: [f32; 2],
     ) -> TreeviewResponse {
         let [x, y] = event.position;
-        // non-negative, since `y >= TOP_PAD`
-        #[allow(clippy::cast_sign_loss)]
-        let row = (in_treeview && y >= f64::from(TOP_PAD))
-            .then(|| self.scroll + ((y - f64::from(TOP_PAD)) / f64::from(row_height())) as usize)
+        let layout = self.rows();
+        let row = in_treeview
+            .then(|| layout.row_at(y))
+            .flatten()
             .filter(|&index| index < rows.len());
 
-        let within = ((y - f64::from(TOP_PAD)) / f64::from(row_height())).fract() as f32;
+        let within = layout.within(y);
         let zone = if row.is_none() || (EDGE_ZONE..=1.0 - EDGE_ZONE).contains(&within) {
             DropZone::Middle
         } else if within < EDGE_ZONE {
@@ -586,26 +556,20 @@ impl TreeviewPointer {
     }
 
     /// The `×` that closes a hovered row
-    fn close_button(&self, width: f32, text_top: f32, settings: &Settings) -> UITree {
+    fn close_button(&self, width: f32, settings: &Settings) -> UITree {
         let color = if self.hovered_close {
             settings.palette.fg
         } else {
             settings.palette.inactive
         };
-        UITree::leaf_styled(
-            UIElement::Text(vec![(
-                "×".to_string(),
-                UIElement::glyphon_attr(with_opacity(color)),
-            )]),
-            Style::absolute(
-                [
-                    width - close_width() + (close_width() - font_size()) / 2.0,
-                    text_top,
-                ],
-                [close_width(), row_height() - text_top],
-            ),
-        )
-        .with_cursor(Some(Cursor::Named(CursorIcon::Pointer)))
+        let left = width - close_width() + (close_width() - font_size()) / 2.0;
+        self.rows()
+            .text(
+                ui::text("×", with_opacity(color)),
+                left,
+                left + close_width(),
+            )
+            .with_pointer()
     }
 
     /// Where a drag over the row drops: a line between siblings, else a border around the row (into it)
@@ -670,7 +634,7 @@ impl TreeviewPointer {
         }
 
         let text_left = LEFT_PAD + row.depth as f32 * INDENT;
-        let text_top = (row_height() - font_size()) / 2.0;
+        let rows = self.rows();
         // like a browser tab's, only on the hovered row
         let shows_close = row.closable && is_hovered && dragging.is_none();
         let text_color = with_opacity(if is_dragged {
@@ -685,18 +649,13 @@ impl TreeviewPointer {
         } else {
             row.label.clone()
         };
-        parts.push(UITree::leaf_styled(
-            UIElement::Text(vec![(label, UIElement::glyphon_attr(text_color))]),
-            Style::absolute(
-                [text_left, text_top],
-                [
-                    (width - text_left - if shows_close { close_width() } else { 0.0 }).max(0.0),
-                    row_height() - text_top,
-                ],
-            ),
+        parts.push(rows.text(
+            ui::text(label, text_color),
+            text_left,
+            width - if shows_close { close_width() } else { 0.0 },
         ));
         if shows_close {
-            parts.push(self.close_button(width, text_top, settings));
+            parts.push(self.close_button(width, settings));
         }
         if has_triangle(row) {
             parts.push(
@@ -704,7 +663,7 @@ impl TreeviewPointer {
                     UIElement::Nothing,
                     Style::absolute([text_left, 0.0], [triangle_width(), row_height()]),
                 )
-                .with_cursor(Some(Cursor::Named(CursorIcon::Pointer))),
+                .with_pointer(),
             );
         }
 
@@ -713,23 +672,18 @@ impl TreeviewPointer {
         }
 
         let background = if is_focused {
-            UIElement::Backgrounded(FOCUS_BG)
+            Some(FOCUS_BG)
         } else if is_hovered && dragging.is_none() {
-            UIElement::Backgrounded(HOVER_BG)
+            Some(HOVER_BG)
         } else {
-            UIElement::Nothing
+            None
         };
-        UITree::new_styled(
-            background,
-            Style::absolute(
-                [
-                    0.0,
-                    TOP_PAD + (index as f32 - self.scroll as f32) * row_height(),
-                ],
-                [width, row_height()],
-            ),
-            parts,
-        )
+        rows.row(index, width, background, parts)
+    }
+
+    /// Where the rows are, for the current scroll
+    fn rows(&self) -> Rows {
+        Rows::new(TOP_PAD).scrolled(self.scroll)
     }
 
     /// Scrolls to the focused row if focus moved there since the last render
@@ -744,8 +698,7 @@ impl TreeviewPointer {
 
         if self.followed.as_ref() != Some(&focused_row) {
             if let Some(index) = rows.iter().position(|row| row.path == focused_row) {
-                let shown = shown_rows(height);
-                self.scroll = self.scroll.clamp((index + 1).saturating_sub(shown), index);
+                self.scroll = ui::scroll_to(self.scroll, index, shown_rows(height));
             }
             self.followed = Some(focused_row.clone());
         }
@@ -785,14 +738,13 @@ fn has_triangle(row: &TreeviewRow) -> bool {
 }
 
 /// How many rows fit
-#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 fn shown_rows(height: f32) -> usize {
-    (((height - TOP_PAD) / row_height()).floor() as usize).max(1)
+    Rows::new(TOP_PAD).fitting(height)
 }
 
 /// The furthest the rows can scroll: until the last one is at the bottom
 fn max_scroll(row_count: usize, height: f32) -> usize {
-    row_count.saturating_sub(shown_rows(height))
+    ui::max_scroll(row_count, shown_rows(height))
 }
 
 fn distance([x1, y1]: [f64; 2], [x2, y2]: [f64; 2]) -> f64 {
