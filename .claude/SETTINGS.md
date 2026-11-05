@@ -13,7 +13,7 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 ## Format
 
 - `Settings` derives `serde` + `schemars::JsonSchema`; the schema is written out so `"$schema"` gives editor autocomplete.
-- Every field is `#[serde(default)]`; partial files are fine.
+- Defaults are in `assets/default_settings.json` (`include_str!`, the only place they're defined); a file or program's JSON is deep-merged over them (objects merge, everything else replaces), so partial files are fine. A field missing from the defaults file panics in `Settings::default()` (the tests catch it).
 - Optional top-level `"watch": [paths]`: extra files to watch (eg the file colors are generated from). Not part of the stored settings.
 
 ## Reload
@@ -32,7 +32,7 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 - Broadcast: on an actual change (`!=`), each `subscribe`d calloop sender is pinged; dead ones are dropped. `AppletClient` and the root applet subscribe. `AppletClient` calls `StandardApplet::settings_changed` (default: nothing) once before the first draw and on each change, then damages the surface. Always delivered, no subscribing per applet.
 - `StandardRequest::GetSettings` is answered with `StandardEvent::SettingsChanged(Settings)` by the holder (`NodeHolder`, the runner for the root, the file manager for its documents); `AppletClient` turns that event into `settings_changed` too. Nothing sends it yet, since every applet gets the settings anyway.
 - `Color` parses/deserializes `#rrggbb`/`#rrggbbaa`.
-- Defaults reproduce the old hardcoded look (focus-inside border green, traversal yellow, unfocused #3b4049, black bg, 46 px font).
+- Defaults: the old hardcoded colors (focus-inside border green, traversal yellow, unfocused #3b4049, black bg), with border 2, gap 8, radius 12, 24 px font (also `char_grid::FONT_SIZE`'s initial value, used when there is no config dir).
 - Known gap: if the program leaves a background child holding stdout open, reading blocks after it exits (timeout only covers the program itself).
 
 ## What each setting drives

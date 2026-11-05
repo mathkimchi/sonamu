@@ -93,7 +93,7 @@ impl Default for InternalCharCell {
 }
 
 /// Font height in px, as `f32` bits; set from the settings
-static FONT_SIZE: AtomicU32 = AtomicU32::new(46.0_f32.to_bits());
+static FONT_SIZE: AtomicU32 = AtomicU32::new(24.0_f32.to_bits());
 
 /// Font height in px
 pub fn font_size() -> f32 {

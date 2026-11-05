@@ -19,9 +19,10 @@ use std::{
 };
 
 const PROGRAM_TIMEOUT: Duration = Duration::from_secs(5);
+/// Every setting; a settings file or program only gives the ones it changes
+const DEFAULTS: &str = include_str!("../../assets/default_settings.json");
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default)]
 pub struct Settings {
     pub palette: Palette,
     pub border: Border,
@@ -45,30 +46,16 @@ pub struct Settings {
     /// Program started by Super+N; `None`: `$BROWSER`, else the first installed of a list
     pub browser: Option<String>,
 }
+impl Default for Settings {
+    fn default() -> Self {
+        serde_json::from_str(DEFAULTS).expect("valid default settings")
+    }
+}
 impl Settings {
     /// `gap` and `border.width`, rounded to whole px
     #[must_use]
     pub fn gap_and_border_px(&self) -> (u32, u32) {
         (self.gap.round().to_px(), self.border.width.round().to_px())
-    }
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            palette: Palette::default(),
-            border: Border::default(),
-            gap: 0.0,
-            radius: 0.0,
-            always_frame: true,
-            font_size: 46.0,
-            treeview: TreeviewSettings::default(),
-            keybinds: Vec::new(),
-            restore_programs: Vec::new(),
-            startup: Vec::new(),
-            terminal: None,
-            browser: None,
-        }
     }
 }
 
@@ -142,7 +129,6 @@ impl RestoreProgram {
 
 /// Whether the treeview is pinned is part of the session, toggled by its pin button
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default)]
 pub struct TreeviewSettings {
     /// The side a pinned one is on
     pub side: TreeviewSide,
@@ -154,39 +140,25 @@ pub struct TreeviewSettings {
     pub floating_size: [u32; 2],
 }
 
-impl Default for TreeviewSettings {
-    fn default() -> Self {
-        Self {
-            side: TreeviewSide::default(),
-            width: 20,
-            floating: TreeviewFloating::default(),
-            floating_size: [40, 70],
-        }
-    }
-}
-
 /// A column beside the panes, which get the rest of the width
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TreeviewSide {
-    #[default]
     Left,
     Right,
 }
 
 /// Where an unpinned treeview floats over the panes, which keep their size
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TreeviewFloating {
     /// Over the middle
-    #[default]
     Center,
     /// At `side`
     Side,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default)]
 pub struct Palette {
     /// Unused for now: behind the panes is the background layer (eg a wallpaper)
     pub bg: Color,
@@ -199,17 +171,11 @@ pub struct Palette {
 }
 impl Default for Palette {
     fn default() -> Self {
-        Self {
-            bg: Color::BLACK,
-            fg: Color::LIGHT_GRAY,
-            accent: Color::LIGHT_YELLOW,
-            inactive: Color([0x70, 0x75, 0x80, 0xFF]),
-        }
+        Settings::default().palette
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default)]
 pub struct Border {
     /// Of panes, in px
     pub width: f32,
@@ -219,17 +185,6 @@ pub struct Border {
     /// Of the treeview, when framed (`always_frame`)
     pub treeview: Color,
 }
-impl Default for Border {
-    fn default() -> Self {
-        Self {
-            width: 1.0,
-            focused: Color::LIGHT_GREEN,
-            unfocused: Color([0x3B, 0x40, 0x49, 0xFF]),
-            treeview: Color([0x3B, 0x40, 0x49, 0xFF]),
-        }
-    }
-}
-
 /// What the settings file or program gives.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct Loaded {
@@ -294,7 +249,32 @@ pub fn load(dir: &Path) -> Result<Loaded, LoadError> {
             Err(err) => return Err(err.into()),
         }
     };
-    Ok(serde_json::from_str(&text)?)
+    parse(&text)
+}
+
+/// `text`'s settings over the defaults
+fn parse(text: &str) -> Result<Loaded, LoadError> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(DEFAULTS).expect("valid default settings");
+    merge(&mut value, serde_json::from_str(text)?);
+    Ok(serde_json::from_value(value)?)
+}
+
+/// Puts `over` into `base`, keeping what `base` has in objects `over` leaves out
+fn merge(base: &mut serde_json::Value, over: serde_json::Value) {
+    match (base, over) {
+        (serde_json::Value::Object(base), serde_json::Value::Object(over)) => {
+            for (key, value) in over {
+                match base.get_mut(&key) {
+                    Some(base) => merge(base, value),
+                    None => {
+                        base.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base, over) => *base = over,
+    }
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -533,14 +513,12 @@ mod tests {
 
     #[test]
     fn partial_json_uses_defaults() {
-        let loaded: Loaded =
-            serde_json::from_str(r##"{"border": {"focused": "#a0cafd"}, "watch": ["/a"]}"##)
-                .unwrap();
+        let loaded = parse(r##"{"border": {"focused": "#a0cafd"}, "watch": ["/a"]}"##).unwrap();
         assert_eq!(
             loaded.settings.border,
             Border {
                 focused: Color([0xa0, 0xca, 0xfd, 0xff]),
-                ..Border::default()
+                ..Settings::default().border
             }
         );
         assert_eq!(loaded.settings.palette, Palette::default());

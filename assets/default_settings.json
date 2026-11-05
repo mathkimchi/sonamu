@@ -1,0 +1,29 @@
+{
+  "palette": {
+    "bg": "#000000",
+    "fg": "#dfdfdf",
+    "accent": "#ffff00",
+    "inactive": "#707580"
+  },
+  "border": {
+    "width": 2.0,
+    "focused": "#00ff00",
+    "unfocused": "#3b4049",
+    "treeview": "#3b4049"
+  },
+  "gap": 8.0,
+  "radius": 12.0,
+  "always_frame": true,
+  "font_size": 24.0,
+  "treeview": {
+    "side": "left",
+    "width": 20,
+    "floating": "center",
+    "floating_size": [40, 70]
+  },
+  "keybinds": [],
+  "restore_programs": [],
+  "startup": [],
+  "terminal": null,
+  "browser": null
+}
