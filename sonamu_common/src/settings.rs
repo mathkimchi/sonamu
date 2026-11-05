@@ -170,8 +170,10 @@ pub struct TreeviewSettings {
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[schemars(transform = optional_fields)]
 pub struct SwipeSettings {
-    /// How far the fingers move to go one node, in px
-    pub distance: f32,
+    /// How far the fingers move left / right to go one node, in px
+    pub distance_x: f32,
+    /// How far the fingers move up / down to go one node, in px
+    pub distance_y: f32,
     /// How far past the first / last node it stretches at most, in nodes
     pub rubber_band: f32,
     /// How long it takes to settle on a node after the fingers lift, in ms

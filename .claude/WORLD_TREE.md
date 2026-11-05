@@ -61,7 +61,7 @@ Applets have no traversal of their own.
     children); fingers up bring in the next. Horizontal: ancestors up to the first row, then down through each row's
     remembered child (`RootNodeApplet::remembered`, the child row focus was last under, by path, unsaved; else the
     first); fingers left bring in the child.
-  - The view is a position in rows (`swipe.distance` px each), rubber-banded past the ends (`swipe.rubber_band`). On
+  - The view is a position in rows (`swipe.distance_x` / `distance_y` px each), rubber-banded past the ends (`swipe.rubber_band`). On
     lift it settles on one of the two rows shown, the one the speed projected 200 ms ahead is nearer (`settle_target`;
     it never skips rows), focuses it, then eases there (`Settle`, `swipe.snap_ms`, ticked by a calloop timer). A new
     swipe during that carries on from where it was.

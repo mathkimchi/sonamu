@@ -23,7 +23,8 @@
     "floating_size": [40, 70]
   },
   "swipe": {
-    "distance": 300.0,
+    "distance_x": 600.0,
+    "distance_y": 600.0,
     "rubber_band": 0.15,
     "snap_ms": 250
   },

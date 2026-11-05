@@ -202,8 +202,13 @@
       "description": "3 finger touchpad swipes between nodes (#141): up / down between siblings, left / right between parent and child",
       "type": "object",
       "properties": {
-        "distance": {
-          "description": "How far the fingers move to go one node, in px",
+        "distance_x": {
+          "description": "How far the fingers move left / right to go one node, in px",
+          "type": "number",
+          "format": "float"
+        },
+        "distance_y": {
+          "description": "How far the fingers move up / down to go one node, in px",
           "type": "number",
           "format": "float"
         },

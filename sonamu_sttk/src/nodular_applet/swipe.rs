@@ -190,9 +190,12 @@ impl Swipe {
         };
         let (strip, position) = self.lane.as_mut()?;
         // the content follows the fingers, so moving them up (or left) goes on; a focus ring follows them itself
-        let moved = if strip.vertical { delta[1] } else { delta[0] };
-        let along =
-            if strip.reversed { moved } else { -moved } / f64::from(settings.distance.max(1.0));
+        let (moved, distance) = if strip.vertical {
+            (delta[1], settings.distance_y)
+        } else {
+            (delta[0], settings.distance_x)
+        };
+        let along = if strip.reversed { moved } else { -moved } / f64::from(distance.max(1.0));
         *position += along;
         let now = Instant::now();
         self.moves.push_back((now, along));

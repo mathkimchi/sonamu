@@ -58,7 +58,8 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 - `keybinds` (#114): `[{"mods": ["logo"], "key": "t", "command": "foot"}]`; `key` is a char (case-insensitive) or an evdev code. Checked in `AppletRunner::handle_ui_event` after layer surfaces and Alt+P; mods must match exactly; runs `sh -c`. Only in the settings the compositor actually loads (with an executable `settings`, `settings.json` is ignored), and one bad entry fails the whole parse (previous settings kept, error logged). The example config binds volume and mute (wpctl), brightness (brightnessctl) and Print (`dms screenshot`, grim in a comment).
 - `restore_programs`: `["hx", {"program": "claude", "args": ["--continue"]}]`, programs restored running in their terminal; others are asked about (see SESSIONS.md).
 - `terminal` / `browser`: programs started by Super+T / Super+N (and the treeview's and a project's new terminal/browser). Unset: `$TERMINAL` / `$BROWSER` if installed, else the first installed of `TERMINALS` / `BROWSERS` in `standard_keybinds.rs` (foot, alacritty, kitty, ...; firefox, librewolf, chromium, ...), else foot / firefox. Resolved on each use, no args. The example config sets foot and firefox.
-- `swipe` (#141): `distance` (px of finger movement per node, default 300), `rubber_band` (most it stretches past the
+- `swipe` (#141): `distance_x` / `distance_y` (px of finger movement per node, left/right and
+  up/down, default 600), `rubber_band` (most it stretches past the
   first / last node, in nodes, default 0.15), `snap_ms` (settling after the fingers lift, default 250). Read on each
   swipe event (`settings::get()` in the root). See WORLD_TREE.md (Traversal keys).
 - `pdf_viewer`: what the file manager opens PDFs in (its window becomes the document). Unset: the first installed of
