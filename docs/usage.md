@@ -23,8 +23,8 @@ Sonamu can be run directly from TTY or embedded inside another Wayland composito
 Basic Usage Manual:
 - Global Shortcuts:
   - `Super + Shift + /` (ie `Super + ?`): bring up this basic usage manual
-  - `Super + T`: spawn `foot` terminal
-  - `Super + N`: spawn `firefox` browser
+  - `Super + T`: spawn terminal
+  - `Super + N`: spawn browser
   - `Super + P`: wrap current tab in a project
   - `Super + W`: close current tab
   - `Super + Shift + \` (ie `Super + |`): split to right
