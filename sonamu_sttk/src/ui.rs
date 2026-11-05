@@ -4,6 +4,7 @@
 
 use sonamu_ui::{
     color::Color,
+    display_units::DisplayContainerSize,
     ui_element::{Length, Style, UIElement, UITree, font_size},
 };
 
@@ -30,6 +31,17 @@ pub fn spans(spans: impl IntoIterator<Item = (String, Color)>) -> UIElement {
             .into_iter()
             .map(|(text, color)| (text, UIElement::glyphon_attr(color)))
             .collect(),
+    )
+}
+
+/// `element` over a container of `size`, `pad` in from each side (eg a message filling an applet)
+pub fn inset(element: UIElement, size: DisplayContainerSize, pad: f32) -> UITree {
+    UITree::leaf_styled(
+        element,
+        Style::absolute(
+            [pad, pad],
+            [size.width, size.height].map(|length| (length as f32 - 2.0 * pad).max(0.0)),
+        ),
     )
 }
 

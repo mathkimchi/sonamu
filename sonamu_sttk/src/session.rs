@@ -4,6 +4,7 @@ use crate::{
     command_hub::program_command,
     nodular_applet::{AppletContext, NodeRequest, NodularAppletInitializer, StandardApplet},
     standard_keybinds::standard_keybind_request,
+    ui,
 };
 use sonamu_common::{
     sap::{
@@ -16,7 +17,7 @@ use sonamu_common::{
 use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
-    ui_element::{Style, UIElement, UITree},
+    ui_element::UITree,
     ui_event::{KeySymbol, UIEvent},
 };
 use std::{
@@ -416,7 +417,6 @@ impl StandardApplet for RestorePrompt {
     }
 
     fn get_window_standard_applet(&self, container_size: DisplayContainerSize) -> UITree {
-        let margin = 16.0;
         let cwd = self
             .wl
             .running
@@ -429,16 +429,7 @@ impl StandardApplet for RestorePrompt {
             wl_label(&self.wl),
             self.command()
         );
-        UITree::leaf_styled(
-            UIElement::Text(vec![(text, UIElement::glyphon_attr(Color::LIGHT_GRAY))]),
-            Style::absolute(
-                [margin, margin],
-                [
-                    (container_size.width as f32 - 2.0 * margin).max(0.0),
-                    (container_size.height as f32 - 2.0 * margin).max(0.0),
-                ],
-            ),
-        )
+        ui::inset(ui::text(text, Color::LIGHT_GRAY), container_size, ui::PAD)
     }
 
     fn get_treeview(&self) -> WorldTree<String> {
@@ -472,19 +463,10 @@ impl StandardApplet for RestoringApplet {
     }
 
     fn get_window_standard_applet(&self, container_size: DisplayContainerSize) -> UITree {
-        let margin = 16.0;
-        UITree::leaf_styled(
-            UIElement::Text(vec![(
-                self.label.clone(),
-                UIElement::glyphon_attr(Color::LIGHT_GRAY),
-            )]),
-            Style::absolute(
-                [margin, margin],
-                [
-                    (container_size.width as f32 - 2.0 * margin).max(0.0),
-                    (container_size.height as f32 - 2.0 * margin).max(0.0),
-                ],
-            ),
+        ui::inset(
+            ui::text(self.label.clone(), Color::LIGHT_GRAY),
+            container_size,
+            ui::PAD,
         )
     }
 
