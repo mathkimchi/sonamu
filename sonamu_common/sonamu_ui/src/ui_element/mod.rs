@@ -541,6 +541,12 @@ impl UITree {
         self
     }
 
+    /// The pointing hand over it, for something clickable
+    #[must_use]
+    pub fn with_pointer(self) -> Self {
+        self.with_cursor(Some(Cursor::Named(CursorIcon::Pointer)))
+    }
+
     #[must_use]
     pub fn leaf(node: UIElement) -> Self {
         Self::new(node, Vec::new())
