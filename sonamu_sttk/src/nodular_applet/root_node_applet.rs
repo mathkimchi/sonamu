@@ -93,8 +93,6 @@ pub struct RootNodeApplet {
     remembered: HashMap<WorldTreePath, WorldTreePath>,
     /// When Ctrl+Shift+Q was pressed, while it asks to press it again (#139)
     quit_asked: Option<Instant>,
-    /// Shown at the bottom of the active screen for `NOTICE_TIME` from when it came (#143), eg a settings error
-    notice: Option<(String, Instant)>,
     loop_handle: LoopHandle<'static, Self>,
 }
 
@@ -126,10 +124,6 @@ impl RootNodeApplet {
     /// How long Ctrl+Shift+Q waits to be pressed again
     const QUIT_CONFIRM: Duration = Duration::from_secs(3);
     const QUIT_NOTICE: &str = "Press Ctrl+Shift+Q again to quit";
-    /// How long a notice shows
-    const NOTICE_TIME: Duration = Duration::from_secs(6);
-    /// Longer notices are cut (the log has them whole)
-    const NOTICE_CHARS: usize = 100;
 
     /// Where the treeview is drawn (`[x, y, width, height]`, frame included), and how;
     /// `None` while hidden
@@ -185,7 +179,6 @@ impl RootNodeApplet {
         let shown = self.treeview_shown;
         let pinned = self.treeview_pinned;
         let quit_asked = self.quit_asked.is_some();
-        let notice_text = self.notice.as_ref().map(|(text, _)| text.as_str());
         let Self {
             holder,
             treeview_pointer,
@@ -223,12 +216,7 @@ impl RootNodeApplet {
                         ));
                     }
                     if quit_asked && index == active {
-                        window.push(notice(&settings, Self::QUIT_NOTICE, size, true));
-                    }
-                    if let Some(text) = notice_text
-                        && index == active
-                    {
-                        window.push(notice(&settings, text, size, false));
+                        window.push(notice(&settings, Self::QUIT_NOTICE, size));
                     }
                     UITree::new_container_styled(
                         Style::absolute([x as f32, y as f32], [size.width as f32, height as f32]),
@@ -357,35 +345,6 @@ impl RootNodeApplet {
             .unwrap();
     }
 
-    /// Shows `text` for a while (#143)
-    fn notify(&mut self, text: &str) {
-        let text = if text.chars().count() > Self::NOTICE_CHARS {
-            let cut: String = text.chars().take(Self::NOTICE_CHARS - 1).collect();
-            format!("{cut}…")
-        } else {
-            text.to_string()
-        };
-        self.notice = Some((text, Instant::now()));
-        self.surface.damage();
-        self.loop_handle
-            .insert_source(
-                Timer::from_duration(Self::NOTICE_TIME),
-                |_, &mut (), root: &mut Self| {
-                    // not replaced by a newer one meanwhile
-                    if root
-                        .notice
-                        .as_ref()
-                        .is_some_and(|(_, since)| since.elapsed() >= Self::NOTICE_TIME)
-                    {
-                        root.notice = None;
-                        root.surface.damage();
-                    }
-                    TimeoutAction::Drop
-                },
-            )
-            .unwrap();
-    }
-
     /// Saves first, since the runner may end the process right after
     fn quit(&mut self) {
         self.save_session();
@@ -461,7 +420,6 @@ impl RootNodeApplet {
             select_swipe: None,
             remembered: HashMap::new(),
             quit_asked: None,
-            notice: None,
             loop_handle: event_loop.clone(),
         };
         // a clean session starts with the help shown
@@ -525,16 +483,6 @@ impl RootNodeApplet {
                     .insert_source(settings_rx, |event, &mut (), root: &mut RootNodeApplet| {
                         if let calloop::channel::Event::Msg(()) = event {
                             root.surface.damage();
-                        }
-                    })
-                    .unwrap();
-                let (errors_tx, errors_rx) = calloop::channel::channel();
-                settings::subscribe_errors(errors_tx);
-                event_loop
-                    .handle()
-                    .insert_source(errors_rx, |event, &mut (), root: &mut RootNodeApplet| {
-                        if let calloop::channel::Event::Msg(err) = event {
-                            root.notify(&format!("Settings not loaded: {err}"));
                         }
                     })
                     .unwrap();
@@ -1151,19 +1099,15 @@ fn treeview_frame(
 
 /// The treeview's rows: the view root's subtree (`view_path`, else the `NodeTree`'s),
 /// under a `‹` row for its parent with `up`.
-/// A line of text framed in the middle of `size` (eg asking to confirm quitting), or at its bottom
-fn notice(settings: &Settings, text: &str, size: DisplayContainerSize, middle: bool) -> UITree {
+/// A line of text framed in the middle of `size` (eg asking to confirm quitting)
+fn notice(settings: &Settings, text: &str, size: DisplayContainerSize) -> UITree {
     let pad = font_size();
     // monospace: about this wide a character
     let width = text.chars().count() as f32 * font_size() * 0.6 + 2.0 * pad;
     // room for descenders
     let line = font_size() * 1.4;
     let height = line + 2.0 * pad;
-    let top = if middle {
-        (size.height as f32 - height) / 2.0
-    } else {
-        size.height as f32 - height - 2.0 * settings.gap.max(pad)
-    };
+    let top = (size.height as f32 - height) / 2.0;
     let left = (size.width as f32 - width) / 2.0;
     ui::frame(
         settings.palette.accent,

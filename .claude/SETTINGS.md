@@ -18,8 +18,10 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 
 ## Reload
 
-- A failed load is shown as a notice by the root (`settings::subscribe_errors`, #143); the last error is kept until a
-  load succeeds, and given to new subscribers right away.
+- Every reload sends a desktop notification (#143, `sonamu_common::notification`: the freedesktop Notifications D-Bus
+  API through `busctl`, shown by eg DMS): "Settings reloaded", or a critical "Settings not loaded" with the error.
+  The first load only notifies if it fails. They replace each other (one bubble while DMS rewrites its settings), and
+  are retried for 10 s since the daemon may still be starting (eg DMS from `startup`).
 
 - Watch the settings file/program and every `watch` path (`notify`). On change: re-run/re-read.
 - Program gets a timeout. On spawn failure, timeout, non-zero exit or parse error: keep the previous settings and log.

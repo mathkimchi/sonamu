@@ -1,5 +1,6 @@
 //! User settings, read from the config dir. See `.claude/SETTINGS.md`.
 
+use crate::notification::Replacing;
 use notify::Watcher as _;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::Deserialize;
@@ -364,9 +365,8 @@ fn run(program: &Path) -> Result<String, LoadError> {
 
 static CURRENT: LazyLock<RwLock<Settings>> = LazyLock::new(Default::default);
 static SUBSCRIBERS: Mutex<Vec<calloop::channel::Sender<()>>> = Mutex::new(Vec::new());
-static ERROR_SUBSCRIBERS: Mutex<Vec<calloop::channel::Sender<String>>> = Mutex::new(Vec::new());
-/// Why the last load failed, until one succeeds
-static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+/// The notification about the last (re)load, replaced by the next
+static NOTIFICATION: Replacing = Replacing::new();
 
 /// The current settings.
 pub fn get() -> Settings {
@@ -384,40 +384,26 @@ pub fn subscribe(sender: calloop::channel::Sender<()>) {
         .push(sender);
 }
 
-/// `sender` gets why loading the settings failed, whenever it does (the previous ones are kept), eg to show it;
-/// right away if the last load failed (eg at startup)
-pub fn subscribe_errors(sender: calloop::channel::Sender<String>) {
-    if let Some(err) = LAST_ERROR
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone()
-    {
-        let _ = sender.send(err);
-    }
-    ERROR_SUBSCRIBERS
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .push(sender);
-}
-
 /// Loads the settings into [`get`]. On failure, keeps the current ones and logs.
 pub fn reload() {
     if let Some(dir) = config_dir() {
-        reload_from(&dir);
+        reload_from(&dir, true);
     }
 }
 
-/// Returns the extra paths to watch, `None` on failure.
-fn reload_from(dir: &Path) -> Option<Vec<PathBuf>> {
+/// Returns the extra paths to watch, `None` on failure. Notifies how it went (#143), except a first load that worked.
+fn reload_from(dir: &Path, reloading: bool) -> Option<Vec<PathBuf>> {
     match load(dir) {
         Ok(Loaded { settings, watch }) => {
             // read by sonamu_ui itself (eg char grid sizes), which can't see the settings
             sonamu_ui::ui_element::set_font_size(settings.font_size);
-            *LAST_ERROR.lock().unwrap_or_else(PoisonError::into_inner) = None;
             let changed = {
                 let mut current = CURRENT.write().unwrap_or_else(PoisonError::into_inner);
                 std::mem::replace(&mut *current, settings) != *current
             };
+            if reloading {
+                NOTIFICATION.send("Settings reloaded".to_string(), String::new(), false);
+            }
             if changed {
                 // drops the subscribers that are gone
                 SUBSCRIBERS
@@ -432,12 +418,11 @@ fn reload_from(dir: &Path) -> Option<Vec<PathBuf>> {
                 "Keeping previous settings, could not load from {}: {err}",
                 dir.display()
             );
-            let err = err.to_string();
-            ERROR_SUBSCRIBERS
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .retain(|sender| sender.send(err.clone()).is_ok());
-            *LAST_ERROR.lock().unwrap_or_else(PoisonError::into_inner) = Some(err);
+            NOTIFICATION.send(
+                "Settings not loaded, keeping the previous ones".to_string(),
+                err.to_string(),
+                true,
+            );
             None
         }
     }
@@ -450,7 +435,7 @@ pub fn load_and_watch() {
         log::warn!("No config dir, using default settings");
         return;
     };
-    let extra = reload_from(&dir);
+    let extra = reload_from(&dir, false);
     let (event_sender, events) = mpsc::channel();
     let watcher = match notify::recommended_watcher(event_sender) {
         Ok(watcher) => watcher,
@@ -499,7 +484,7 @@ impl Watcher {
             while pending {
                 self.settle(events);
                 // let ran_program = is_executable(&self.dir.join("settings"));
-                if let Some(extra) = reload_from(&self.dir) {
+                if let Some(extra) = reload_from(&self.dir, true) {
                     self.sync(extra);
                 }
                 // changed while loading: reload again
