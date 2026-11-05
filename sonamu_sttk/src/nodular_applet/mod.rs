@@ -29,6 +29,7 @@ pub mod node_tree;
 pub mod project_applet;
 pub mod root_node_applet;
 pub mod split_applet;
+mod swipe;
 mod traversal;
 pub(crate) mod treeview;
 

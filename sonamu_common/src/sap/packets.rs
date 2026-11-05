@@ -204,6 +204,20 @@ pub enum StandardEvent {
         sizes: Vec<Option<DisplayContainerSize>>,
         active: usize,
     },
+    /// Show this swipe between elements of the client's treeview instead of its focus (#141), or stop (`None`).
+    /// Only the holder of both elements' world draws it; others pass it in or ignore it.
+    Swipe(Option<SwipeView>),
+}
+
+/// A swipe partway between two elements (#141): `from` is drawn moved `progress` of the way toward `to`,
+/// which follows it in (below for `vertical`, else to the right)
+#[derive(Clone, Debug, PartialEq)]
+pub struct SwipeView {
+    pub vertical: bool,
+    pub from: WorldTreePath,
+    /// `None`: past the first / last element, `from` alone is pulled `progress` away (negative toward the first)
+    pub to: Option<WorldTreePath>,
+    pub progress: f32,
 }
 
 /// The applet registered under `applet`, made with `args`

@@ -10,7 +10,7 @@ use sonamu_common::{
     sap::{
         client_handle::ClientHandle,
         detached::{Axis, DetachedClient, DetachedTree, Layout},
-        packets::{AwaitedWl, NewWlSurface, SpawnPosition, StandardEvent, WlSurfaceId},
+        packets::{AwaitedWl, NewWlSurface, SpawnPosition, StandardEvent, SwipeView, WlSurfaceId},
         session::{SavedApplet, SavedTree, SavedWl},
     },
     settings,
@@ -123,6 +123,21 @@ pub struct NodeTree {
     /// so its entry is stale.
     screens: Vec<Screen>,
     active_screen: usize,
+
+    /// A swipe drawn between two of its nodes instead of the focus (#141)
+    swipe: Option<TreeSwipe>,
+    /// The node a swipe was passed into (its main's inner world has both ends), to stop it there
+    swipe_sent_to: Option<NodeId>,
+}
+
+/// A swipe between two nodes of the tree (`StandardEvent::Swipe`), drawn on the active screen
+struct TreeSwipe {
+    vertical: bool,
+    from: NodeId,
+    to: Option<NodeId>,
+    progress: f32,
+    /// What each end shows, from the last `update_layout`
+    panes: [Vec<Pane>; 2],
 }
 
 /// A screen showing the tree, as it was left when another became active
@@ -211,6 +226,8 @@ impl NodeTree {
             view_root: NodeId::default(),
             screens: Vec::new(),
             active_screen: 0,
+            swipe: None,
+            swipe_sent_to: None,
         };
         tree.root = insert_root(&mut tree);
         tree.view_root = tree.root;
@@ -1533,6 +1550,7 @@ impl NodeTree {
             }
             shown.extend(panes.iter().map(|pane| pane.node));
             self.panes = panes;
+            self.layout_swipe(size);
         }
         for index in 0..self.screens.len() {
             if index == self.active_screen {
@@ -1690,9 +1708,128 @@ impl NodeTree {
         }
     }
 
+    /// Draws the swipe if both its ends are nodes of this world, else passes it into the node whose inner world
+    /// has both (a node and its inner root are one), or stops it (`None`, or ends in different worlds)
+    pub fn set_swipe(&mut self, view: Option<SwipeView>) {
+        if view.is_none() && self.swipe.is_none() && self.swipe_sent_to.is_none() {
+            return;
+        }
+        /// Where the swipe's `to` is: a node of this world, or (with `from`) inside `from`'s node
+        enum To {
+            Here(Option<NodeId>),
+            Inside(Option<WorldTreePath>),
+        }
+        let mut draw = None;
+        let mut pass = None;
+        if let Some(view) = view {
+            let (from, from_inner) = view.from.split_world();
+            let to = match view.to.as_ref().map(WorldTreePath::split_world) {
+                None if from_inner.is_none() => Some(To::Here(None)),
+                None => Some(To::Inside(None)),
+                Some((to, None)) if from_inner.is_none() => {
+                    self.node_at(&to).map(|to| To::Here(Some(to)))
+                }
+                Some((to, to_inner)) if to == from => {
+                    Some(To::Inside(Some(to_inner.unwrap_or_default())))
+                }
+                Some(_) => None,
+            };
+            match (self.node_at(&from), to) {
+                (Some(from), Some(To::Here(to))) => {
+                    draw = Some((from, to, view.vertical, view.progress))
+                }
+                (Some(node), Some(To::Inside(to))) => {
+                    let view = SwipeView {
+                        from: from_inner.unwrap_or_default(),
+                        to,
+                        ..view
+                    };
+                    pass = Some((node, view));
+                }
+                _ => {}
+            }
+        }
+        let pass_to = pass.as_ref().map(|(node, _)| *node);
+        if self.swipe_sent_to != pass_to
+            && let Some(old) = self.swipe_sent_to.take()
+        {
+            self.send_event(old, StandardEvent::Swipe(None));
+        }
+        if let Some((node, view)) = pass {
+            self.send_event(node, StandardEvent::Swipe(Some(view)));
+            self.swipe_sent_to = Some(node);
+        }
+        self.swipe = draw.map(|(from, to, vertical, progress)| TreeSwipe {
+            vertical,
+            from,
+            to,
+            progress,
+            panes: Default::default(),
+        });
+        if let Some(size) = self.latest_size {
+            self.layout_swipe(size);
+        }
+        self.damaged = true;
+    }
+
+    /// What the swipe's ends show (each as if focused), resizing their applets
+    fn layout_swipe(&mut self, size: DisplayContainerSize) {
+        let Some(swipe) = &self.swipe else {
+            return;
+        };
+        let ends = [Some(swipe.from), swipe.to];
+        let panes = ends.map(|end| {
+            end.filter(|&id| self.nodes.contains_key(id))
+                .map(|id| {
+                    let view_root = if self.contains(self.view_root, id) {
+                        self.view_root
+                    } else {
+                        id
+                    };
+                    self.layout(view_root, id, size, self.active_screen)
+                })
+                .unwrap_or_default()
+        });
+        for pane in panes.iter().flatten() {
+            self.resize(pane.node, pane.inner_size());
+        }
+        if let Some(swipe) = &mut self.swipe {
+            swipe.panes = panes;
+        }
+    }
+
     /// Every pane, bordered unless it is the only one; the focused one's border shows whether focus is inside it
     pub fn get_window(&self) -> UITree {
-        self.window(&self.panes, Some(self.focused_node()), self.active_screen)
+        self.get_window_with(None)
+    }
+
+    /// Like `get_window`, but with `at_root` drawn while its root is focused (eg a project's overview).
+    /// During a swipe, its ends slide past each other.
+    pub fn get_window_with(&self, at_root: Option<&dyn Fn() -> UITree>) -> UITree {
+        let focused = self.focused_node();
+        let view = |id: NodeId, panes: &[Pane]| match at_root {
+            Some(at_root) if id == self.root => at_root(),
+            _ => self.window(panes, Some(focused), self.active_screen),
+        };
+        let (Some(swipe), Some(size)) = (&self.swipe, self.latest_size) else {
+            return view(focused, &self.panes);
+        };
+        let [from_panes, to_panes] = &swipe.panes;
+        // ends that show the same panes (eg both in a split) don't move
+        let nodes = |panes: &[Pane]| panes.iter().map(|pane| pane.node).collect::<Vec<_>>();
+        if let Some(to) = swipe.to
+            && (at_root.is_none() || (swipe.from != self.root && to != self.root))
+            && nodes(from_panes) == nodes(to_panes)
+        {
+            return view(focused, &self.panes);
+        }
+        slide(
+            size,
+            swipe.vertical,
+            swipe.progress,
+            view(swipe.from, from_panes),
+            swipe.to.map(|to| view(to, to_panes)),
+        )
     }
 
     /// Like `get_window`, for the screen (an inactive one shows no focus)
@@ -2054,6 +2191,29 @@ fn has_inner_elements(treeview: &WorldTree<String>) -> bool {
 //         }
 //     };
 // }
+
+/// `from` moved `progress` of the way out (up, or left), and `to` right after it, cut to `size` (#141)
+fn slide(
+    size: DisplayContainerSize,
+    vertical: bool,
+    progress: f32,
+    from: UITree,
+    to: Option<UITree>,
+) -> UITree {
+    let [width, height] = [size.width as f32, size.height as f32];
+    let at = |offset: f32, window| {
+        let corner = if vertical {
+            [0.0, offset * height]
+        } else {
+            [offset * width, 0.0]
+        };
+        UITree::new_container_styled(Style::absolute(corner, [width, height]), vec![window])
+    };
+    let mut windows = vec![at(-progress, from)];
+    windows.extend(to.map(|to| at(1.0 - progress, to)));
+    // a box, so nothing is drawn outside it
+    UITree::new_container_styled(Style::absolute([0.0, 0.0], [width, height]), windows)
+}
 
 /// What the client shows on `screen`: its window for it, if it has one per screen (`Treeview::screen_windows`)
 fn screen_surface(main: &ClientHandle, screen: usize) -> UITree {

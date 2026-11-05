@@ -57,6 +57,9 @@
         "type": "string"
       }
     },
+    "swipe": {
+      "$ref": "#/$defs/SwipeSettings"
+    },
     "terminal": {
       "description": "Program started by Super+T; `None`: `$TERMINAL`, else the first installed of a list",
       "type": [
@@ -187,6 +190,28 @@
           ]
         }
       ]
+    },
+    "SwipeSettings": {
+      "description": "3 finger touchpad swipes between nodes (#141): up / down between siblings, left / right between parent and child",
+      "type": "object",
+      "properties": {
+        "distance": {
+          "description": "How far the fingers move to go one node, in px",
+          "type": "number",
+          "format": "float"
+        },
+        "rubber_band": {
+          "description": "How far past the first / last node it stretches at most, in nodes",
+          "type": "number",
+          "format": "float"
+        },
+        "snap_ms": {
+          "description": "How long it takes to settle on a node after the fingers lift, in ms",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      }
     },
     "TreeviewFloating": {
       "description": "Where an unpinned treeview floats over the panes, which keep their size",

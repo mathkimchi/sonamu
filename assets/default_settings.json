@@ -22,6 +22,11 @@
     "floating": "center",
     "floating_size": [40, 70]
   },
+  "swipe": {
+    "distance": 300.0,
+    "rubber_band": 0.15,
+    "snap_ms": 250
+  },
   "keybinds": [],
   "restore_programs": [],
   "startup": [],

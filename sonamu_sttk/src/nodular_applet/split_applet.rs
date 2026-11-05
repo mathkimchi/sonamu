@@ -179,6 +179,8 @@ impl StandardApplet for SplitApplet {
             StandardEvent::Capturing(_) | StandardEvent::Screens(_) => {}
             // shown the same on every screen
             StandardEvent::ScreenViews { .. } => {}
+            // its panes are all shown, so they don't slide (#141)
+            StandardEvent::Swipe(_) => {}
         }
     }
 

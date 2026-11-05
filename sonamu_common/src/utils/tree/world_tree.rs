@@ -2,7 +2,7 @@ use crate::utils::tree::{recursive_tree::RecursiveTreeNode, tree_node_path::Tree
 use serde::{Deserialize, Serialize};
 
 /// One step of a `WorldTreePath`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Step {
     /// To a child of the node, in the same world
     Child(usize),
@@ -16,7 +16,7 @@ pub enum Step {
 ///
 /// So a path is "inside" a node when it goes into its value with `Inner`:
 /// `[Child(2), Child(1)]` is on node `[2, 1]`, and `[Child(2), Child(1), Inner(0)]` is its inner root's first child.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct WorldTreePath(pub Vec<Step>);
 impl WorldTreePath {
     /// The world's root

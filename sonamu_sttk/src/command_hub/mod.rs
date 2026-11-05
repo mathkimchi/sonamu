@@ -552,6 +552,8 @@ impl StandardApplet for CommandHubApplet {
             | StandardEvent::Screens(_)
             | StandardEvent::ScreenViews { .. }
             | StandardEvent::Open(_) => {}
+            // has no inner world
+            StandardEvent::Swipe(_) => {}
         }
     }
 

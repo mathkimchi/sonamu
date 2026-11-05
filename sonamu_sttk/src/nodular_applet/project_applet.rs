@@ -906,6 +906,7 @@ impl StandardApplet for ProjectApplet {
             | StandardEvent::NodeAction(..) => {}
             // only the root gets these
             StandardEvent::Capturing(_) | StandardEvent::Screens(_) => {}
+            StandardEvent::Swipe(view) => self.holder.tree.set_swipe(view),
         }
     }
 
@@ -914,11 +915,7 @@ impl StandardApplet for ProjectApplet {
             return UITree::leaf(UIElement::Nothing);
         }
         let tree = &self.holder.tree;
-        let active = if self.at_root() {
-            self.get_overview(container_size.width as f32)
-        } else {
-            tree.get_window()
-        };
+        let active = tree.get_window_with(Some(&|| self.get_overview(container_size.width as f32)));
         if !self.screen_windows() {
             return active;
         }

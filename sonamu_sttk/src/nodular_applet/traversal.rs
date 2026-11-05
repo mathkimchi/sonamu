@@ -3,11 +3,11 @@
 
 use super::treeview::TreeviewRow;
 use sonamu_common::utils::tree::world_tree::WorldTreePath;
-use sonamu_ui::ui_event::{KeyTrait, SwipeDirection, UIEvent};
+use sonamu_ui::ui_event::{KeyTrait, UIEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Traversal {
-    /// The next / previous row (Tab / Shift+Tab, 3 fingers down / up), wrapping around
+    /// The next / previous row (Tab / Shift+Tab), wrapping around
     Next,
     Prev,
     /// `a` (and `0`)
@@ -24,7 +24,7 @@ pub enum Traversal {
     Enter,
 }
 impl Traversal {
-    /// The traversal a key or swipe does. While `traversing` (the treeview has the keys) plain keys do it,
+    /// The traversal a key does (swipes are the root's, `swipe`). While `traversing` (the treeview has the keys) plain keys do it,
     /// otherwise only with Alt.
     pub fn of(ui_event: &UIEvent, traversing: bool) -> Option<Self> {
         match *ui_event {
@@ -56,19 +56,6 @@ impl Traversal {
                     _ => return None,
                 })
             }
-            UIEvent::Swipe {
-                fingers,
-                direction,
-                repeat,
-            } => match (fingers, direction) {
-                (3, SwipeDirection::Up) => Some(Self::Prev),
-                (3, SwipeDirection::Down) => Some(Self::Next),
-                // once per swipe
-                (4, _) if repeat => None,
-                (4, SwipeDirection::Up) => Some(Self::Select),
-                (4, SwipeDirection::Down) if traversing => Some(Self::Enter),
-                _ => None,
-            },
             _ => None,
         }
     }

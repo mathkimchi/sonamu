@@ -57,6 +57,7 @@ pub struct Settings {
     /// Text height in px (Sonamu's own UI isn't scaled)
     pub font_size: f32,
     pub treeview: TreeviewSettings,
+    pub swipe: SwipeSettings,
     /// Global shortcuts that run a shell command
     pub keybinds: Vec<Keybind>,
     /// Programs restored running in their terminal (see `.claude/SESSIONS.md`)
@@ -161,6 +162,18 @@ pub struct TreeviewSettings {
     pub floating: TreeviewFloating,
     /// A `Center` floating one's width and height, in percent of the window's
     pub floating_size: [u32; 2],
+}
+
+/// 3 finger touchpad swipes between nodes (#141): up / down between siblings, left / right between parent and child
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[schemars(transform = optional_fields)]
+pub struct SwipeSettings {
+    /// How far the fingers move to go one node, in px
+    pub distance: f32,
+    /// How far past the first / last node it stretches at most, in nodes
+    pub rubber_band: f32,
+    /// How long it takes to settle on a node after the fingers lift, in ms
+    pub snap_ms: u32,
 }
 
 /// A column beside the panes, which get the rest of the width

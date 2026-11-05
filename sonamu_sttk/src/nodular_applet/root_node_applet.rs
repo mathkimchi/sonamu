@@ -6,6 +6,7 @@ use crate::{
         node_tree::{NodeId, NodeTree},
         project_applet::ProjectApplet,
         split_applet::SplitApplet,
+        swipe::{Settle, Strip, Swipe},
         traversal::{self, Traversal},
         treeview::{
             BTN_LEFT, TreeviewAction, TreeviewPointer, TreeviewRow, close_width, focused_row,
@@ -36,12 +37,13 @@ use sonamu_common::{
 use sonamu_ui::{
     display_units::DisplayContainerSize,
     ui_element::{Cursor, CursorIcon, Length, Style, UIElement, UITree, font_size},
-    ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, UIEvent},
+    ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, SwipePhase, UIEvent},
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     path::PathBuf,
     sync::{Arc, RwLock},
+    time::{Duration, Instant},
 };
 
 /// Holds the tree of nodes, is held by a Basic Applet runner (applet runner).
@@ -77,6 +79,18 @@ pub struct RootNodeApplet {
     /// Every screen (#60), each with its own focus (see `NodeTree::activate_screen`).
     /// The active one's view is the fields above (`latest_size`, `view_path`, `treeview_pointer`).
     screens: Vec<Screen>,
+
+    /// The 3 finger swipe while the fingers are down (#141)
+    swipe: Option<Swipe>,
+    /// Easing onto a node after a swipe, a frame at a time (`tick_settle`)
+    settle: Option<Settle>,
+    /// Whether `tick_settle`'s timer is running
+    settling: bool,
+    /// How far a 4 finger swipe moved, until it acts (once a swipe)
+    select_swipe: Option<[f64; 2]>,
+    /// The child row each row last had focus under, for swipes into children (#142); not saved
+    remembered: HashMap<WorldTreePath, WorldTreePath>,
+    loop_handle: LoopHandle<'static, Self>,
 }
 
 /// A screen, in the root's area. While inactive it keeps its view, and shows the treeview only if pinned.
@@ -99,7 +113,11 @@ enum TreeviewPlace {
 
 impl RootNodeApplet {
     /// How often the session is saved (if it changed), besides before quitting
-    const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+    const SAVE_INTERVAL: Duration = Duration::from_secs(2);
+    /// Between frames of a swipe settling
+    const SETTLE_FRAME: Duration = Duration::from_millis(8);
+    /// How far (px) a 4 finger swipe moves to act
+    const SELECT_DISTANCE: f64 = 50.0;
 
     /// Where the treeview is drawn (`[x, y, width, height]`, frame included), and how;
     /// `None` while hidden
@@ -357,6 +375,12 @@ impl RootNodeApplet {
                 rect: [0, 0, 800, 600],
                 ..Screen::default()
             }],
+            swipe: None,
+            settle: None,
+            settling: false,
+            select_swipe: None,
+            remembered: HashMap::new(),
+            loop_handle: event_loop.clone(),
         };
         // a clean session starts with the help shown
         if root.saved_session.is_none() {
@@ -441,6 +465,7 @@ impl RootNodeApplet {
                         }
                         root.holder.tree.update_view_root();
                         root.update_view_path();
+                        root.remember_focus();
                         root.damage_if_tree_changed();
                         root.update_treeview_visibility();
                         root.holder.tree.update_layout();
@@ -459,6 +484,15 @@ impl RootNodeApplet {
 
     /// From the runner
     fn handle_event(&mut self, event: StandardEvent) {
+        if let StandardEvent::UIEvent(UIEvent::Swipe { fingers, phase }) = event {
+            match fingers {
+                3 => self.handle_swipe(phase),
+                4 => self.handle_select_swipe(phase),
+                _ => {}
+            }
+            self.damage_if_tree_changed();
+            return;
+        }
         if let StandardEvent::UIEvent(ui_event) = &event
             && let Some(keybind) = RootKeybind::of(ui_event)
         {
@@ -513,6 +547,8 @@ impl RootNodeApplet {
             // its tree is in the runner's directory
             StandardEvent::Directory(_) => {}
             StandardEvent::Open(open) => self.holder.open(open),
+            // it starts them
+            StandardEvent::Swipe(_) => {}
             StandardEvent::UIEvent(_)
             | StandardEvent::FocusChanged(..)
             | StandardEvent::Highlighted(..) => {
@@ -705,6 +741,127 @@ impl RootNodeApplet {
         if let Some(target) = target {
             self.holder.focus(&target);
             self.surface.damage();
+        }
+    }
+
+    /// 3 fingers: the view follows them between nodes, and settles on one when they lift (`swipe`, #141)
+    fn handle_swipe(&mut self, phase: SwipePhase) {
+        let settings = settings::get().swipe;
+        match phase {
+            SwipePhase::Begin => {
+                // it carries on from where a settle it interrupts was
+                let carried = self
+                    .settle
+                    .take()
+                    .map(|settle| settle.carried(Instant::now()));
+                self.swipe = Some(Swipe::new(carried));
+            }
+            SwipePhase::Update(delta) => {
+                let Self {
+                    swipe: Some(swipe),
+                    holder,
+                    view_path,
+                    remembered,
+                    ..
+                } = self
+                else {
+                    return;
+                };
+                let view = swipe.update(delta, &settings, |vertical| {
+                    let tree = &holder.tree;
+                    let rows =
+                        view_tree_rows(tree, view_path.as_ref(), tree.active_screen(), false);
+                    let focus = focused_row(&rows, &tree.get_focus_path());
+                    let from = rows.iter().position(|row| row.path == focus)?;
+                    Some(if vertical {
+                        Strip::siblings(&rows, from)
+                    } else {
+                        Strip::lineage(&rows, from, remembered)
+                    })
+                });
+                if let Some(view) = view {
+                    self.holder.tree.set_swipe(Some(view));
+                }
+            }
+            SwipePhase::End { cancelled } => {
+                let Some(settle) = self
+                    .swipe
+                    .take()
+                    .and_then(|swipe| swipe.end(cancelled, &settings))
+                else {
+                    // it never moved far enough (but may have stopped a settle)
+                    self.holder.tree.set_swipe(None);
+                    return;
+                };
+                if settle.target != settle.strip.start {
+                    self.holder.focus(&settle.strip.paths[settle.target]);
+                    self.surface.damage();
+                }
+                self.settle = Some(settle);
+                if !std::mem::replace(&mut self.settling, true) {
+                    self.loop_handle
+                        .insert_source(Timer::immediate(), |_, &mut (), root: &mut Self| {
+                            root.tick_settle()
+                        })
+                        .unwrap();
+                }
+            }
+        }
+    }
+
+    /// A frame of the settle, until it arrives (or a swipe interrupts it)
+    fn tick_settle(&mut self) -> TimeoutAction {
+        let Some(settle) = &self.settle else {
+            self.settling = false;
+            return TimeoutAction::Drop;
+        };
+        let view = settle.view(Instant::now());
+        let arrived = view.is_none();
+        self.holder.tree.set_swipe(view);
+        self.damage_if_tree_changed();
+        if arrived {
+            self.settle = None;
+            self.settling = false;
+            return TimeoutAction::Drop;
+        }
+        TimeoutAction::ToDuration(Self::SETTLE_FRAME)
+    }
+
+    /// 4 fingers up select the focused row (out of its applet), down are Enter; once a swipe
+    fn handle_select_swipe(&mut self, phase: SwipePhase) {
+        match phase {
+            SwipePhase::Begin => self.select_swipe = Some([0.0; 2]),
+            SwipePhase::Update([x, y]) => {
+                let Some(moved) = &mut self.select_swipe else {
+                    return;
+                };
+                *moved = [moved[0] + x, moved[1] + y];
+                let [x, y] = *moved;
+                if x.hypot(y) < Self::SELECT_DISTANCE {
+                    return;
+                }
+                self.select_swipe = None;
+                if x.abs() > y.abs() {
+                    return;
+                }
+                if y < 0.0 {
+                    self.traverse(Traversal::Select);
+                } else if self.holder.tree.is_traversing() {
+                    self.traverse(Traversal::Enter);
+                }
+            }
+            SwipePhase::End { .. } => self.select_swipe = None,
+        }
+    }
+
+    /// Remembers the child each row on the focus path has focus under (#142)
+    fn remember_focus(&mut self) {
+        let focus = self.holder.tree.get_focus_path();
+        for end in 1..=focus.0.len() {
+            self.remembered.insert(
+                WorldTreePath(focus.0[..end - 1].to_vec()),
+                WorldTreePath(focus.0[..end].to_vec()),
+            );
         }
     }
 

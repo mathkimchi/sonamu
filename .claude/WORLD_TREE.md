@@ -54,8 +54,23 @@ Applets have no traversal of their own.
   Tab / Shift+Tab: next / previous row (wrapping); `w` / `s`: previous / next sibling (shown rows at the same depth
   under the same parent: a node's inner children come before its own, so `s` on the last inner one goes to the first
   outer one); `a` / `0`: parent (past the view root: its parent, widening the view); `d`, `1`-`8`, `9`: first, nth, last child.
-- Swipes (DRM backend only: `UIEvent::Swipe`, a step each time the fingers move `SWIPE_DISTANCE`): 3 fingers up / down
-  is Shift+Tab / Tab, every step; 4 fingers up selects the focused row (out of its applet), 4 down is Enter; once a swipe.
+- Swipes (DRM backend only: `UIEvent::Swipe`, `Begin` / `Update(px)` / `End`), the root's (`handle_swipe`): 4 fingers up
+  selects the focused row (out of its applet), 4 down is Enter; once a swipe (50 px). 3 fingers (#141, #142,
+  `nodular_applet/swipe.rs`) move along a strip of shown rows, natural direction (content follows the fingers):
+  - The axis locks after 10 px. Vertical: the focused row's siblings (rows under the same parent row, so inner then own
+    children); fingers up bring in the next. Horizontal: ancestors up to the first row, then down through each row's
+    remembered child (`RootNodeApplet::remembered`, the child row focus was last under, by path, unsaved; else the
+    first); fingers left bring in the child.
+  - The view is a position in rows (`swipe.distance` px each), rubber-banded past the ends (`swipe.rubber_band`). On
+    lift it projects the speed 200 ms ahead, rounds to a row, focuses it, then eases there (`Settle`, `swipe.snap_ms`,
+    ticked by a calloop timer). A new swipe during that carries on from where it was.
+  - Drawing: the root sends its tree `StandardEvent::Swipe(SwipeView { from, to, progress })` (the two rows the view is
+    between). `NodeTree::set_swipe` draws it if both are its nodes, else passes it into the node whose inner world has
+    both (a node and its inner root are one, so project ↔ its inner child is the project's), else drops it (ends in
+    different worlds: inner ↔ own sibling, no animation). The holder lays out each end as if focused
+    (`layout_swipe`, which also sizes and so shows their applets) and slides the two windows in a clipped box (`slide`);
+    ends showing the same panes (eg in a split) don't move. A project draws its overview for its root
+    (`get_window_with`). Splits ignore it. Only the active screen's tree draws it.
 - In the selector (the deepest holder's `NodeTree::handle_event`, or an applet's own, eg the file manager's documents):
   Space (or clicking its `▾`/`▸`) collapses/expands all its children, inner and own (the holder owning the row keeps
   the flag, unsaved; `NodeTree::applet_treeview`/`get_treeview_of` leave them out); Enter confirms (into the applet,

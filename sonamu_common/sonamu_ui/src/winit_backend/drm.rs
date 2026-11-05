@@ -7,7 +7,7 @@ use crate::{
     display_units::{DisplayAreaPx, DisplayContainerSize},
     dmabuf,
     ui_element::{Cursor, CursorIcon, PrimitiveScene, RoundRect, UIPrimitiveElement},
-    ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, SwipeDirection, UIEvent},
+    ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, SwipePhase, UIEvent},
     winit_backend::{
         CapturedFrame, DisplayInfo, DisplayNotification, DisplayProxy, DisplayRequest, Gpu,
         PointerGrab, UIDisplay, WgpuData,
@@ -28,8 +28,8 @@ use smithay::{
         drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, GbmBufferedSurface},
         input::{
             AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event as _,
-            GestureBeginEvent as _, GestureSwipeUpdateEvent as _, InputEvent, KeyState,
-            KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
+            GestureBeginEvent as _, GestureEndEvent as _, GestureSwipeUpdateEvent as _, InputEvent,
+            KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
         },
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
@@ -59,8 +59,6 @@ const SCROLL_PER_NOTCH: f64 = 15.0;
 const NATURAL_SCROLL: bool = true;
 /// Size of the fallback box, when the cursor theme has no image
 const CURSOR_SIZE: [u32; 2] = [12, 18];
-/// How far (px) the fingers have to move for each step of a swipe
-const SWIPE_DISTANCE: f64 = 50.0;
 
 /// A cursor uploaded to the GPU
 struct CursorImage {
@@ -154,8 +152,8 @@ struct DrmDisplay {
     keyboard: xkb::State,
     /// The key being repeated (xkb keycode) and its timer
     repeat: Option<(Keycode, RegistrationToken)>,
-    /// The swipe going on: its fingers, how far they moved since its last step, and whether it had a step
-    swipe: Option<(u32, [f64; 2], bool)>,
+    /// The fingers of the swipe going on
+    swipe: Option<u32>,
 
     drm_device: DrmDevice,
     gbm: GbmDevice<DrmDeviceFd>,
@@ -836,35 +834,33 @@ impl DrmDisplay {
                 );
             }
             InputEvent::GestureSwipeBegin { event } => {
-                self.swipe = Some((event.fingers(), [0.0; 2], false));
+                self.swipe = Some(event.fingers());
+                self.send(UIEvent::Swipe {
+                    fingers: event.fingers(),
+                    phase: SwipePhase::Begin,
+                });
             }
             InputEvent::GestureSwipeUpdate { event } => {
-                let Some((fingers, moved, repeat)) = &mut self.swipe else {
+                let Some(fingers) = self.swipe else {
                     return;
                 };
                 let delta = event.delta();
-                moved[0] += delta.x;
-                moved[1] += delta.y;
-                let [x, y] = *moved;
-                // a step each time, like scrolling
-                if x.hypot(y) >= SWIPE_DISTANCE {
-                    let direction = match (x.abs() > y.abs(), x > 0.0, y > 0.0) {
-                        (true, true, _) => SwipeDirection::Right,
-                        (true, false, _) => SwipeDirection::Left,
-                        (false, _, true) => SwipeDirection::Down,
-                        (false, _, false) => SwipeDirection::Up,
-                    };
-                    let event = UIEvent::Swipe {
-                        fingers: *fingers,
-                        direction,
-                        repeat: *repeat,
-                    };
-                    *moved = [0.0; 2];
-                    *repeat = true;
-                    self.send(event);
-                }
+                self.send(UIEvent::Swipe {
+                    fingers,
+                    phase: SwipePhase::Update([delta.x, delta.y]),
+                });
             }
-            InputEvent::GestureSwipeEnd { .. } => self.swipe = None,
+            InputEvent::GestureSwipeEnd { event } => {
+                let Some(fingers) = self.swipe.take() else {
+                    return;
+                };
+                self.send(UIEvent::Swipe {
+                    fingers,
+                    phase: SwipePhase::End {
+                        cancelled: event.cancelled(),
+                    },
+                });
+            }
             _ => {}
         }
     }
