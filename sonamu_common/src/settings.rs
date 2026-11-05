@@ -68,6 +68,8 @@ pub struct Settings {
     pub terminal: Option<String>,
     /// Program started by Super+N; `None`: `$BROWSER`, else the first installed of a list
     pub browser: Option<String>,
+    /// Program the file manager opens PDFs in; `None`: the first installed of zathura, okular, evince
+    pub pdf_viewer: Option<String>,
 }
 impl Default for Settings {
     fn default() -> Self {

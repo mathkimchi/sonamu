@@ -31,5 +31,6 @@
   "restore_programs": [],
   "startup": [],
   "terminal": null,
-  "browser": null
+  "browser": null,
+  "pdf_viewer": null
 }

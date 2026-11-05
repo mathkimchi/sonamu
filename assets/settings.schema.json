@@ -38,6 +38,13 @@
     "palette": {
       "$ref": "#/$defs/Palette"
     },
+    "pdf_viewer": {
+      "description": "Program the file manager opens PDFs in; `None`: the first installed of zathura, okular, evince",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "radius": {
       "description": "Of pane corners, in px",
       "type": "number",

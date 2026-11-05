@@ -30,21 +30,33 @@ const BROWSERS: [&str; 6] = [
     "brave",
 ];
 
+/// Tried in order for PDFs when the settings don't give a viewer: zathura starts fast and is keyboard driven
+const PDF_VIEWERS: [&str; 3] = ["zathura", "okular", "evince"];
+
 /// Started by Super+T (and a project's `+ terminal`)
 #[must_use]
 pub fn terminal() -> String {
-    pick_program(settings::get().terminal, "TERMINAL", &TERMINALS)
+    pick_program(settings::get().terminal, Some("TERMINAL"), &TERMINALS)
 }
 /// Started by Super+N (and a project's `+ browser`)
 #[must_use]
 pub fn browser() -> String {
-    pick_program(settings::get().browser, "BROWSER", &BROWSERS)
+    pick_program(settings::get().browser, Some("BROWSER"), &BROWSERS)
+}
+/// Opens PDFs in the file manager (its window becomes the document)
+#[must_use]
+pub fn pdf_viewer() -> String {
+    pick_program(settings::get().pdf_viewer, None, &PDF_VIEWERS)
 }
 
 /// The setting, else `$var` if installed, else the first installed of `fallbacks` (else the first)
-fn pick_program(setting: Option<String>, var: &str, fallbacks: &[&str]) -> String {
+fn pick_program(setting: Option<String>, var: Option<&str>, fallbacks: &[&str]) -> String {
     setting
-        .or_else(|| std::env::var(var).ok().filter(|program| installed(program)))
+        .or_else(|| {
+            std::env::var(var?)
+                .ok()
+                .filter(|program| installed(program))
+        })
         .or_else(|| {
             fallbacks
                 .iter()

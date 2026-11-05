@@ -27,7 +27,7 @@ use sonamu_sttk::{
         NodularAppletInitializer, StandardApplet, swipe, with_opacity,
     },
     session,
-    standard_keybinds::{handle_standard_keybinds, standard_keybind_request},
+    standard_keybinds::{handle_standard_keybinds, pdf_viewer, standard_keybind_request},
     wl_surface_applet::WlSurfaceApplet,
 };
 use sonamu_ui::{
@@ -88,7 +88,7 @@ struct Document {
     handle: ClientHandle,
     /// `None` if it was placed here rather than opened
     file: Option<PathBuf>,
-    /// The wl surface it shows (eg Okular's for a PDF)
+    /// The wl surface it shows (eg Zathura's for a PDF)
     wl: Option<WlSurfaceId>,
 }
 
@@ -130,7 +130,7 @@ pub struct FileManagerApplet {
     preview: Option<Preview>,
     /// The file list row under the mouse
     hovered: Option<usize>,
-    /// Okular processes started for these PDFs (or restored wl clients), whose windows become documents
+    /// PDF viewer processes started for these PDFs (or restored wl clients), whose windows become documents
     /// (`take_wl_surface`)
     starting: Vec<(u32, Option<PathBuf>)>,
     /// Pids of `starting` processes that ended, from the threads waiting on them
@@ -339,7 +339,7 @@ impl FileManagerApplet {
     }
 
     /// Shows the file's document, making one if it isn't open: its preview's editor, a new editor,
-    /// or for a PDF, Okular's window once it arrives
+    /// or for a PDF, its viewer's window once it arrives
     fn open(&mut self, file: PathBuf) {
         if let Some(index) = self.document_index(&file) {
             self.set_active(Some(index));
@@ -347,7 +347,7 @@ impl FileManagerApplet {
             return;
         }
         if is_pdf(&file) {
-            self.start_okular(file);
+            self.start_pdf_viewer(file);
             return;
         }
         let document = match self.preview.take() {
@@ -377,7 +377,7 @@ impl FileManagerApplet {
     }
 
     /// Its window becomes a document (`take_wl_surface`)
-    fn start_okular(&mut self, file: PathBuf) {
+    fn start_pdf_viewer(&mut self, file: PathBuf) {
         if self
             .starting
             .iter()
@@ -385,7 +385,7 @@ impl FileManagerApplet {
         {
             return;
         }
-        let mut command = program_command("okular", &[]);
+        let mut command = program_command(&pdf_viewer(), &[]);
         command.arg(&file);
         self.start(command, Some(file));
     }
@@ -398,7 +398,8 @@ impl FileManagerApplet {
                 self.starting.push((pid, file));
                 // published as `awaiting_wl`, so its window comes here wherever focus is
                 self.hook.damage_treeview();
-                self.status = Some("Starting Okular...".to_string());
+                let program = command.get_program().to_string_lossy();
+                self.status = Some(format!("Starting {program}..."));
                 let exited = self.exited_sender.clone();
                 let waker = self.hook.waker();
                 // reaps it
@@ -979,7 +980,7 @@ impl StandardApplet for FileManagerApplet {
         self.update_preview();
     }
 
-    /// An Okular process ended
+    /// A PDF viewer process ended
     fn wake(&mut self) {
         while let Ok(pid) = self.exited.try_recv() {
             self.starting.retain(|&(starting, _)| starting != pid);
@@ -987,7 +988,7 @@ impl StandardApplet for FileManagerApplet {
         self.hook.damage_treeview();
     }
 
-    /// Okular's windows, for the PDFs it was started for
+    /// The PDF viewer's windows, for the PDFs it was started for
     fn awaiting_wl(&self) -> Vec<AwaitedWl> {
         self.starting
             .iter()
@@ -995,7 +996,7 @@ impl StandardApplet for FileManagerApplet {
             .collect()
     }
 
-    /// Okular's window for a PDF becomes its document
+    /// The PDF viewer's window for a PDF becomes its document
     fn take_wl_surface(&mut self, surface: NewWlSurface) -> Result<(), Box<NewWlSurface>> {
         let Some(index) = self
             .starting
@@ -1020,7 +1021,7 @@ impl StandardApplet for FileManagerApplet {
         Ok(())
     }
 
-    /// Asks its wl clients (eg Okular) to close too, since nothing else shows their windows
+    /// Asks its wl clients (eg Zathura) to close too, since nothing else shows their windows
     fn close_requested(&mut self) -> bool {
         for document in self
             .documents
@@ -1268,7 +1269,7 @@ impl StandardApplet for FileManagerApplet {
     }
 }
 
-/// The file a saved document shows: a code editor's, or a PDF its wl client (eg Okular) was started with
+/// The file a saved document shows: a code editor's, or a PDF its wl client (eg Zathura) was started with
 fn saved_file(saved: &SavedApplet) -> Option<PathBuf> {
     match saved {
         SavedApplet::Spawner { name, args, .. } if name == "code_editor" => {
