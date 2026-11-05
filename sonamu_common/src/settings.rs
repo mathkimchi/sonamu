@@ -176,8 +176,10 @@ pub struct SwipeSettings {
     pub distance_y: f32,
     /// How far past the first / last node it stretches at most, in nodes
     pub rubber_band: f32,
-    /// How long it takes to settle on a node after the fingers lift, in ms
-    pub snap_ms: u32,
+    /// Of the spring settling on a node after the fingers lift (mass 1): higher is faster
+    pub stiffness: f32,
+    /// Of that spring: 1 is critically damped (no bounce), below 1 overshoots and bounces, above 1 is sluggish
+    pub damping_ratio: f32,
 }
 
 /// A column beside the panes, which get the rest of the width

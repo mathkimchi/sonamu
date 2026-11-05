@@ -63,7 +63,8 @@ Applets have no traversal of their own.
     first); fingers left bring in the child.
   - The view is a position in rows (`swipe.distance_x` / `distance_y` px each), rubber-banded past the ends (`swipe.rubber_band`). On
     lift it settles on one of the two rows shown, the one the speed projected 200 ms ahead is nearer (`settle_target`;
-    it never skips rows), focuses it, then eases there (`Settle`, `swipe.snap_ms`, ticked by a calloop timer). A new
+    it never skips rows), focuses it, then springs there (`Settle`: a damped harmonic oscillator, `swipe.stiffness` /
+    `damping_ratio`, starting at the fingers' speed; ticked by a calloop timer). A new
     swipe during that carries on from where it was.
   - Rows whose children are all shown at once (`Treeview::shown_at_once`: a split's panes; `NodeTree::shown_at_once`
     gathers its `Layout::Split` nodes and its mains' lists) are swiped `reversed`: the focus ring follows the fingers.

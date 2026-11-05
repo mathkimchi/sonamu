@@ -60,7 +60,8 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 - `terminal` / `browser`: programs started by Super+T / Super+N (and the treeview's and a project's new terminal/browser). Unset: `$TERMINAL` / `$BROWSER` if installed, else the first installed of `TERMINALS` / `BROWSERS` in `standard_keybinds.rs` (foot, alacritty, kitty, ...; firefox, librewolf, chromium, ...), else foot / firefox. Resolved on each use, no args. The example config sets foot and firefox.
 - `swipe` (#141): `distance_x` / `distance_y` (px of finger movement per node, left/right and
   up/down, default 600), `rubber_band` (most it stretches past the
-  first / last node, in nodes, default 0.15), `snap_ms` (settling after the fingers lift, default 250). Read on each
+  first / last node, in nodes, default 0.15), `stiffness` / `damping_ratio` (the spring settling after the fingers lift, mass 1; default
+  1000 / 1.0, critically damped, as niri's workspace switch). Read on each
   swipe event (`settings::get()` in the root). See WORLD_TREE.md (Traversal keys).
 - `pdf_viewer`: what the file manager opens PDFs in (its window becomes the document). Unset: the first installed of
   `PDF_VIEWERS` in `standard_keybinds.rs` (zathura, okular, evince); zathura since 2026-11-05 (was Okular): fast to

@@ -202,6 +202,11 @@
       "description": "3 finger touchpad swipes between nodes (#141): up / down between siblings, left / right between parent and child",
       "type": "object",
       "properties": {
+        "damping_ratio": {
+          "description": "Of that spring: 1 is critically damped (no bounce), below 1 overshoots and bounces, above 1 is sluggish",
+          "type": "number",
+          "format": "float"
+        },
         "distance_x": {
           "description": "How far the fingers move left / right to go one node, in px",
           "type": "number",
@@ -217,11 +222,10 @@
           "type": "number",
           "format": "float"
         },
-        "snap_ms": {
-          "description": "How long it takes to settle on a node after the fingers lift, in ms",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
+        "stiffness": {
+          "description": "Of the spring settling on a node after the fingers lift (mass 1): higher is faster",
+          "type": "number",
+          "format": "float"
         }
       }
     },

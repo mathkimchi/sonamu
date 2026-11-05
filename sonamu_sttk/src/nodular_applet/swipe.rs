@@ -213,24 +213,27 @@ impl Swipe {
     pub fn end(self, cancelled: bool, settings: &SwipeSettings) -> Option<Settle> {
         let (strip, position) = self.lane?;
         let shown = strip.rubber_band(position, f64::from(settings.rubber_band));
+        let span = self
+            .moves
+            .front()
+            .map_or(Duration::ZERO, |&(at, _)| at.elapsed())
+            .max(Duration::from_millis(10));
+        let velocity = self.moves.iter().map(|&(_, along)| along).sum::<f64>() / span.as_secs_f64();
         let target = if cancelled {
             strip.start
         } else {
-            let span = self
-                .moves
-                .front()
-                .map_or(Duration::ZERO, |&(at, _)| at.elapsed())
-                .max(Duration::from_millis(10));
-            let velocity =
-                self.moves.iter().map(|&(_, along)| along).sum::<f64>() / span.as_secs_f64();
             settle_target(shown, velocity, strip.last())
         };
         Some(Settle {
             strip,
             from: shown,
+            velocity,
             target,
             started: Instant::now(),
-            duration: Duration::from_millis(u64::from(settings.snap_ms)),
+            spring: Spring {
+                stiffness: f64::from(settings.stiffness.max(1.0)),
+                damping_ratio: f64::from(settings.damping_ratio.max(0.01)),
+            },
         })
     }
 }
@@ -307,27 +310,61 @@ fn settle_target(shown: f64, velocity: f64, last: f64) -> usize {
     target.min(last).to_px() as usize
 }
 
-/// Easing onto a row after the fingers lifted
+/// A damped harmonic oscillator of mass 1 (as in libadwaita, niri and Apple's spring animations)
+#[derive(Debug, Clone, Copy)]
+struct Spring {
+    stiffness: f64,
+    damping_ratio: f64,
+}
+impl Spring {
+    /// It stops this close to its target, in rows (and moving slower than this per second)
+    const EPSILON: f64 = 0.001;
+    /// It stops after this long anyway (eg barely damped)
+    const MAX_TIME: f64 = 3.0;
+
+    /// Where it is `t` s after starting `offset` away from its target, moving at `velocity` (per s)
+    fn offset(self, offset: f64, velocity: f64, t: f64) -> f64 {
+        let omega = self.stiffness.sqrt();
+        let zeta = self.damping_ratio;
+        let decay = (-zeta * omega * t).exp();
+        if (zeta - 1.0).abs() < 1e-6 {
+            decay * (offset + (velocity + omega * offset) * t)
+        } else if zeta < 1.0 {
+            let omega_d = omega * (1.0 - zeta * zeta).sqrt();
+            decay
+                * (offset * (omega_d * t).cos()
+                    + (velocity + zeta * omega * offset) / omega_d * (omega_d * t).sin())
+        } else {
+            let omega_d = omega * (zeta * zeta - 1.0).sqrt();
+            decay
+                * (offset * (omega_d * t).cosh()
+                    + (velocity + zeta * omega * offset) / omega_d * (omega_d * t).sinh())
+        }
+    }
+}
+
+/// Springing onto a row after the fingers lifted, starting at their speed
 #[derive(Debug)]
 pub struct Settle {
     pub strip: Strip,
     from: f64,
+    /// Rows / s when the fingers lifted
+    velocity: f64,
     pub target: usize,
     started: Instant,
-    duration: Duration,
+    spring: Spring,
 }
 impl Settle {
     /// Where the view is at `now`, and whether it arrived
     fn position(&self, now: Instant) -> (f64, bool) {
-        let t = if self.duration.is_zero() {
-            1.0
-        } else {
-            ((now - self.started).as_secs_f64() / self.duration.as_secs_f64()).min(1.0)
-        };
-        // ease out (cubic)
-        let eased = 1.0 - (1.0 - t).powi(3);
+        let t = (now - self.started).as_secs_f64();
         let target = self.target as f64;
-        (self.from + (target - self.from) * eased, t >= 1.0)
+        let offset = |t| self.spring.offset(self.from - target, self.velocity, t);
+        let here = offset(t);
+        let speed = (offset(t + 0.001) - here) / 0.001;
+        let arrived = t >= Spring::MAX_TIME
+            || (here.abs() < Spring::EPSILON && speed.abs() < Spring::EPSILON * 10.0);
+        (if arrived { target } else { target + here }, arrived)
     }
 
     /// The view at `now`, `None` once it arrived
@@ -437,6 +474,29 @@ mod tests {
         // past the ends
         assert_eq!(super::settle_target(5.1, 3.0, 5.0), 5);
         assert_eq!(super::settle_target(-0.1, -3.0, 5.0), 0);
+    }
+
+    #[test]
+    fn spring_settles() {
+        let spring = super::Spring {
+            stiffness: 1000.0,
+            damping_ratio: 1.0,
+        };
+        assert!((spring.offset(1.0, 0.0, 0.0) - 1.0).abs() < 1e-9);
+        assert!(spring.offset(1.0, 0.0, 0.5).abs() < 0.01);
+        // critically damped: never overshoots from rest
+        assert!((0..100).all(|ms| spring.offset(1.0, 0.0, f64::from(ms) / 100.0) >= 0.0));
+        // a bouncy one overshoots, a sluggish one is still on its way
+        let bouncy = super::Spring {
+            damping_ratio: 0.3,
+            ..spring
+        };
+        assert!((0..100).any(|ms| bouncy.offset(1.0, 0.0, f64::from(ms) / 100.0) < 0.0));
+        let sluggish = super::Spring {
+            damping_ratio: 3.0,
+            ..spring
+        };
+        assert!(sluggish.offset(1.0, 0.0, 0.1) > spring.offset(1.0, 0.0, 0.1));
     }
 
     #[test]
