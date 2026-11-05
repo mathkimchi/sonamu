@@ -263,7 +263,7 @@ pub enum NodeRequest {
     /// Replaces the applet's node with `tree`, ending the applet (eg a project's contents, when it dissolves)
     Unwrap(DetachedTree),
     /// Starts a program without waiting for it (eg a wl client)
-    Run(&'static str),
+    Run(String),
     /// A wl surface the applet didn't take (`StandardApplet::take_wl_surface`), as a child of its node
     AddWlSurface(NewWlSurface),
     /// An applet to open the applet didn't take (`StandardApplet::take_open`), as a child of its node

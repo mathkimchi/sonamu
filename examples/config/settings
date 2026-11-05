@@ -55,6 +55,9 @@ print(json.dumps({
     ],
     # programs restored running in their terminal; for others, the restored terminal asks first
     "restore_programs": ["hx", {"program": "claude", "args": ["--continue"]}, "typst"],
+    # started by Super+T / Super+N
+    "terminal": "foot",
+    "browser": "firefox",
     # run once when Sonamu starts
     "startup": ["dms run"],
     "watch": [str(colors_path), str(dms_settings_path)],

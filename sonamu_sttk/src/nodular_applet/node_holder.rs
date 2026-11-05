@@ -10,7 +10,7 @@ use crate::{
         project_applet::ProjectApplet,
         split_applet::SplitApplet,
     },
-    standard_keybinds::{BROWSER, TERMINAL},
+    standard_keybinds::{browser, terminal},
 };
 use calloop::LoopHandle;
 use sonamu_common::{
@@ -272,11 +272,11 @@ impl NodeHolder {
         let initializer = match applet {
             NewApplet::Terminal | NewApplet::Browser => {
                 let program = if applet == NewApplet::Terminal {
-                    TERMINAL
+                    terminal()
                 } else {
-                    BROWSER
+                    browser()
                 };
-                if self.run(program) {
+                if self.run(&program) {
                     self.wl_target = Some((parent, position));
                 }
                 return;
@@ -496,7 +496,7 @@ impl NodeHolder {
             NodeRequest::Wrap(wrapper) => self.to_wrap = Some((id, wrapper, false)),
             NodeRequest::Unwrap(tree) => self.tree.unwrap(id, tree),
             NodeRequest::Run(program) => {
-                self.run(program);
+                self.run(&program);
             }
             NodeRequest::AddWlSurface(surface) => self.tree.add_wl_surface(id, surface),
             NodeRequest::Open(open) => self.open_under(id, &open),

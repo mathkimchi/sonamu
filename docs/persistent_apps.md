@@ -11,7 +11,7 @@ The session is saved every 2 seconds (if it changed) and before quitting, to `~/
 To turn sessions off, set it to nothing (`SONAMU_SESSION=`). To start fresh, delete the file.
 A file that can't be read is moved to `session.json.bad`.
 
-The recommended apps are Firefox and foot: Super+T starts foot and Super+N starts Firefox.
+The recommended apps are Firefox and foot. Super+T starts the `terminal` setting and Super+N the `browser` setting (unset: `$TERMINAL` / `$BROWSER`, else the first installed of a list starting with foot / firefox).
 
 ## Firefox
 

@@ -40,6 +40,10 @@ pub struct Settings {
     pub restore_programs: Vec<RestoreProgram>,
     /// Shell commands run once when Sonamu starts (eg `dms run`)
     pub startup: Vec<String>,
+    /// Program started by Super+T; `None`: `$TERMINAL`, else the first installed of a list
+    pub terminal: Option<String>,
+    /// Program started by Super+N; `None`: `$BROWSER`, else the first installed of a list
+    pub browser: Option<String>,
 }
 impl Settings {
     /// `gap` and `border.width`, rounded to whole px
@@ -62,6 +66,8 @@ impl Default for Settings {
             keybinds: Vec::new(),
             restore_programs: Vec::new(),
             startup: Vec::new(),
+            terminal: None,
+            browser: None,
         }
     }
 }

@@ -10,7 +10,7 @@ use crate::{
         node_tree::{AttachClient, NodeId, NodeTree, PROJECT_ICON, SpawnClient, root_label_mut},
     },
     session,
-    standard_keybinds::{BROWSER, TERMINAL},
+    standard_keybinds::{browser, terminal},
 };
 use sonamu_common::{
     sap::{
@@ -82,14 +82,14 @@ enum New {
     CommandHub,
     /// An empty project, in this one's directory
     Project,
-    Program(&'static str),
+    Program(fn() -> String),
 }
 /// Rows after its contents that add to it: label, key, and what it adds
 const NEW_ROWS: [(&str, char, New); 4] = [
     ("+ command hub  (n)", 'n', New::CommandHub),
     ("+ project  (p)", 'p', New::Project),
-    ("+ terminal  (t)", 't', New::Program(TERMINAL)),
-    ("+ browser  (b)", 'b', New::Program(BROWSER)),
+    ("+ terminal  (t)", 't', New::Program(terminal)),
+    ("+ browser  (b)", 'b', New::Program(browser)),
 ];
 // Other text is the settings' `palette.fg`
 const HINT: Color = Color([0x8A, 0x93, 0xA6, 0xFF]);
@@ -542,7 +542,7 @@ impl ProjectApplet {
         let initializer = match NEW_ROWS[index].2 {
             New::Program(program) => {
                 self.holder
-                    .handle_node_request(root, NodeRequest::Run(program));
+                    .handle_node_request(root, NodeRequest::Run(program()));
                 return;
             }
             New::CommandHub => CommandHubApplet::get_boxed_initiator(),
