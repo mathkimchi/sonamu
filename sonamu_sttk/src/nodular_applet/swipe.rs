@@ -5,13 +5,14 @@
 //! `slide` and `ring` draw a swipe for holders (`StandardEvent::Swipe`).
 
 use super::treeview::TreeviewRow;
+use crate::ui;
 use sonamu_common::{
     sap::packets::SwipeView, settings::SwipeSettings, utils::tree::world_tree::WorldTreePath,
 };
 use sonamu_ui::{
     color::Color,
     display_units::{DisplayContainerSize, ToPx},
-    ui_element::{Length, Style, UIElement, UITree},
+    ui_element::{Style, UITree},
 };
 use std::{
     collections::{HashMap, VecDeque},
@@ -281,12 +282,12 @@ pub fn ring(
         [start, (end + (to_end - end) * end_t).max(start)]
     };
     let [[left, right], [top, bottom]] = [edges(0), edges(1)];
-    UITree::leaf_styled(
-        UIElement::Bordered { color, radius },
-        Style {
-            border: Length::uniform_rect(Length::Px(border)),
-            ..Style::absolute([left, top], [right - left, bottom - top])
-        },
+    ui::frame(
+        color,
+        radius,
+        border,
+        Style::absolute([left, top], [right - left, bottom - top]),
+        Vec::new(),
     )
 }
 

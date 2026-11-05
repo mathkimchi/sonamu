@@ -3,6 +3,7 @@ use crate::{
     nodular_applet::{NodeRequest, NodularAppletInitializer, swipe},
     session,
     standard_keybinds::standard_keybind_request,
+    ui,
     wl_surface_applet::WlSurfaceApplet,
 };
 use slotmap::SlotMap;
@@ -22,7 +23,7 @@ use sonamu_common::{
 };
 use sonamu_ui::{
     display_units::DisplayContainerSize,
-    ui_element::{Length, Style, UIElement, UITree},
+    ui_element::{Style, UIElement, UITree},
     ui_event::{KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::collections::HashMap;
@@ -1930,15 +1931,11 @@ impl NodeTree {
                     |main| screen_surface(main, screen),
                 );
                 let [x, y, width, height] = pane.rect.map(|value| value as f32);
-                UITree::new_styled(
-                    UIElement::Bordered {
-                        color: border,
-                        radius: if pane.framed { settings.radius } else { 0.0 },
-                    },
-                    Style {
-                        border: Length::uniform_rect(Length::Px(pane.border as f32)),
-                        ..Style::absolute([x, y], [width, height])
-                    },
+                ui::frame(
+                    border,
+                    if pane.framed { settings.radius } else { 0.0 },
+                    pane.border as f32,
+                    Style::absolute([x, y], [width, height]),
                     vec![surface],
                 )
             })
