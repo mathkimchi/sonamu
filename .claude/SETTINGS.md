@@ -12,7 +12,7 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 
 ## Format
 
-- `Settings` derives `serde` + `schemars::JsonSchema`; the schema is written out so `"$schema"` gives editor autocomplete.
+- `Loaded`/`Settings` derive `schemars::JsonSchema`; the test `schema_is_current` rewrites `assets/settings.schema.json` when it's out of date (and fails once, so it gets committed). Fields of `Settings`, `Palette`, `Border`, `TreeviewSettings` aren't required (`optional_fields`); colors use `ColorSchema` (`Color` is in `sonamu_ui`). `assets/default_settings.json` points `$schema` at it relatively, the example program at the raw GitHub URL on `dev`; unknown keys like `$schema` are ignored when parsing.
 - Defaults are in `assets/default_settings.json` (`include_str!`, the only place they're defined); a file or program's JSON is deep-merged over them (objects merge, everything else replaces), so partial files are fine. A field missing from the defaults file panics in `Settings::default()` (the tests catch it).
 - Optional top-level `"watch": [paths]`: extra files to watch (eg the file colors are generated from). Not part of the stored settings.
 

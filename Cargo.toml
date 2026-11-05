@@ -15,6 +15,7 @@ resolver = "2"
 [workspace.dependencies]
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = "^1.0"
+schemars = "^1.0"                                         # json schema for the settings
 uuid = { version = "^1.23.3", features = ["v4", "serde"] }
 slotmap = { version = "^1.1" }                             # like a hashmap but it generates the keys
 libc = { version = "^0.2" }

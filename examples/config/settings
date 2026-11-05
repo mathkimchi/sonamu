@@ -14,6 +14,7 @@ colors = dms_colors["colors"][dms_colors["mode"]]
 bar = (dms_settings.get("barConfigs") or [{}])[0]
 
 print(json.dumps({
+    "$schema": "https://raw.githubusercontent.com/mathkimchi/sonamu/dev/assets/settings.schema.json",
     "palette": {
         "bg": colors["background"],
         "fg": colors["on_surface"],

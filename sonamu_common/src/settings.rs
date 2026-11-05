@@ -1,6 +1,7 @@
 //! User settings, read from the config dir. See `.claude/SETTINGS.md`.
 
 use notify::Watcher as _;
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::Deserialize;
 use sonamu_ui::{color::Color, display_units::ToPx};
 use std::{
@@ -22,7 +23,28 @@ const PROGRAM_TIMEOUT: Duration = Duration::from_secs(5);
 /// Every setting; a settings file or program only gives the ones it changes
 const DEFAULTS: &str = include_str!("../../assets/default_settings.json");
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+/// Every field can be left out, since the defaults fill it in
+fn optional_fields(schema: &mut Schema) {
+    schema.remove("required");
+}
+
+/// `Color`'s schema (`#rrggbb` or `#rrggbbaa`)
+struct ColorSchema;
+impl JsonSchema for ColorSchema {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Color".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "type": "string",
+            "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[schemars(transform = optional_fields)]
 pub struct Settings {
     pub palette: Palette,
     pub border: Border,
@@ -60,7 +82,7 @@ impl Settings {
 }
 
 /// Runs `command` with `sh -c` when `key` is pressed with exactly `mods` held.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 pub struct Keybind {
     /// Any of `ctrl`, `alt`, `shift`, `logo`
     #[serde(default)]
@@ -70,7 +92,7 @@ pub struct Keybind {
 }
 
 /// A character (case-insensitive), or an evdev code for keys without one (eg 115 is volume up)
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Key {
     Code(u32),
@@ -113,7 +135,7 @@ impl Keybind {
 
 /// A program (matched by its name) restored running in its terminal: with its saved args,
 /// or with these instead (eg `claude` with `--continue`)
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum RestoreProgram {
     Name(String),
@@ -128,7 +150,8 @@ impl RestoreProgram {
 }
 
 /// Whether the treeview is pinned is part of the session, toggled by its pin button
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[schemars(transform = optional_fields)]
 pub struct TreeviewSettings {
     /// The side a pinned one is on
     pub side: TreeviewSide,
@@ -141,7 +164,7 @@ pub struct TreeviewSettings {
 }
 
 /// A column beside the panes, which get the rest of the width
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TreeviewSide {
     Left,
@@ -149,7 +172,7 @@ pub enum TreeviewSide {
 }
 
 /// Where an unpinned treeview floats over the panes, which keep their size
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TreeviewFloating {
     /// Over the middle
@@ -158,15 +181,20 @@ pub enum TreeviewFloating {
     Side,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[schemars(transform = optional_fields)]
 pub struct Palette {
     /// Unused for now: behind the panes is the background layer (eg a wallpaper)
+    #[schemars(with = "ColorSchema")]
     pub bg: Color,
     /// Text of the treeview and projects
+    #[schemars(with = "ColorSchema")]
     pub fg: Color,
     /// Focus on a node itself (traversal keys move it): its border and treeview marker
+    #[schemars(with = "ColorSchema")]
     pub accent: Color,
     /// Text of inactive (eg hibernated) nodes in the treeview
+    #[schemars(with = "ColorSchema")]
     pub inactive: Color,
 }
 impl Default for Palette {
@@ -175,18 +203,22 @@ impl Default for Palette {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[schemars(transform = optional_fields)]
 pub struct Border {
     /// Of panes, in px
     pub width: f32,
     /// Focus is inside the pane's applet (keys go to it); also its treeview marker
+    #[schemars(with = "ColorSchema")]
     pub focused: Color,
+    #[schemars(with = "ColorSchema")]
     pub unfocused: Color,
     /// Of the treeview, when framed (`always_frame`)
+    #[schemars(with = "ColorSchema")]
     pub treeview: Color,
 }
 /// What the settings file or program gives.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 pub struct Loaded {
     #[serde(flatten)]
     pub settings: Settings,
@@ -523,6 +555,20 @@ mod tests {
         );
         assert_eq!(loaded.settings.palette, Palette::default());
         assert_eq!(loaded.watch, vec![PathBuf::from("/a")]);
+    }
+
+    /// Writes `assets/settings.schema.json` if it's out of date
+    #[test]
+    fn schema_is_current() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../assets/settings.schema.json"
+        );
+        let schema = serde_json::to_string_pretty(&schemars::schema_for!(Loaded)).unwrap() + "\n";
+        if fs::read_to_string(path).ok().as_deref() != Some(&schema) {
+            fs::write(path, schema).unwrap();
+            panic!("{path} was out of date and is rewritten; commit it");
+        }
     }
 
     #[test]

@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loaded",
+  "description": "What the settings file or program gives.",
+  "type": "object",
+  "properties": {
+    "always_frame": {
+      "description": "Border, gap and radius also on a pane alone in its tree, and on the treeview",
+      "type": "boolean"
+    },
+    "border": {
+      "$ref": "#/$defs/Border"
+    },
+    "browser": {
+      "description": "Program started by Super+N; `None`: `$BROWSER`, else the first installed of a list",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "font_size": {
+      "description": "Text height in px (Sonamu's own UI isn't scaled)",
+      "type": "number",
+      "format": "float"
+    },
+    "gap": {
+      "description": "Between panes and around them, in px",
+      "type": "number",
+      "format": "float"
+    },
+    "keybinds": {
+      "description": "Global shortcuts that run a shell command",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Keybind"
+      }
+    },
+    "palette": {
+      "$ref": "#/$defs/Palette"
+    },
+    "radius": {
+      "description": "Of pane corners, in px",
+      "type": "number",
+      "format": "float"
+    },
+    "restore_programs": {
+      "description": "Programs restored running in their terminal (see `.claude/SESSIONS.md`)",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RestoreProgram"
+      }
+    },
+    "startup": {
+      "description": "Shell commands run once when Sonamu starts (eg `dms run`)",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "terminal": {
+      "description": "Program started by Super+T; `None`: `$TERMINAL`, else the first installed of a list",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "treeview": {
+      "$ref": "#/$defs/TreeviewSettings"
+    },
+    "watch": {
+      "description": "Extra files to watch for changes, eg the ones the program reads.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "Border": {
+      "type": "object",
+      "properties": {
+        "focused": {
+          "description": "Focus is inside the pane's applet (keys go to it); also its treeview marker",
+          "$ref": "#/$defs/Color"
+        },
+        "treeview": {
+          "description": "Of the treeview, when framed (`always_frame`)",
+          "$ref": "#/$defs/Color"
+        },
+        "unfocused": {
+          "$ref": "#/$defs/Color"
+        },
+        "width": {
+          "description": "Of panes, in px",
+          "type": "number",
+          "format": "float"
+        }
+      }
+    },
+    "Color": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+    },
+    "Key": {
+      "description": "A character (case-insensitive), or an evdev code for keys without one (eg 115 is volume up)",
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "maxLength": 1,
+          "minLength": 1
+        }
+      ]
+    },
+    "Keybind": {
+      "description": "Runs `command` with `sh -c` when `key` is pressed with exactly `mods` held.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "mods": {
+          "description": "Any of `ctrl`, `alt`, `shift`, `logo`",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "key",
+        "command"
+      ]
+    },
+    "Palette": {
+      "type": "object",
+      "properties": {
+        "accent": {
+          "description": "Focus on a node itself (traversal keys move it): its border and treeview marker",
+          "$ref": "#/$defs/Color"
+        },
+        "bg": {
+          "description": "Unused for now: behind the panes is the background layer (eg a wallpaper)",
+          "$ref": "#/$defs/Color"
+        },
+        "fg": {
+          "description": "Text of the treeview and projects",
+          "$ref": "#/$defs/Color"
+        },
+        "inactive": {
+          "description": "Text of inactive (eg hibernated) nodes in the treeview",
+          "$ref": "#/$defs/Color"
+        }
+      }
+    },
+    "RestoreProgram": {
+      "description": "A program (matched by its name) restored running in its terminal: with its saved args,\nor with these instead (eg `claude` with `--continue`)",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "program": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "program",
+            "args"
+          ]
+        }
+      ]
+    },
+    "TreeviewFloating": {
+      "description": "Where an unpinned treeview floats over the panes, which keep their size",
+      "oneOf": [
+        {
+          "description": "Over the middle",
+          "type": "string",
+          "const": "center"
+        },
+        {
+          "description": "At `side`",
+          "type": "string",
+          "const": "side"
+        }
+      ]
+    },
+    "TreeviewSettings": {
+      "description": "Whether the treeview is pinned is part of the session, toggled by its pin button",
+      "type": "object",
+      "properties": {
+        "floating": {
+          "description": "Where an unpinned one floats (only while focus is on a node)",
+          "$ref": "#/$defs/TreeviewFloating"
+        },
+        "floating_size": {
+          "description": "A `Center` floating one's width and height, in percent of the window's",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "side": {
+          "description": "The side a pinned one is on",
+          "$ref": "#/$defs/TreeviewSide"
+        },
+        "width": {
+          "description": "The side column's width, in percent of the window's",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      }
+    },
+    "TreeviewSide": {
+      "description": "A column beside the panes, which get the rest of the width",
+      "type": "string",
+      "enum": [
+        "left",
+        "right"
+      ]
+    }
+  }
+}
