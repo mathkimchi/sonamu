@@ -1328,8 +1328,7 @@ fn read_cursor_surface(surface: &WlSurface, scale: f64) -> Option<Cursor> {
         for row in 0..height {
             let start = usize::try_from(metadata.offset + metadata.stride * row as i32).ok()?;
             // little-endian ARGB is B,G,R,A in bytes, and premultiplied
-            for pixel in data.get(start..start + width * 4)?.chunks_exact(4) {
-                let &[b, g, r, a] = pixel else { unreachable!() };
+            for &[b, g, r, a] in data.get(start..start + width * 4)?.as_chunks::<4>().0 {
                 let a = if has_alpha { a } else { u8::MAX };
                 let unpremultiply = |channel: u8| {
                     let value = (u16::from(channel) * 255)
