@@ -126,8 +126,8 @@ User-facing setup (incl. NixOS / Home Manager) is in `docs/persistent_apps.md`.
 
 - Single-instance apps (kitty `-1`, qutebrowser, firefox): every window has the instance's pid, so all share the
   first window's cwd, and two awaiting tiles of the same app may get each other's windows (urls swapped).
-- Plucking or wrapping a tile while it is still "Starting ..." drops its `awaiting` (`DetachedTree` has no field for it):
-  the placeholder stays, and the window opens at the focus instead.
+- Fixed 2026-11-05: plucking or wrapping a tile while it was still "Starting ..." dropped its `awaiting` (and a
+  hibernating node its saved applet, #102); `DetachedTree` carries both now.
 - Fixed (#77): Firefox's add-on install prompt didn't show. Every toplevel was always `Activated`, and Firefox only
   shows doorhangers in its active window, so it never did; now only the keyboard focus's toplevel is (`focus_changed`).
   The prompt is a subsurface, which was drawn under the page: surface trees were walked top to bottom

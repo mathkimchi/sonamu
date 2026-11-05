@@ -3,7 +3,7 @@
 use crate::{
     sap::{
         client_handle::ClientHandle,
-        packets::{StandardEvent, Treeview, WlSurfaceId},
+        packets::{AwaitedWl, StandardEvent, Treeview, WlSurfaceId},
         session::SavedApplet,
         shared_state::SharedState,
     },
@@ -97,6 +97,8 @@ pub struct DetachedTree {
     pub wl_surface: Option<WlSurfaceId>,
     /// `main` stands in for this saved applet, which starts when the node is focused (hibernating, #102)
     pub hibernated: Option<SavedApplet>,
+    /// `main` stands in for a restored wl client that is starting, until its toplevel comes
+    pub awaiting: Option<AwaitedWl>,
     pub children: Vec<Self>,
 }
 impl DetachedTree {
@@ -107,6 +109,7 @@ impl DetachedTree {
             layout: Layout::Single,
             wl_surface: None,
             hibernated: None,
+            awaiting: None,
             children: Vec::new(),
         }
     }

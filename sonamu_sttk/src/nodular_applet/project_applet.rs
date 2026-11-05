@@ -313,6 +313,7 @@ impl ProjectApplet {
                 layout: Layout::Single,
                 wl_surface: None,
                 hibernated: None,
+                awaiting: None,
                 children: Vec::new(),
             };
             let mut project = Self::with_tree(hook, |spawn_client, attach_client| {
@@ -329,6 +330,7 @@ impl ProjectApplet {
             layout: Layout::Single,
             wl_surface: None,
             hibernated: None,
+            awaiting: None,
             children: vec![subtree],
         };
         Self::with_tree(hook, |spawn_client, attach_client| {

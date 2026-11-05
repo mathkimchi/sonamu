@@ -974,6 +974,9 @@ impl StandardApplet for FileManagerApplet {
 
     fn settings_changed(&mut self, settings: &Settings) {
         self.palette = settings.palette.clone();
+        // the documents are under a header as tall as a row, which the font size sets
+        self.clamp_scroll();
+        self.resize_documents();
     }
 
     fn update(&mut self) {

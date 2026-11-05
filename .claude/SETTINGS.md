@@ -77,7 +77,8 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 ## Issues found
 
 - Couldn't screenshot: a nested winit Sonamu inside a running Sonamu fails `Surface::configure` ("Surface does not support the adapter's queue family"); the previous commit fails the same way, so it's environmental.
-- The file manager sizes its preview from row height only on resize, so a font change applies there after the next resize.
+- Fixed 2026-11-05: the file manager sized its documents from the row height only on resize, so a font change applied
+  there after the next resize; it resizes them on `settings_changed` too.
 
 ## Later
 

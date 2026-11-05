@@ -277,6 +277,7 @@ impl NodeTree {
         let id = self.nodes.insert_with_key(|id| Node {
             inactive: tree.hibernated.is_some(),
             hibernated: tree.hibernated,
+            awaiting: tree.awaiting,
             ..Node::new(
                 tree.main.map(|main| attach_client(id, main)),
                 tree.layout,
@@ -452,6 +453,7 @@ impl NodeTree {
             layout: node.layout,
             wl_surface,
             hibernated: node.hibernated,
+            awaiting: node.awaiting,
             children: node
                 .children
                 .into_iter()
