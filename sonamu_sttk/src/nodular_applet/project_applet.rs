@@ -47,6 +47,8 @@ fn row_height() -> f32 {
 const PAD: f32 = 16.0;
 const DIRECTORY_ROW: usize = 1;
 const ICON_ROW: usize = 2;
+/// The only row a click does nothing on
+const HINT_ROW: usize = 3;
 /// Rows before its contents (or the directory or icon options, while setting one)
 const CONTENTS_ROW: usize = 4;
 /// The icons the picker lists (any typed character works too)
@@ -852,6 +854,7 @@ impl ProjectApplet {
                         [(width - PAD).max(0.0), row_height()],
                     ),
                 )
+                .with_cursor((index != HINT_ROW).then_some(Cursor::Named(CursorIcon::Pointer)))
             })
             .chain(self.get_cards())
             .collect();

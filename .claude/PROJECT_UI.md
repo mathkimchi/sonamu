@@ -58,7 +58,8 @@
 
 - `StandardEvent::FocusChanged`/`Highlighted` are never sent by anything.
 - `1-9: select` in the hint: `9` is the last child and digits only reach 8 children; beyond that only clicks/`w`/`s`.
-- No hover/pointer cursor on the clickable rows.
+- Fixed 2026-11-05: no pointer cursor on the clickable rows (all but the hint have one now, across the row's width,
+  like the click).
 
 ## Verified (headless)
 
