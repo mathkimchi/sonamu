@@ -62,6 +62,8 @@ pub struct RootNodeApplet {
     last_drop: Option<(WorldTreePath, NodeId)>,
     /// Pinned, or traversing (see `update_treeview_visibility`)
     treeview_shown: bool,
+    /// A 3 finger swipe moved the selector last, so it doesn't show the treeview (until keys or 4 fingers move it)
+    swiped: bool,
     /// Always shown, beside the panes; toggled by its pin button and saved in the session
     treeview_pinned: bool,
     /// The view root when it is a row inside an applet (double click, right click › Set as view root, Alt+R);
@@ -151,8 +153,11 @@ impl RootNodeApplet {
     /// (also when the treeview settings or pinning did)
     fn update_treeview_visibility(&mut self) {
         let settings = settings::get();
+        let traversing = self.holder.tree.is_traversing();
+        // once inside an applet, selecting again shows it
+        self.swiped &= traversing;
         let shown = self.treeview_pinned
-            || self.holder.tree.is_traversing()
+            || (traversing && !self.swiped)
             // eg a drag or menu that started there
             || self.treeview_pointer.is_pressed();
         if shown != self.treeview_shown {
@@ -399,6 +404,7 @@ impl RootNodeApplet {
             last_drop: None,
             // the root node starts focused
             treeview_shown: true,
+            swiped: false,
             // a clean session starts pinned
             treeview_pinned: saved_session
                 .as_ref()
@@ -524,8 +530,14 @@ impl RootNodeApplet {
     fn handle_event(&mut self, event: StandardEvent) {
         if let StandardEvent::UIEvent(UIEvent::Swipe { fingers, phase }) = event {
             match fingers {
-                3 => self.handle_swipe(phase),
-                4 => self.handle_select_swipe(phase),
+                3 => {
+                    self.swiped = true;
+                    self.handle_swipe(phase);
+                }
+                4 => {
+                    self.swiped = false;
+                    self.handle_select_swipe(phase);
+                }
                 _ => {}
             }
             self.damage_if_tree_changed();
@@ -549,6 +561,7 @@ impl RootNodeApplet {
         if let StandardEvent::UIEvent(ui_event) = &event
             && let Some(traversal) = Traversal::of(ui_event, self.holder.tree.is_traversing())
         {
+            self.swiped = false;
             self.traverse(traversal);
             self.damage_if_tree_changed();
             return;
