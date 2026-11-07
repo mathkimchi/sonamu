@@ -1237,11 +1237,7 @@ impl NodeTree {
 
     /// Starts the focused node's wl client if it is hibernating
     pub fn wake_focused(&mut self) {
-        self.wake(self.focused_node());
-    }
-
-    /// Starts a hibernating node's saved applet in place of its stand-in
-    fn wake(&mut self, id: NodeId) {
+        let id = self.focused_node();
         let Some(saved) = self.nodes[id].hibernated.take() else {
             return;
         };
@@ -1605,8 +1601,6 @@ impl NodeTree {
                 true,
             );
             for pane in &panes {
-                // shown beside the focused one (eg a half width neighbour), so it runs
-                self.wake(pane.node);
                 self.resize(pane.node, pane.inner_size());
             }
             if self
