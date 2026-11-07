@@ -81,6 +81,7 @@ fn installed(program: &str) -> bool {
 /// - `Super+T` / `Super+N` - Start the terminal / browser
 /// - `Ctrl+Shift+Plus` - Add child
 /// - `Super+P` - Put the node in a project
+/// - `Super+F` - Toggle half width
 /// - `Alt+Shift+W` / `Alt+Shift+S` - swap with the previous / next sibling
 ///
 /// Traversal (`Alt+<traversal key>`, swipes) is the root's (`nodular_applet::traversal`).
@@ -131,6 +132,16 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
     {
         // Super+W -> close this tab, its children move to the parent
         Some(NodeRequest::Close)
+    } else if let UIEvent::Key {
+        symbol: Some(key),
+        modifiers: KeyModifiers { logo: true, .. },
+        pressed: true,
+        ..
+    } = &ui_event
+        && matches!(key.to_char(), Some('f' | 'F'))
+    {
+        // Super+F -> toggle half width (#144)
+        Some(NodeRequest::ToggleHalf)
     } else if let UIEvent::Key {
         symbol: Some(key),
         modifiers: KeyModifiers { logo: true, .. },

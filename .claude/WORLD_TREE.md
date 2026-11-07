@@ -117,6 +117,8 @@ published treeviews.
     subtree with a node whose applet is made from it.
   - Undone by closing it: on `CloseRequest` (Ctrl+W on its node, or on its inner root) it detaches its contents and
     sends `NodeRequest::Unwrap(contents)`, so they take its place.
+- `Super+F` (`NodeRequest::ToggleHalf`) toggles a node's `half` width, saved as `SavedTree::half`; a project's
+  inner root passes it to the project's node. Not laid out yet (#144).
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
   container of its panes (`NodeTree::restore_subtree`).
 

@@ -257,6 +257,8 @@ pub enum NodeRequest {
     Close,
     /// Swaps the applet's node (with its subtree) with the sibling this many places over (-1: previous)
     SwapSibling(isize),
+    /// Toggles the applet's node between half and full width (#144)
+    ToggleHalf,
     /// Replaces the applet's node and everything under it with a node whose applet is made from them
     /// (eg a project holding them as its inner tree)
     Wrap(WrapInitializer),

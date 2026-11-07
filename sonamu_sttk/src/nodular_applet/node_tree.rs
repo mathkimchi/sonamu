@@ -66,6 +66,8 @@ struct Node {
     hibernated: Option<SavedApplet>,
     /// The last `StandardEvent::ScreenViews` sent to its main: its size on each screen, and the active one
     screen_views: Option<(Vec<Option<DisplayContainerSize>>, usize)>,
+    /// Half width (`Super+F`, #144)
+    half: bool,
 }
 impl Node {
     const fn new(main: Option<ClientHandle>, parent: Option<NodeId>) -> Self {
@@ -82,6 +84,7 @@ impl Node {
             inactive: false,
             hibernated: None,
             screen_views: None,
+            half: false,
         }
     }
 }
@@ -316,6 +319,7 @@ impl NodeTree {
         let id = self.nodes.insert_with_key(|id| Node {
             inactive: hibernated.is_some(),
             hibernated,
+            half: saved.half,
             ..Node::new(main.map(|initializer| spawn_client(id, initializer)), parent)
         });
         self.send_initial_size(id);
@@ -335,9 +339,7 @@ impl NodeTree {
             _ => SavedTree {
                 main: None,
                 children: saved,
-                label: None,
-                directory: None,
-                icon: None,
+                ..SavedTree::default()
             },
         }
     }
@@ -360,6 +362,7 @@ impl NodeTree {
         vec![SavedTree {
             main,
             children,
+            half: node.half,
             label: None,
             directory: None,
             icon: None,
@@ -581,6 +584,14 @@ impl NodeTree {
             id = self.nodes.get(current).and_then(|node| node.parent);
         }
         false
+    }
+
+    /// Toggles the node between half and full width (`Super+F`, #144)
+    pub fn toggle_half(&mut self, id: NodeId) {
+        if let Some(node) = self.nodes.get_mut(id) {
+            node.half = !node.half;
+            self.damaged = true;
+        }
     }
 
     /// Swaps the node with the sibling `shift` places over; does nothing if there is none

@@ -479,6 +479,11 @@ impl NodeHolder {
                 self.tree.close(id);
             }
             NodeRequest::SwapSibling(shift) => self.tree.swap_sibling(id, shift),
+            // the root of a project's inner tree stands for the project
+            NodeRequest::ToggleHalf if self.project && id == self.tree.root() => {
+                return Some(NodeRequest::ToggleHalf);
+            }
+            NodeRequest::ToggleHalf => self.tree.toggle_half(id),
             // it is a project already
             NodeRequest::Wrap(_) if self.project && id == self.tree.root() => {}
             NodeRequest::Wrap(wrapper) => self.to_wrap = Some((id, wrapper)),
