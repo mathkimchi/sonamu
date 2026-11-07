@@ -37,6 +37,7 @@ DEVLOG.md is 10k+ lines, read it with tail.
 # Rules
 
 - Do not change more than asked.
+- Never edit `docs/`, `README.md` or `DEVLOG.md`; they're the user's.
 - Keep changes small and simple.
 - Report issues we missed.
 - Follow general Rust idioms.
