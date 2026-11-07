@@ -69,8 +69,8 @@ const MAN_PAGE: &[ManSection] = &[
     ManSection {
         title: "Gestures",
         entries: &[
-            entry("3-finger swipe up/down", "previous/next sibling"),
-            entry("3-finger swipe left/right", "child/parent"),
+            entry("3-finger swipe left/right", "next/previous sibling"),
+            entry("3-finger swipe up/down", "child/parent"),
             entry("4-finger swipe up/down", "focus tree view/main content"),
         ],
     },

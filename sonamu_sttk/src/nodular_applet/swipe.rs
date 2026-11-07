@@ -49,7 +49,7 @@ impl Strip {
             .position(|sibling| sibling == path)
             .unwrap_or(0);
         Self {
-            vertical: true,
+            vertical: false,
             paths,
             start,
             reversed: false,
@@ -83,7 +83,7 @@ impl Strip {
             paths.push(child);
         }
         Self {
-            vertical: false,
+            vertical: true,
             paths,
             start,
             reversed: false,

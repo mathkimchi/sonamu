@@ -43,8 +43,8 @@ Basic Usage Manual:
   - Drag/drop nodes: yes
   - Right click: brings up options
 - Gestures:
-  - 3-finger swipe up/down: next/previous sibling (the view follows the fingers)
-  - 3-finger swipe left/right: child (the one last focused)/parent
+  - 3-finger swipe left/right: next/previous sibling (the view follows the fingers)
+  - 3-finger swipe up/down: child (the one last focused)/parent
   - 4-finger swipe up/down: focus tree view/main content
 
 Niche keybinds not included,
