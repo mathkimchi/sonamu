@@ -66,8 +66,9 @@ Applets have no traversal of their own.
     it never skips rows), focuses it, then springs there (`Settle`: a damped harmonic oscillator, `swipe.stiffness` /
     `damping_ratio`, starting at the fingers' speed; ticked by a calloop timer). A new
     swipe during that carries on from where it was.
-  - A node selected by a 3 finger swipe doesn't show the treeview (`RootNodeApplet::swiped`, cleared by traversal
-    keys, 4 fingers, or focus going inside an applet).
+  - A node selected by a 3 finger swipe doesn't show the treeview (`RootNodeApplet::swiped`, cleared by a key with a
+    symbol or a click reaching the root, or 4 fingers). Not by focus going inside an applet: a project reports its
+    `traversing` late, so right after a swipe into it the root would see "inside" and clear it.
   - Rows whose children are all shown at once (`Treeview::shown_at_once`; `NodeTree::shown_at_once` gathers its
     mains' lists; nothing publishes any now) are swiped `reversed`: the focus ring follows the fingers. Half width
     siblings side by side aren't: a swipe goes the same way whatever the widths (#144).

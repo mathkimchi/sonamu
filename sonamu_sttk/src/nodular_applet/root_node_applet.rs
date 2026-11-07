@@ -62,7 +62,8 @@ pub struct RootNodeApplet {
     last_drop: Option<(WorldTreePath, NodeId)>,
     /// Pinned, or traversing (see `update_treeview_visibility`)
     treeview_shown: bool,
-    /// A 3 finger swipe moved the selector last, so it doesn't show the treeview (until keys or 4 fingers move it)
+    /// A 3 finger swipe moved the selector last, so it doesn't show the treeview (until a key, click or 4 fingers).
+    /// Not cleared by focus going inside an applet: a project reports that late, so it would race the swipe.
     swiped: bool,
     /// Always shown, beside the panes; toggled by its pin button and saved in the session
     treeview_pinned: bool,
@@ -153,11 +154,8 @@ impl RootNodeApplet {
     /// (also when the treeview settings or pinning did)
     fn update_treeview_visibility(&mut self) {
         let settings = settings::get();
-        let traversing = self.holder.tree.is_traversing();
-        // once inside an applet, selecting again shows it
-        self.swiped &= traversing;
         let shown = self.treeview_pinned
-            || (traversing && !self.swiped)
+            || (self.holder.tree.is_traversing() && !self.swiped)
             // eg a drag or menu that started there
             || self.treeview_pointer.is_pressed();
         if shown != self.treeview_shown {
@@ -542,6 +540,20 @@ impl RootNodeApplet {
             }
             self.damage_if_tree_changed();
             return;
+        }
+        if let StandardEvent::UIEvent(
+            UIEvent::Key {
+                symbol: Some(_),
+                pressed: true,
+                ..
+            }
+            | UIEvent::Mouse(MouseEvent {
+                kind: MouseEventKind::Button { pressed: true, .. },
+                ..
+            }),
+        ) = &event
+        {
+            self.swiped = false;
         }
         if let StandardEvent::UIEvent(ui_event) = &event
             && let Some(keybind) = RootKeybind::of(ui_event)
