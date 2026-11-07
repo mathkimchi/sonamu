@@ -136,7 +136,7 @@ Designed together (grilled 2026-11-07). These are defaults; an applet with an in
 - Column width per node, ½ or 1, `Super+F` toggles (like Niri), saved. The view follows focus by minimal scroll
   (Niri's default), animated by the swipe settle spring.
 - 3-finger axes swap: left/right = siblings, up/down = parent/child.
-- Splits hidden: no default keybinds; still loadable from sessions and in the right-click menu.
+- Splits hidden: no default keybinds; still loadable from sessions (they never had a right-click menu entry, so nothing makes new ones now).
 - Zoom-out view isn't a compositor state: it is what a holder (project, split, file manager, root) draws when selected
   but not inside (extends `selected_at_root`; a project adds its settings). Plain nodes have no inner tree, so there is no
   selected vs inside for them visually. Swipes and keys move focus as usual.
