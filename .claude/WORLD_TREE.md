@@ -148,7 +148,8 @@ Ownership is what pluck/place moves between: a holder detaches clients from its 
   tree whose root has no main (the root applet's) draws `NodeTree::map`: a row of scaled tiles per depth (3 at most)
   down the children focus was last under, marked, each row scrolled to its marked tile. Pinned to iterate on; it
   takes no clicks yet.
-- Not yet: wider strips than two halves, and waking a hibernated half shown beside.
+- Every pane on the active screen is woken if hibernating (`update_layout`), eg a half shown beside the focused one.
+- Not yet: wider strips than two halves.
 
 ## Focus
 
