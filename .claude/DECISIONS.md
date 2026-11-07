@@ -125,3 +125,26 @@ Found, not fixed (not small, or the intended behavior is unclear):
 - It's placed like a new wl surface: passed into the focused applet while focus is inside it (projects and splits take it into their tree), else added as the focused node's last child, focused. So without a path arg the file manager follows the directory of the tree it lands in (eg a project's); in the root's tree that's the runner's cwd.
 - `sonamu-msg` makes relative args that exist as paths absolute, since the runner's cwd differs. It exits 1 if Sonamu isn't reachable, so xdg-open can fall back.
 - Not done: `org.freedesktop.FileManager1` over D-Bus (browsers' "Show in folder"), `file://` URI args, and selecting a file (`ShowItems`) rather than opening a folder.
+
+## Scrolling and the zoom-out view (#144, #145; planned, not built)
+
+Designed together (grilled 2026-11-07). These are defaults; an applet with an inner tree may lay out its own differently.
+
+- `Layout::Single` becomes `Layout::Scroll` (`#[serde(alias = "Single")]`), the default: a node's children are a
+  horizontal strip, ordered like rows now (inner, then own). A node's main is its column in its parent's strip.
+  With all columns full width it is exactly `Single`.
+- Column width per node, ½ or 1, `Super+F` toggles (like Niri), saved. The view follows focus by minimal scroll
+  (Niri's default), animated by the swipe settle spring.
+- 3-finger axes swap: left/right = siblings, up/down = parent/child.
+- Splits hidden: no default keybinds; still loadable from sessions and in the right-click menu.
+- Zoom-out view isn't a compositor state: it is what a holder (project, split, file manager, root) draws when selected
+  but not inside (extends `selected_at_root`; a project adds its settings). Plain nodes have no inner tree, so there is no
+  selected vs inside for them visually. Swipes and keys move focus as usual.
+- Drawn with scaled live textures (like the project preview), never by resizing clients.
+- 4 fingers up selects the nearest enclosing holder (one per swipe, up to the root); 4 down goes back in.
+- Default zoomed-out layout: one row of scaled tiles per depth, stacked down the remembered chain (the swipe space
+  drawn small). Pinned: to iterate on.
+- The symbolic treeview is reached only by Alt.
+- Paths stay `Vec<Step>`: "selected P" and "inside P" are focus, not path, so P's inner root needs no path of its own
+  (the old `[[2], []]` stays unrepresentable).
+- When built: update `docs/usage.md`, the help menu and `WORLD_TREE.md` for the new gestures.
