@@ -1,6 +1,6 @@
 //! 3 finger swipes between nodes (#141, #142): the view follows the fingers along a strip of shown rows
-//! (siblings up / down, parent and child left / right) and settles on one when they lift.
-//! Natural direction: the content moves with the fingers, so fingers up bring in the next sibling; where the rows are
+//! (siblings left / right, parent and child up / down, #144) and settles on one when they lift.
+//! Natural direction: the content moves with the fingers, so fingers left bring in the next sibling; where the rows are
 //! all shown at once, the focus moves with the fingers instead.
 //! `slide` and `ring` draw a swipe for holders (`StandardEvent::Swipe`).
 
@@ -49,7 +49,7 @@ impl Strip {
             .position(|sibling| sibling == path)
             .unwrap_or(0);
         Self {
-            vertical: true,
+            vertical: false,
             paths,
             start,
             reversed: false,
@@ -83,7 +83,7 @@ impl Strip {
             paths.push(child);
         }
         Self {
-            vertical: false,
+            vertical: true,
             paths,
             start,
             reversed: false,

@@ -57,10 +57,10 @@ Applets have no traversal of their own.
 - Swipes (DRM backend only: `UIEvent::Swipe`, `Begin` / `Update(px)` / `End`), the root's (`handle_swipe`): 4 fingers up
   selects the focused row (out of its applet), 4 down is Enter; once a swipe (50 px). 3 fingers (#141, #142,
   `nodular_applet/swipe.rs`) move along a strip of shown rows, natural direction (content follows the fingers):
-  - The axis locks after 10 px. Vertical: the focused row's siblings (rows under the same parent row, so inner then own
-    children); fingers up bring in the next. Horizontal: ancestors up to the first row, then down through each row's
-    remembered child (`RootNodeApplet::remembered`, the child row focus was last under, by path, unsaved; else the
-    first); fingers left bring in the child.
+  - The axis locks after 10 px. Horizontal (#144): the focused row's siblings (rows under the same parent row, so inner
+    then own children); fingers left bring in the next. Vertical: ancestors up to the first row, then down through each
+    row's remembered child (`RootNodeApplet::remembered`, the child row focus was last under, by path, unsaved; else the
+    first); fingers up bring in the child.
   - The view is a position in rows (`swipe.distance_x` / `distance_y` px each), rubber-banded past the ends (`swipe.rubber_band`). On
     lift it settles on one of the two rows shown, the one the speed projected 200 ms ahead is nearer (`settle_target`;
     it never skips rows), focuses it, then springs there (`Settle`: a damped harmonic oscillator, `swipe.stiffness` /

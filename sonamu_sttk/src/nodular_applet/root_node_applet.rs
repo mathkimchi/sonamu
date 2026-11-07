@@ -812,13 +812,13 @@ impl RootNodeApplet {
                     let focus = focused_row(&rows, &tree.get_focus_path());
                     let from = rows.iter().position(|row| row.path == focus)?;
                     Some(if vertical {
+                        Strip::lineage(&rows, from, remembered)
+                    } else {
                         let mut strip = Strip::siblings(&rows, from);
                         let mut parent = focus;
                         parent.0.pop();
                         strip.reversed = tree.shown_at_once().contains(&parent);
                         strip
-                    } else {
-                        Strip::lineage(&rows, from, remembered)
                     })
                 });
                 if let Some(view) = view {
