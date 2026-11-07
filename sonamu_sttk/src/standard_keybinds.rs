@@ -80,7 +80,7 @@ fn installed(program: &str) -> bool {
 /// - `Super+W` - Close tab
 /// - `Super+T` / `Super+N` - Start the terminal / browser
 /// - `Ctrl+Shift+Plus` - Add child
-/// - `Super+Shift+|` / `Super+Shift+_` - Split side by side / stacked
+/// - `Super+F` - Toggle half width
 /// - `Super+P` - Put the node in a project
 /// - `Alt+Shift+W` / `Alt+Shift+S` - swap with the previous / next sibling
 ///
@@ -132,6 +132,16 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
     {
         // Super+W -> close this tab, its children move to the parent
         Some(NodeRequest::Close)
+    } else if let UIEvent::Key {
+        symbol: Some(key),
+        modifiers: KeyModifiers { logo: true, .. },
+        pressed: true,
+        ..
+    } = &ui_event
+        && matches!(key.to_char(), Some('f' | 'F'))
+    {
+        // Super+F -> toggle half width in the strip (#144)
+        Some(NodeRequest::ToggleHalf)
     } else if let UIEvent::Key {
         symbol: Some(key),
         modifiers: KeyModifiers { logo: true, .. },

@@ -134,6 +134,16 @@ Generic hooks that make this possible (`StandardApplet`, run by `AppletClient`):
 Ownership is what pluck/place moves between: a holder detaches clients from its loop and another attaches them
 (`ClientHandle::detach`, `DetachedClient::attach`).
 
+## Scrolling (#144)
+
+- A node's children are a horizontal strip (`Layout::Scroll`, the default; was `Single`): it shows the child focus is
+  under (`NodeTree::shown_child`), its main being its column in its parent's strip. A full width child shows alone.
+- `Super+F` (`NodeRequest::ToggleHalf`, saved as `SavedTree::half`) makes a node half width. A half width child is
+  shown beside a half width sibling (`NodeTree::half_pair`), scrolled as little as can be from the last pair shown
+  (`Node::pair`, kept only by the active screen's layout, not by swipes'); with none beside it, it is alone on the left.
+  A project's or split's inner root passes it to the project's node.
+- Not yet: the zoom-out view (#145), wider strips than two halves, and waking a hibernated half shown beside.
+
 ## Focus
 
 Each node stores one `FocusIndex`:

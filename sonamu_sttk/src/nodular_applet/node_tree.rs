@@ -26,7 +26,7 @@ use sonamu_ui::{
     ui_element::{Style, UIElement, UITree},
     ui_event::{KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
-use std::collections::HashMap;
+use std::{cell::Cell, collections::HashMap};
 
 #[derive(Debug, Clone, Copy)]
 enum FocusIndex {
@@ -67,6 +67,10 @@ struct Node {
     hibernated: Option<SavedApplet>,
     /// The last `StandardEvent::ScreenViews` sent to its main: its size on each screen, and the active one
     screen_views: Option<(Vec<Option<DisplayContainerSize>>, usize)>,
+    /// Half width in its parent's strip (#144)
+    half: bool,
+    /// Of its children shown as a pair of half width ones, the first (#144)
+    pair: Cell<usize>,
 }
 impl Node {
     const fn new(main: Option<ClientHandle>, layout: Layout, parent: Option<NodeId>) -> Self {
@@ -84,6 +88,8 @@ impl Node {
             inactive: false,
             hibernated: None,
             screen_views: None,
+            half: false,
+            pair: Cell::new(0),
         }
     }
 }
@@ -305,6 +311,7 @@ impl NodeTree {
         let id = self.nodes.insert_with_key(|id| Node {
             inactive: hibernated.is_some(),
             hibernated,
+            half: saved.half,
             ..Node::new(
                 main.map(|initializer| spawn_client(id, initializer)),
                 saved.layout,
@@ -329,9 +336,7 @@ impl NodeTree {
                 main: None,
                 layout: Layout::Scroll,
                 children: saved,
-                label: None,
-                directory: None,
-                icon: None,
+                ..SavedTree::default()
             },
         }
     }
@@ -358,9 +363,8 @@ impl NodeTree {
             main,
             layout: node.layout,
             children,
-            label: None,
-            directory: None,
-            icon: None,
+            half: node.half,
+            ..SavedTree::default()
         }]
     }
 
@@ -582,6 +586,13 @@ impl NodeTree {
             id = self.nodes.get(current).and_then(|node| node.parent);
         }
         false
+    }
+
+    /// Toggles the node between half and full width in its parent's strip (`Super+F`, #144)
+    pub fn toggle_half(&mut self, id: NodeId) {
+        let node = &mut self.nodes[id];
+        node.half = !node.half;
+        self.damaged = true;
     }
 
     /// Swaps the node with the sibling `shift` places over; does nothing if there is none
@@ -1502,29 +1513,65 @@ impl NodeTree {
     /// Like `displayed_node`, but following the children `focus` is under
     /// (another screen's focus, which the nodes' own focus doesn't point to)
     fn displayed_node_toward(&self, mut id: NodeId, focus: NodeId) -> NodeId {
-        loop {
-            let node = &self.nodes[id];
-            if matches!(node.layout, Layout::Scroll)
-                && let Some(&child) = node
-                    .children
-                    .iter()
-                    .find(|&&child| self.contains(child, focus))
-            {
-                id = child;
-                continue;
-            }
-            match (node.layout, node.focus) {
-                // the focus is on this node itself (its own `focus` may point to another screen's)
-                (Layout::Scroll, FocusIndex::Child(index)) if id != focus => {
-                    id = node.children[index];
-                }
-                // a container has nothing of its own to show
-                (Layout::Scroll, _) if node.main.is_none() && !node.children.is_empty() => {
-                    id = node.children[node.last_child.min(node.children.len() - 1)];
-                }
-                _ => return id,
-            }
+        while let Some(child) = self.shown_child(id, focus) {
+            id = child;
         }
+        id
+    }
+
+    /// The child a scrolling node shows instead of itself, following the children `focus` is under
+    fn shown_child(&self, id: NodeId, focus: NodeId) -> Option<NodeId> {
+        let node = &self.nodes[id];
+        if !matches!(node.layout, Layout::Scroll) {
+            return None;
+        }
+        if let Some(&child) = node
+            .children
+            .iter()
+            .find(|&&child| self.contains(child, focus))
+        {
+            return Some(child);
+        }
+        match node.focus {
+            // the focus is on this node itself (its own `focus` may point to another screen's)
+            FocusIndex::Child(index) if id != focus => Some(node.children[index]),
+            // a container has nothing of its own to show
+            _ if node.main.is_none() && !node.children.is_empty() => {
+                Some(node.children[node.last_child.min(node.children.len() - 1)])
+            }
+            _ => None,
+        }
+    }
+
+    /// The half width children shown side by side with `child` (one of `id`'s, half width itself), as `[left, right]`
+    /// (`None`: empty), scrolled as little as can be from the last pair shown (#144). `remember` keeps the pair.
+    fn half_pair(&self, id: NodeId, child: NodeId, remember: bool) -> Option<[Option<NodeId>; 2]> {
+        let node = &self.nodes[id];
+        if !self.nodes[child].half {
+            return None;
+        }
+        let index = self.child_index(id, child);
+        let half = |index: usize| {
+            node.children
+                .get(index)
+                .is_some_and(|&child| self.nodes[child].half)
+        };
+        let last = node.pair.get();
+        let first = if (index == last || index == last + 1) && half(last) && half(last + 1) {
+            last
+        } else if index > last && index > 0 && half(index - 1) {
+            // moved right: it comes in on the right
+            index - 1
+        } else if half(index + 1) || index == 0 || !half(index - 1) {
+            index
+        } else {
+            index - 1
+        };
+        if remember {
+            node.pair.set(first);
+        }
+        let at = |index: usize| node.children.get(index).copied().filter(|_| half(index));
+        Some([at(first), at(first + 1)])
     }
 
     /// What the node shows on its own (for a split, its first pane) and the size it is drawn at, eg for a preview.
@@ -1551,6 +1598,7 @@ impl NodeTree {
                 self.focused_node(),
                 size,
                 self.active_screen,
+                true,
             );
             for pane in &panes {
                 self.resize(pane.node, pane.inner_size());
@@ -1580,7 +1628,7 @@ impl NodeTree {
             let Some(size) = screen.size else {
                 continue;
             };
-            let panes = self.layout(view_root, focus, size, index);
+            let panes = self.layout(view_root, focus, size, index, false);
             for pane in &panes {
                 if !shown.contains(&pane.node) {
                     self.resize(pane.node, pane.inner_size());
@@ -1636,30 +1684,29 @@ impl NodeTree {
     }
 
     /// The panes showing `view_root` at `size`, with focus on `focus`
-    /// (on `screen`)
+    /// (on `screen`); `remember` keeps which half width children were shown (`half_pair`)
     fn layout(
         &self,
         view_root: NodeId,
         focus: NodeId,
         size: DisplayContainerSize,
         screen: usize,
+        remember: bool,
     ) -> Vec<Pane> {
         let settings = settings::get();
         let (gap, border) = settings.gap_and_border_px();
         let mut panes = Vec::new();
-        self.push_panes(
-            view_root,
-            focus,
-            [
-                gap,
-                gap,
-                size.width.saturating_sub(2 * gap),
-                size.height.saturating_sub(2 * gap),
-            ],
-            [gap, border],
-            &mut panes,
-        );
-        if let (false, [pane]) = (settings.always_frame, panes.as_mut_slice()) {
+        let area = [
+            gap,
+            gap,
+            size.width.saturating_sub(2 * gap),
+            size.height.saturating_sub(2 * gap),
+        ];
+        self.push_panes(view_root, focus, area, [gap, border], remember, &mut panes);
+        // a lone half width pane keeps its frame
+        if let (false, [pane]) = (settings.always_frame, panes.as_mut_slice())
+            && pane.rect == area
+        {
             pane.rect = [0, 0, size.width, size.height];
             pane.border = 0;
             pane.framed = false;
@@ -1681,16 +1728,36 @@ impl NodeTree {
         panes
     }
 
-    /// Splits leave `gap` between their children
+    /// Splits and half width children side by side leave `gap` between them
     fn push_panes(
         &self,
-        id: NodeId,
+        mut id: NodeId,
         focus: NodeId,
-        rect: [u32; 4],
+        mut rect: [u32; 4],
         [gap, border]: [u32; 2],
+        remember: bool,
         panes: &mut Vec<Pane>,
     ) {
-        let id = self.displayed_node_toward(id, focus);
+        while let Some(child) = self.shown_child(id, focus) {
+            if let Some(pair) = self.half_pair(id, child, remember) {
+                let [x, y, width, height] = rect;
+                let left = width.saturating_sub(gap) / 2;
+                let halves = [
+                    [x, y, left, height],
+                    [x + left + gap, y, width.saturating_sub(left + gap), height],
+                ];
+                for (side, half) in pair.into_iter().zip(halves) {
+                    match side {
+                        Some(side) if side == child => rect = half,
+                        Some(side) => {
+                            self.push_panes(side, focus, half, [gap, border], remember, panes);
+                        }
+                        None => {}
+                    }
+                }
+            }
+            id = child;
+        }
         let node = &self.nodes[id];
         let Layout::Split(axis) = node.layout else {
             panes.push(Pane {
@@ -1717,7 +1784,7 @@ impl NodeTree {
                 Axis::Horizontal => [x + start, y, end - start, height],
                 Axis::Vertical => [x, y + start, width, end - start],
             };
-            self.push_panes(child, focus, child_rect, [gap, border], panes);
+            self.push_panes(child, focus, child_rect, [gap, border], remember, panes);
         }
     }
 
@@ -1799,7 +1866,7 @@ impl NodeTree {
                     } else {
                         id
                     };
-                    self.layout(view_root, id, size, self.active_screen)
+                    self.layout(view_root, id, size, self.active_screen, false)
                 })
                 .unwrap_or_default()
         });

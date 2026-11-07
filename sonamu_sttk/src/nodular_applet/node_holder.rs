@@ -488,6 +488,11 @@ impl NodeHolder {
                 return Some(request);
             }
             NodeRequest::SwapSibling(shift) => self.tree.swap_sibling(id, shift),
+            // the project's (or split's) node is the one in a strip
+            NodeRequest::ToggleHalf if self.project && id == self.tree.root() => {
+                return Some(NodeRequest::ToggleHalf);
+            }
+            NodeRequest::ToggleHalf => self.tree.toggle_half(id),
             NodeRequest::Split { axis, new_pane } => {
                 self.to_wrap = Some((id, SplitApplet::wrapper(axis, new_pane), true));
             }
