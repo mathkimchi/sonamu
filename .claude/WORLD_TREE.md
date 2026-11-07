@@ -66,8 +66,9 @@ Applets have no traversal of their own.
     it never skips rows), focuses it, then springs there (`Settle`: a damped harmonic oscillator, `swipe.stiffness` /
     `damping_ratio`, starting at the fingers' speed; ticked by a calloop timer). A new
     swipe during that carries on from where it was.
-  - Rows whose children are all shown at once (`Treeview::shown_at_once`; `NodeTree::shown_at_once` gathers its
-    mains' lists; nothing publishes any since splits were removed) are swiped `reversed`: the focus ring follows the fingers.
+  - Rows whose children are shown at once (`Treeview::shown_at_once`; `NodeTree::shown_at_once` gathers nodes with
+    several children side by side in its strips, and its mains' lists) are swiped `reversed`: the focus ring follows
+    the fingers. It is the whole strip's, so past the shown ones the strip scrolls against the fingers.
   - Drawing: the root sends its tree `StandardEvent::Swipe(SwipeView { from, to, progress })` (the two rows the view is
     between). `NodeTree::set_swipe` draws it if both are its nodes, else passes it into the node whose inner world has
     both (a node and its inner root are one, so project ↔ its inner child is the project's), else drops it (ends in
@@ -124,7 +125,8 @@ published treeviews.
   displayed node), cut to the strip (`Pane::clip`), their applets keeping their full size. Only the last strip toward
   the displayed node is on screen: focus on `[0, 0]` shows `[0, 0]`'s siblings across the whole area, not `[0]`'s. All full width, it shows one node, as before. A swipe between siblings slides the strip from one's
   scroll to the other's (`TreeSwipe::strip`, laid out with `Strips::fixed`), so the settle spring animates it; focus
-  moved by keys jumps.
+  moved by keys jumps. Between siblings both in sight (same panes, in any order) the focus ring stretches between them
+  instead (`ring_window`).
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
   container of its panes (`NodeTree::restore_subtree`).
 

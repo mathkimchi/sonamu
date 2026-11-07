@@ -1943,7 +1943,11 @@ impl NodeTree {
             return self.window(&panes, Some(focused), self.active_screen);
         }
         // ends that show the same panes don't move, the focus ring does
-        let nodes = |panes: &[Pane]| panes.iter().map(|pane| pane.node).collect::<Vec<_>>();
+        let nodes = |panes: &[Pane]| {
+            let mut nodes: Vec<_> = panes.iter().map(|pane| pane.node).collect();
+            nodes.sort_unstable();
+            nodes
+        };
         if let Some(to) = swipe.to
             && (at_root.is_none() || (swipe.from != self.root && to != self.root))
             && nodes(from_panes) == nodes(to_panes)
@@ -1989,9 +1993,26 @@ impl NodeTree {
         ])
     }
 
-    /// Paths whose children are all shown at once (`Treeview::shown_at_once`): its applets' own
+    /// Paths whose children are shown at once (`Treeview::shown_at_once`): side by side here, and its applets' own
     pub fn shown_at_once(&self) -> Vec<WorldTreePath> {
-        let mut paths = Vec::new();
+        // and nodes with several children side by side on screen (#144)
+        let mut columns: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        for pane in &self.panes {
+            let mut child = pane.node;
+            while let Some(parent) = self.nodes.get(child).and_then(|node| node.parent) {
+                let shown = columns.entry(parent).or_default();
+                if !shown.contains(&child) {
+                    shown.push(child);
+                }
+                child = parent;
+            }
+        }
+        let mut paths: Vec<_> = columns
+            .into_iter()
+            .filter(|(_, shown)| shown.len() > 1)
+            .filter_map(|(parent, _)| self.path_of(parent))
+            .map(|path| WorldTreePath::from_tree_path(&path))
+            .collect();
         for (id, node) in &self.nodes {
             let Some(path) = self.path_of(id) else {
                 continue;
