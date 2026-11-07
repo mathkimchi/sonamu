@@ -126,7 +126,7 @@ Found, not fixed (not small, or the intended behavior is unclear):
 - `sonamu-msg` makes relative args that exist as paths absolute, since the runner's cwd differs. It exits 1 if Sonamu isn't reachable, so xdg-open can fall back.
 - Not done: `org.freedesktop.FileManager1` over D-Bus (browsers' "Show in folder"), `file://` URI args, and selecting a file (`ShowItems`) rather than opening a folder.
 
-## Scrolling and the zoom-out view (#144, #145; planned, not built)
+## Scrolling and the zoom-out view (#144, #145)
 
 Designed together (grilled 2026-11-07). These are defaults; an applet with an inner tree may lay out its own differently.
 

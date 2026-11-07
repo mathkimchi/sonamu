@@ -71,7 +71,7 @@ const MAN_PAGE: &[ManSection] = &[
         entries: &[
             entry("3-finger swipe left/right", "next/previous sibling"),
             entry("3-finger swipe up/down", "child/parent"),
-            entry("4-finger swipe up/down", "focus tree view/main content"),
+            entry("4-finger swipe up/down", "zoom out/in"),
         ],
     },
 ];

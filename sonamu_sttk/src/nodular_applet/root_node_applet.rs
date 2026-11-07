@@ -32,7 +32,7 @@ use sonamu_common::{
     settings::{self, Settings, TreeviewFloating, TreeviewSide},
     utils::tree::{
         tree_node_path::TreeNodePath,
-        world_tree::{WorldTree, WorldTreePath},
+        world_tree::{Step, WorldTree, WorldTreePath},
     },
 };
 use sonamu_ui::{
@@ -61,8 +61,11 @@ pub struct RootNodeApplet {
     /// The last treeview drop and the node it was on.
     /// A drop can come before its drag's pluck finishes, which can shift the paths.
     last_drop: Option<(WorldTreePath, NodeId)>,
-    /// Pinned, or traversing (see `update_treeview_visibility`)
+    /// Pinned, or traversing by keys (see `update_treeview_visibility`)
     treeview_shown: bool,
+    /// The selector was last moved by keys, so it shows the treeview; gestures leave it hidden, the selected holder
+    /// drawing its zoomed-out view instead (#145)
+    traversing_by_keys: bool,
     /// Always shown, beside the panes; toggled by its pin button and saved in the session
     treeview_pinned: bool,
     /// The view root when it is a row inside an applet (double click, right click › Set as view root, Alt+R);
@@ -148,12 +151,12 @@ impl RootNodeApplet {
         )
     }
 
-    /// Shows the treeview if pinned or traversing, else hides it, resizing the applets if their area changed
+    /// Shows the treeview if pinned or traversing by keys, else hides it, resizing the applets if their area changed
     /// (also when the treeview settings or pinning did)
     fn update_treeview_visibility(&mut self) {
         let settings = settings::get();
         let shown = self.treeview_pinned
-            || self.holder.tree.is_traversing()
+            || (self.traversing_by_keys && self.holder.tree.is_traversing())
             // eg a drag or menu that started there
             || self.treeview_pointer.is_pressed();
         if shown != self.treeview_shown {
@@ -401,6 +404,7 @@ impl RootNodeApplet {
             last_drop: None,
             // the root node starts focused
             treeview_shown: true,
+            traversing_by_keys: false,
             // a clean session starts pinned
             treeview_pinned: saved_session
                 .as_ref()
@@ -525,6 +529,7 @@ impl RootNodeApplet {
     /// From the runner
     fn handle_event(&mut self, event: StandardEvent) {
         if let StandardEvent::UIEvent(UIEvent::Swipe { fingers, phase }) = event {
+            self.traversing_by_keys = false;
             match fingers {
                 3 => self.handle_swipe(phase),
                 4 => self.handle_select_swipe(phase),
@@ -551,6 +556,7 @@ impl RootNodeApplet {
         if let StandardEvent::UIEvent(ui_event) = &event
             && let Some(traversal) = Traversal::of(ui_event, self.holder.tree.is_traversing())
         {
+            self.traversing_by_keys = true;
             self.traverse(traversal);
             self.damage_if_tree_changed();
             return;
@@ -749,36 +755,29 @@ impl RootNodeApplet {
 
     /// Moves focus by the shown rows (#83), across applets' inner trees
     fn traverse(&mut self, traversal: Traversal) {
-        let focus = self.holder.tree.get_focus_path();
-        let target = match traversal {
-            // its row's node itself
-            Traversal::Select => Some(focus),
+        if matches!(traversal, Traversal::Enter) {
             // like Enter in the selector, wherever it is
-            Traversal::Enter => {
-                let _ = self
-                    .holder
-                    .handle_ui_event(StandardEvent::UIEvent(UIEvent::Key {
-                        symbol: Some(KeySymbol::Enter),
-                        modifiers: KeyModifiers::NONE,
-                        raw_keycode: 0,
-                        pressed: true,
-                    }));
-                None
-            }
-            _ => {
-                let rows = view_tree_rows(
-                    &self.holder.tree,
-                    self.view_path.as_ref(),
-                    self.holder.tree.active_screen(),
-                    false,
-                );
-                let from = rows
-                    .iter()
-                    .position(|row| row.path == focused_row(&rows, &focus));
-                traversal::target(&rows, from, traversal)
-            }
-        };
-        if let Some(target) = target {
+            let _ = self
+                .holder
+                .handle_ui_event(StandardEvent::UIEvent(UIEvent::Key {
+                    symbol: Some(KeySymbol::Enter),
+                    modifiers: KeyModifiers::NONE,
+                    raw_keycode: 0,
+                    pressed: true,
+                }));
+            return;
+        }
+        let focus = self.holder.tree.get_focus_path();
+        let rows = view_tree_rows(
+            &self.holder.tree,
+            self.view_path.as_ref(),
+            self.holder.tree.active_screen(),
+            false,
+        );
+        let from = rows
+            .iter()
+            .position(|row| row.path == focused_row(&rows, &focus));
+        if let Some(target) = traversal::target(&rows, from, traversal) {
             self.holder.focus(&target);
             self.surface.damage();
         }
@@ -871,7 +870,7 @@ impl RootNodeApplet {
         TimeoutAction::ToDuration(Self::SETTLE_FRAME)
     }
 
-    /// 4 fingers up select the focused row (out of its applet), down are Enter; once a swipe
+    /// 4 fingers up zoom out to the holder around the focus, down zoom back in (#145); once a swipe
     fn handle_select_swipe(&mut self, phase: SwipePhase) {
         match phase {
             SwipePhase::Begin => self.select_swipe = Some([0.0; 2]),
@@ -889,13 +888,59 @@ impl RootNodeApplet {
                     return;
                 }
                 if y < 0.0 {
-                    self.traverse(Traversal::Select);
-                } else if self.holder.tree.is_traversing() {
-                    self.traverse(Traversal::Enter);
+                    self.zoom_out();
+                } else {
+                    self.zoom_in();
                 }
             }
             SwipePhase::End { .. } => self.select_swipe = None,
         }
+    }
+
+    /// Selects the nearest holder around the focus: the node whose inner tree it is in, else the root (#145).
+    /// Selected, a holder draws its zoomed-out view (eg a project's overview, the root's map).
+    fn zoom_out(&mut self) {
+        let mut path = self.holder.tree.get_focus_path();
+        match path.0.iter().rposition(|step| matches!(step, Step::Inner(_))) {
+            Some(index) => path.0.truncate(index),
+            None if path.0.is_empty() => return,
+            None => path.0.clear(),
+        }
+        self.holder.focus(&path);
+        self.surface.damage();
+    }
+
+    /// Back down the rows focus was last under (`remembered`) to the next holder, selected, or else to the last
+    /// row, inside it (#145)
+    fn zoom_in(&mut self) {
+        let start = self.holder.tree.get_focus_path();
+        let rows = view_tree_rows(
+            &self.holder.tree,
+            self.view_path.as_ref(),
+            self.holder.tree.active_screen(),
+            false,
+        );
+        let mut path = start.clone();
+        while let Some(child) = self
+            .remembered
+            .get(&path)
+            .filter(|child| rows.iter().any(|row| &row.path == *child))
+        {
+            // into another holder's inner tree: it is selected first
+            if path != start && matches!(child.0.last(), Some(Step::Inner(_))) {
+                self.holder.focus(&path);
+                self.surface.damage();
+                return;
+            }
+            path = child.clone();
+        }
+        if path != start {
+            self.holder.focus(&path);
+        }
+        if self.holder.tree.is_traversing() {
+            self.traverse(Traversal::Enter);
+        }
+        self.surface.damage();
     }
 
     /// Remembers the child each row on the focus path has focus under (#142)

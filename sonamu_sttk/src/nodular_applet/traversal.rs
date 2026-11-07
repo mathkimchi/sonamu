@@ -18,8 +18,6 @@ pub enum Traversal {
     LastChild,
     /// `w` / `s`
     Sibling(isize),
-    /// The focused row's node itself, rather than inside its applet (4 fingers up)
-    Select,
     /// Into the selected row's applet, like Enter (4 fingers down)
     Enter,
 }
@@ -110,7 +108,7 @@ pub fn target(
             // clamped at the first / last sibling
             found?
         }
-        Traversal::Select | Traversal::Enter => return None,
+        Traversal::Enter => return None,
     };
     Some(row.path.clone())
 }

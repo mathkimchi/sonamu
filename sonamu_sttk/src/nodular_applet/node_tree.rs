@@ -23,7 +23,7 @@ use sonamu_common::{
 };
 use sonamu_ui::{
     display_units::DisplayContainerSize,
-    ui_element::{Style, UIElement, UITree},
+    ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::{cell::Cell, collections::HashMap};
@@ -1878,9 +1878,103 @@ impl NodeTree {
         }
     }
 
-    /// Every pane, bordered unless it is the only one; the focused one's border shows whether focus is inside it
+    /// Every pane, bordered unless it is the only one; the focused one's border shows whether focus is inside it.
+    /// A root with nothing of its own (eg the root applet's) draws its `map` while it is focused (#145).
     pub fn get_window(&self) -> UITree {
-        self.get_window_with(None)
+        let root = &self.nodes[self.root];
+        if root.main.is_none() && root.layout == Layout::Scroll && !root.children.is_empty() {
+            self.get_window_with(Some(&|| self.map()))
+        } else {
+            self.get_window_with(None)
+        }
+    }
+
+    /// The zoomed-out view (#145): a row of scaled down tiles per depth, the root's children's, then those of the
+    /// child focus was last under (marked), and so on. Each row is scrolled to keep its marked tile in sight.
+    fn map(&self) -> UITree {
+        /// Most rows shown
+        const DEPTH: usize = 3;
+        let Some(size) = self.latest_size else {
+            return UITree::leaf(UIElement::Nothing);
+        };
+        let settings = settings::get();
+        let [width, height] = [size.width, size.height].map(|length| length.max(1) as f32);
+        let mut rows = Vec::new();
+        let mut id = self.root;
+        while rows.len() < DEPTH {
+            let node = &self.nodes[id];
+            let Some(last) = node.children.len().checked_sub(1) else {
+                break;
+            };
+            let marked = match node.focus {
+                FocusIndex::Child(index) => index,
+                _ => node.last_child,
+            }
+            .min(last);
+            rows.push((&node.children, marked));
+            id = node.children[marked];
+        }
+        let count = rows.len().max(1) as f32;
+        let tile_height = (height - ui::PAD * (count + 1.0)) / count;
+        let preview_height = (tile_height - ui::row_height()).max(1.0);
+        // the screen's shape, which the panes have
+        let tile_width = preview_height * width / height;
+        let mut tiles = Vec::new();
+        for (depth, (children, marked)) in (0..).zip(rows) {
+            let y = ui::PAD + depth as f32 * (tile_height + ui::PAD);
+            let left = |index: usize| ui::PAD + index as f32 * (tile_width + ui::PAD);
+            // the marked tile in sight, the row not past its first tile
+            let scroll = (left(marked) + tile_width + ui::PAD - width).max(0.0);
+            for (index, &child) in children.iter().enumerate() {
+                let x = left(index) - scroll;
+                let mut parts = Vec::new();
+                let node = &self.nodes[child];
+                let shown = match (&node.main, node.size) {
+                    (Some(main), Some(size)) => Some((screen_surface(main, self.active_screen), size)),
+                    _ => self.preview(child),
+                };
+                if let Some((surface, size)) = shown {
+                    let [applet_width, applet_height] =
+                        [size.width, size.height].map(|length| length.max(1) as f32);
+                    let scale = (tile_width / applet_width).min(preview_height / applet_height);
+                    parts.push(UITree::new_styled(
+                        UIElement::Scaled(scale),
+                        Style::absolute(
+                            [(tile_width - applet_width * scale) / 2.0, 0.0],
+                            [applet_width * scale, applet_height * scale],
+                        ),
+                        vec![UITree::new_container_styled(
+                            Style::absolute([0.0, 0.0], [applet_width, applet_height]),
+                            vec![surface],
+                        )],
+                    ));
+                }
+                parts.push(UITree::leaf_styled(
+                    ui::text(self.label(child), settings.palette.fg),
+                    Style::absolute(
+                        [
+                            ui::PAD / 2.0,
+                            preview_height + (ui::row_height() - font_size()) / 2.0,
+                        ],
+                        [(tile_width - ui::PAD / 2.0).max(0.0), font_size()],
+                    ),
+                ));
+                let border = if index == marked {
+                    settings.border.focused
+                } else {
+                    settings.border.unfocused
+                };
+                tiles.push(ui::frame(
+                    border,
+                    settings.radius,
+                    if index == marked { 2.0 } else { 1.0 },
+                    Style::absolute([x, y], [tile_width, tile_height]),
+                    parts,
+                ));
+            }
+        }
+        // a box, so rows scrolled past its sides aren't drawn outside it
+        UITree::new_container_styled(Style::absolute([0.0, 0.0], [width, height]), tiles)
     }
 
     /// Like `get_window`, but with `at_root` drawn while its root is focused (eg a project's overview).

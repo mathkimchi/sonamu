@@ -55,7 +55,9 @@ Applets have no traversal of their own.
   under the same parent: a node's inner children come before its own, so `s` on the last inner one goes to the first
   outer one); `a` / `0`: parent (past the view root: its parent, widening the view); `d`, `1`-`8`, `9`: first, nth, last child.
 - Swipes (DRM backend only: `UIEvent::Swipe`, `Begin` / `Update(px)` / `End`), the root's (`handle_swipe`): 4 fingers up
-  selects the focused row (out of its applet), 4 down is Enter; once a swipe (50 px). 3 fingers (#141, #142,
+  (`zoom_out`, #145) select the holder around the focus (the path up to its last `Inner` step, else the root); 4 down
+  (`zoom_in`) go back down `remembered` to the next holder, selected, or to the last row, inside it; once a swipe
+  (50 px). The treeview shows only while keys moved the selector (`traversing_by_keys`; any swipe clears it). 3 fingers (#141, #142,
   `nodular_applet/swipe.rs`) move along a strip of shown rows, natural direction (content follows the fingers):
   - The axis locks after 10 px. Horizontal (#144): the focused row's siblings (rows under the same parent row, so inner
     then own children); fingers left bring in the next. Vertical: ancestors up to the first row, then down through each
@@ -142,7 +144,11 @@ Ownership is what pluck/place moves between: a holder detaches clients from its 
   shown beside a half width sibling (`NodeTree::half_pair`), scrolled as little as can be from the last pair shown
   (`Node::pair`, kept only by the active screen's layout, not by swipes'); with none beside it, it is alone on the left.
   A project's or split's inner root passes it to the project's node.
-- Not yet: the zoom-out view (#145), wider strips than two halves, and waking a hibernated half shown beside.
+- Zoom-out view (#145): what a holder draws while it is selected, not inside. A project's is its overview (cards); a
+  tree whose root has no main (the root applet's) draws `NodeTree::map`: a row of scaled tiles per depth (3 at most)
+  down the children focus was last under, marked, each row scrolled to its marked tile. Pinned to iterate on; it
+  takes no clicks yet.
+- Not yet: wider strips than two halves, and waking a hibernated half shown beside.
 
 ## Focus
 
