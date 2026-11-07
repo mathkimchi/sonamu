@@ -1,7 +1,4 @@
-use sonamu_common::{
-    sap::packets::StandardRequest,
-    settings,
-};
+use sonamu_common::{sap::packets::StandardRequest, settings};
 use sonamu_ui::ui_event::{KeyModifiers, KeyTrait, UIEvent};
 
 use crate::{

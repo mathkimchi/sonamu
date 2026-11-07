@@ -26,7 +26,7 @@ use sonamu_ui::{
     ui_element::{Style, UIElement, UITree},
     ui_event::{KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
-use std::collections::HashMap;
+use std::{cell::Cell, collections::HashMap};
 
 #[derive(Debug, Clone, Copy)]
 enum FocusIndex {
@@ -68,6 +68,8 @@ struct Node {
     screen_views: Option<(Vec<Option<DisplayContainerSize>>, usize)>,
     /// Half width (`Super+F`, #144)
     half: bool,
+    /// How far its children's strip is scrolled, in px (#144)
+    scroll: Cell<i32>,
 }
 impl Node {
     const fn new(main: Option<ClientHandle>, parent: Option<NodeId>) -> Self {
@@ -85,6 +87,7 @@ impl Node {
             hibernated: None,
             screen_views: None,
             half: false,
+            scroll: Cell::new(0),
         }
     }
 }
@@ -151,11 +154,13 @@ struct Screen {
     view_root: NodeId,
 }
 
-/// A node shown on screen, at `rect` (`[x, y, width, height]`, border included) of the tree's area
+/// A node shown on screen, at `rect` (`[x, y, width, height]`, border included) of the tree's area,
+/// cut to `clip` (the strip it is in, #144)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Pane {
     node: NodeId,
-    rect: [u32; 4],
+    rect: [i32; 4],
+    clip: [i32; 4],
     /// From the settings; 0 when unframed
     border: u32,
     /// Has a border and rounded corners: not the only pane (unless `always_frame`), and not a project
@@ -165,14 +170,17 @@ impl Pane {
     /// Inside the border
     const fn inner_size(&self) -> DisplayContainerSize {
         DisplayContainerSize::new(
-            self.rect[2].saturating_sub(2 * self.border),
-            self.rect[3].saturating_sub(2 * self.border),
+            self.rect[2].cast_unsigned().saturating_sub(2 * self.border),
+            self.rect[3].cast_unsigned().saturating_sub(2 * self.border),
         )
     }
 
     fn contains(&self, [x, y]: [f64; 2]) -> bool {
-        let [left, top, width, height] = self.rect.map(f64::from);
-        (left..left + width).contains(&x) && (top..top + height).contains(&y)
+        let inside = |[left, top, width, height]: [i32; 4]| {
+            let [left, top, width, height] = [left, top, width, height].map(f64::from);
+            (left..left + width).contains(&x) && (top..top + height).contains(&y)
+        };
+        inside(self.rect) && inside(self.clip)
     }
 }
 
@@ -266,9 +274,9 @@ impl NodeTree {
         initializer: NodularAppletInitializer,
     ) -> NodeId {
         let spawn_client = &self.spawn_client;
-        let id = self.nodes.insert_with_key(|id| {
-            Node::new(Some(spawn_client(id, initializer)), parent)
-        });
+        let id = self
+            .nodes
+            .insert_with_key(|id| Node::new(Some(spawn_client(id, initializer)), parent));
         self.send_initial_size(id);
         id
     }
@@ -320,7 +328,10 @@ impl NodeTree {
             inactive: hibernated.is_some(),
             hibernated,
             half: saved.half,
-            ..Node::new(main.map(|initializer| spawn_client(id, initializer)), parent)
+            ..Node::new(
+                main.map(|initializer| spawn_client(id, initializer)),
+                parent,
+            )
         });
         self.send_initial_size(id);
         for child in saved.children {
@@ -1471,8 +1482,8 @@ impl NodeTree {
                 self.nodes[pane.node].focus = FocusIndex::Inner;
             }
         }
-        mouse_event.position[0] -= f64::from(pane.rect[0] + pane.border);
-        mouse_event.position[1] -= f64::from(pane.rect[1] + pane.border);
+        mouse_event.position[0] -= f64::from(pane.rect[0]) + f64::from(pane.border);
+        mouse_event.position[1] -= f64::from(pane.rect[1]) + f64::from(pane.border);
         self.send_event(
             pane.node,
             StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)),
@@ -1487,27 +1498,30 @@ impl NodeTree {
     /// Like `displayed_node`, but following the children `focus` is under
     /// (another screen's focus, which the nodes' own focus doesn't point to)
     fn displayed_node_toward(&self, mut id: NodeId, focus: NodeId) -> NodeId {
-        loop {
-            let node = &self.nodes[id];
-            if let Some(&child) = node
-                    .children
-                    .iter()
-                    .find(|&&child| self.contains(child, focus))
-            {
-                id = child;
-                continue;
+        while let Some(child) = self.shown_child(id, focus) {
+            id = child;
+        }
+        id
+    }
+
+    /// The child the node shows instead of itself, following the children `focus` is under
+    fn shown_child(&self, id: NodeId, focus: NodeId) -> Option<NodeId> {
+        let node = &self.nodes[id];
+        if let Some(&child) = node
+            .children
+            .iter()
+            .find(|&&child| self.contains(child, focus))
+        {
+            return Some(child);
+        }
+        match node.focus {
+            // the focus is on this node itself (its own `focus` may point to another screen's)
+            FocusIndex::Child(index) if id != focus => Some(node.children[index]),
+            // a container has nothing of its own to show
+            _ if node.main.is_none() && !node.children.is_empty() => {
+                Some(node.children[node.last_child.min(node.children.len() - 1)])
             }
-            match node.focus {
-                // the focus is on this node itself (its own `focus` may point to another screen's)
-                FocusIndex::Child(index) if id != focus => {
-                    id = node.children[index];
-                }
-                // a container has nothing of its own to show
-                _ if node.main.is_none() && !node.children.is_empty() => {
-                    id = node.children[node.last_child.min(node.children.len() - 1)];
-                }
-                _ => return id,
-            }
+            _ => None,
         }
     }
 
@@ -1531,6 +1545,7 @@ impl NodeTree {
                 self.focused_node(),
                 size,
                 self.active_screen,
+                true,
             );
             for pane in &panes {
                 self.resize(pane.node, pane.inner_size());
@@ -1560,7 +1575,7 @@ impl NodeTree {
             let Some(size) = screen.size else {
                 continue;
             };
-            let panes = self.layout(view_root, focus, size, index);
+            let panes = self.layout(view_root, focus, size, index, false);
             for pane in &panes {
                 if !shown.contains(&pane.node) {
                     self.resize(pane.node, pane.inner_size());
@@ -1616,47 +1631,119 @@ impl NodeTree {
     }
 
     /// The panes showing `view_root` at `size`, with focus on `focus`
-    /// (on `screen`)
+    /// (on `screen`); `remember` keeps how far the strips are scrolled
     fn layout(
         &self,
         view_root: NodeId,
         focus: NodeId,
         size: DisplayContainerSize,
         screen: usize,
+        remember: bool,
     ) -> Vec<Pane> {
         let settings = settings::get();
         let (gap, border) = settings.gap_and_border_px();
-        let mut panes = vec![Pane {
-            node: self.displayed_node_toward(view_root, focus),
-            rect: [
-                gap,
-                gap,
-                size.width.saturating_sub(2 * gap),
-                size.height.saturating_sub(2 * gap),
-            ],
-            border,
-            framed: true,
-        }];
-        if let (false, [pane]) = (settings.always_frame, panes.as_mut_slice()) {
-            pane.rect = [0, 0, size.width, size.height];
+        let gap = gap.cast_signed();
+        let full = [0, 0, size.width.cast_signed(), size.height.cast_signed()];
+        let area = grow(full, -gap);
+        let mut panes = Vec::new();
+        self.push_panes(view_root, focus, area, full, gap, remember, &mut panes);
+        for pane in &mut panes {
+            pane.border = border;
+        }
+        if let (false, [pane]) = (settings.always_frame, panes.as_mut_slice())
+            && pane.rect == area
+        {
+            pane.rect = full;
             pane.border = 0;
             pane.framed = false;
         }
         for pane in panes.iter_mut().filter(|pane| pane.framed) {
             if self.frames_itself(pane.node, screen) {
                 // it frames its own content, with its own gap around it, so it takes this gap back
-                let [x, y, width, height] = pane.rect;
-                pane.rect = [
-                    x.saturating_sub(gap),
-                    y.saturating_sub(gap),
-                    width + 2 * gap,
-                    height + 2 * gap,
-                ];
+                pane.rect = grow(pane.rect, gap);
                 pane.border = 0;
                 pane.framed = false;
             }
         }
         panes
+    }
+
+    /// The panes showing `id` in `rect`, cut to `clip`. A node's children are a strip (#144): side by side at their
+    /// widths (half ones `Super+F`), scrolled as little as can be from where it was to show the one it shows whole.
+    #[allow(clippy::too_many_arguments)]
+    fn push_panes(
+        &self,
+        mut id: NodeId,
+        focus: NodeId,
+        mut rect: [i32; 4],
+        mut clip: [i32; 4],
+        gap: i32,
+        remember: bool,
+        panes: &mut Vec<Pane>,
+    ) {
+        while let Some(child) = self.shown_child(id, focus) {
+            let node = &self.nodes[id];
+            let [x, y, width, height] = rect;
+            let widths: Vec<i32> = node
+                .children
+                .iter()
+                .map(|&child| {
+                    if self.nodes[child].half {
+                        (width - gap) / 2
+                    } else {
+                        width
+                    }
+                })
+                .collect();
+            let starts: Vec<i32> = widths
+                .iter()
+                .scan(0, |start, &width| {
+                    let this = *start;
+                    *start += width + gap;
+                    Some(this)
+                })
+                .collect();
+            let index = self.child_index(id, child);
+            let end = starts
+                .last()
+                .zip(widths.last())
+                .map_or(0, |(start, width)| start + width);
+            let scroll = node
+                .scroll
+                .get()
+                .min(end - width)
+                .max(0)
+                .min(starts[index])
+                .max(starts[index] + widths[index] - width);
+            if remember {
+                node.scroll.set(scroll);
+            }
+            clip = intersect(clip, rect);
+            for (sibling, (&start, &column)) in node.children.iter().zip(starts.iter().zip(&widths))
+            {
+                let left = x + start - scroll;
+                if *sibling != child && left < x + width && left + column > x {
+                    self.push_panes(
+                        *sibling,
+                        focus,
+                        [left, y, column, height],
+                        clip,
+                        gap,
+                        remember,
+                        panes,
+                    );
+                }
+            }
+            rect = [x + starts[index] - scroll, y, widths[index], height];
+            id = child;
+        }
+        panes.push(Pane {
+            node: id,
+            rect,
+            clip,
+            border: 0,
+            framed: true,
+        });
     }
 
     /// Draws the swipe if both its ends are nodes of this world, else passes it into the node whose inner world
@@ -1737,7 +1824,7 @@ impl NodeTree {
                     } else {
                         id
                     };
-                    self.layout(view_root, id, size, self.active_screen)
+                    self.layout(view_root, id, size, self.active_screen, false)
                 })
                 .unwrap_or_default()
         });
@@ -1868,13 +1955,28 @@ impl NodeTree {
                     || UITree::leaf(UIElement::Nothing),
                     |main| screen_surface(main, screen),
                 );
-                let [x, y, width, height] = pane.rect.map(|value| value as f32);
-                ui::frame(
-                    border,
-                    if pane.framed { settings.radius } else { 0.0 },
-                    pane.border as f32,
+                let frame = |[x, y]: [i32; 2]| {
+                    let [x, y, width, height] =
+                        [x, y, pane.rect[2], pane.rect[3]].map(|value| value as f32);
+                    ui::frame(
+                        border,
+                        if pane.framed { settings.radius } else { 0.0 },
+                        pane.border as f32,
+                        Style::absolute([x, y], [width, height]),
+                        vec![surface],
+                    )
+                };
+                if intersect(pane.rect, pane.clip) == pane.rect {
+                    return frame([pane.rect[0], pane.rect[1]]);
+                }
+                // partly scrolled out of its strip: a box, so it isn't drawn outside it
+                let [x, y, width, height] = pane.clip.map(|value| value as f32);
+                UITree::new_container_styled(
                     Style::absolute([x, y], [width, height]),
-                    vec![surface],
+                    vec![frame([
+                        pane.rect[0] - pane.clip[0],
+                        pane.rect[1] - pane.clip[1],
+                    ])],
                 )
             })
             .collect();
@@ -2206,4 +2308,19 @@ fn screen_surface(main: &ClientHandle, screen: usize) -> UITree {
         .into_iter()
         .nth(screen)
         .unwrap_or_else(|| UITree::leaf(UIElement::Nothing))
+}
+
+/// `rect` (`[x, y, width, height]`) with `by` more on every side
+const fn grow([x, y, width, height]: [i32; 4], by: i32) -> [i32; 4] {
+    [x - by, y - by, width + 2 * by, height + 2 * by]
+}
+
+/// Where two rects (`[x, y, width, height]`) overlap (empty if they don't)
+fn intersect(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
+    let [left, top] = [a[0].max(b[0]), a[1].max(b[1])];
+    let [right, bottom] = [
+        (a[0] + a[2]).min(b[0] + b[2]),
+        (a[1] + a[3]).min(b[1] + b[3]),
+    ];
+    [left, top, (right - left).max(0), (bottom - top).max(0)]
 }
