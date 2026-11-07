@@ -141,14 +141,14 @@ impl SplitApplet {
             (Layout::Split(_), 1) => tree.children.into_iter().next().unwrap(),
             (Layout::Split(_), _) => DetachedTree {
                 main: None,
-                layout: Layout::Single,
+                layout: Layout::Scroll,
                 wl_surface: None,
                 hibernated: None,
                 awaiting: None,
                 children: tree.children,
             },
             // already collapsed into its pane
-            (Layout::Single, _) => tree,
+            (Layout::Scroll, _) => tree,
         }
     }
 }

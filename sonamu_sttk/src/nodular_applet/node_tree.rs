@@ -266,7 +266,7 @@ impl NodeTree {
     ) -> NodeId {
         let spawn_client = &self.spawn_client;
         let id = self.nodes.insert_with_key(|id| {
-            Node::new(Some(spawn_client(id, initializer)), Layout::Single, parent)
+            Node::new(Some(spawn_client(id, initializer)), Layout::Scroll, parent)
         });
         self.send_initial_size(id);
         id
@@ -327,7 +327,7 @@ impl NodeTree {
             1 => saved.pop().unwrap(),
             _ => SavedTree {
                 main: None,
-                layout: Layout::Single,
+                layout: Layout::Scroll,
                 children: saved,
                 label: None,
                 directory: None,
@@ -689,7 +689,7 @@ impl NodeTree {
         self.damaged = true;
 
         let node = &self.nodes[new];
-        if node.main.is_some() || node.layout != Layout::Single {
+        if node.main.is_some() || node.layout != Layout::Scroll {
             return;
         }
         let children = node.children.clone();
@@ -1504,7 +1504,7 @@ impl NodeTree {
     fn displayed_node_toward(&self, mut id: NodeId, focus: NodeId) -> NodeId {
         loop {
             let node = &self.nodes[id];
-            if matches!(node.layout, Layout::Single)
+            if matches!(node.layout, Layout::Scroll)
                 && let Some(&child) = node
                     .children
                     .iter()
@@ -1515,11 +1515,11 @@ impl NodeTree {
             }
             match (node.layout, node.focus) {
                 // the focus is on this node itself (its own `focus` may point to another screen's)
-                (Layout::Single, FocusIndex::Child(index)) if id != focus => {
+                (Layout::Scroll, FocusIndex::Child(index)) if id != focus => {
                     id = node.children[index];
                 }
                 // a container has nothing of its own to show
-                (Layout::Single, _) if node.main.is_none() && !node.children.is_empty() => {
+                (Layout::Scroll, _) if node.main.is_none() && !node.children.is_empty() => {
                     id = node.children[node.last_child.min(node.children.len() - 1)];
                 }
                 _ => return id,
