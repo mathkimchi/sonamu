@@ -27,8 +27,9 @@ Basic Usage Manual:
   - `Super + N`: spawn browser
   - `Super + P`: wrap current tab in a project
   - `Super + W`: close current tab
-  - `Super + Shift + \` (ie `Super + |`): split to right
-  - `Super + Shift + -`: split to bottom
+  - `Super + F`: toggle half-view (like Niri)
+  <!-- - `Super + Shift + \` (ie `Super + |`): split to right -->
+  <!-- - `Super + Shift + -`: split to bottom -->
 - Traversal Keys (use `Alt + <traversal key>` to focus the tree view):
   - (Shift) + Tab: goes (up)/down in the tree view
   - W/S: goes to prev/next sibling

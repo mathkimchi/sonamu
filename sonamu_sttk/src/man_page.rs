@@ -41,8 +41,9 @@ const MAN_PAGE: &[ManSection] = &[
             entry("Super+N", "spawn browser"),
             entry("Super+P", "wrap current tab in a project"),
             entry("Super+W", "close current tab"),
-            entry("Super+Shift+\\ (Super+|)", "split to right"),
-            entry("Super+Shift+-", "split to bottom"),
+            entry("Super+F", "toggle half-view"),
+            // entry("Super+Shift+\\ (Super+|)", "split to right"),
+            // entry("Super+Shift+-", "split to bottom"),
         ],
     },
     ManSection {
