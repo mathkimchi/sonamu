@@ -23,10 +23,10 @@ use sonamu_common::{
 };
 use sonamu_ui::{
     display_units::DisplayContainerSize,
-    ui_element::{Style, UIElement, UITree, font_size},
+    ui_element::{Style, UIElement, UITree},
     ui_event::{KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
-use std::{cell::Cell, collections::HashMap};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy)]
 enum FocusIndex {
@@ -67,10 +67,6 @@ struct Node {
     hibernated: Option<SavedApplet>,
     /// The last `StandardEvent::ScreenViews` sent to its main: its size on each screen, and the active one
     screen_views: Option<(Vec<Option<DisplayContainerSize>>, usize)>,
-    /// Half width in its parent's strip (#144)
-    half: bool,
-    /// Of its children shown as a pair of half width ones, the first (#144)
-    pair: Cell<usize>,
 }
 impl Node {
     const fn new(main: Option<ClientHandle>, layout: Layout, parent: Option<NodeId>) -> Self {
@@ -88,8 +84,6 @@ impl Node {
             inactive: false,
             hibernated: None,
             screen_views: None,
-            half: false,
-            pair: Cell::new(0),
         }
     }
 }
@@ -272,7 +266,7 @@ impl NodeTree {
     ) -> NodeId {
         let spawn_client = &self.spawn_client;
         let id = self.nodes.insert_with_key(|id| {
-            Node::new(Some(spawn_client(id, initializer)), Layout::Scroll, parent)
+            Node::new(Some(spawn_client(id, initializer)), Layout::Single, parent)
         });
         self.send_initial_size(id);
         id
@@ -311,7 +305,6 @@ impl NodeTree {
         let id = self.nodes.insert_with_key(|id| Node {
             inactive: hibernated.is_some(),
             hibernated,
-            half: saved.half,
             ..Node::new(
                 main.map(|initializer| spawn_client(id, initializer)),
                 saved.layout,
@@ -334,9 +327,11 @@ impl NodeTree {
             1 => saved.pop().unwrap(),
             _ => SavedTree {
                 main: None,
-                layout: Layout::Scroll,
+                layout: Layout::Single,
                 children: saved,
-                ..SavedTree::default()
+                label: None,
+                directory: None,
+                icon: None,
             },
         }
     }
@@ -363,8 +358,9 @@ impl NodeTree {
             main,
             layout: node.layout,
             children,
-            half: node.half,
-            ..SavedTree::default()
+            label: None,
+            directory: None,
+            icon: None,
         }]
     }
 
@@ -588,13 +584,6 @@ impl NodeTree {
         false
     }
 
-    /// Toggles the node between half and full width in its parent's strip (`Super+F`, #144)
-    pub fn toggle_half(&mut self, id: NodeId) {
-        let node = &mut self.nodes[id];
-        node.half = !node.half;
-        self.damaged = true;
-    }
-
     /// Swaps the node with the sibling `shift` places over; does nothing if there is none
     pub fn swap_sibling(&mut self, id: NodeId, shift: isize) {
         let Some(parent_id) = self.nodes.get(id).and_then(|node| node.parent) else {
@@ -700,7 +689,7 @@ impl NodeTree {
         self.damaged = true;
 
         let node = &self.nodes[new];
-        if node.main.is_some() || node.layout != Layout::Scroll {
+        if node.main.is_some() || node.layout != Layout::Single {
             return;
         }
         let children = node.children.clone();
@@ -1513,65 +1502,29 @@ impl NodeTree {
     /// Like `displayed_node`, but following the children `focus` is under
     /// (another screen's focus, which the nodes' own focus doesn't point to)
     fn displayed_node_toward(&self, mut id: NodeId, focus: NodeId) -> NodeId {
-        while let Some(child) = self.shown_child(id, focus) {
-            id = child;
-        }
-        id
-    }
-
-    /// The child a scrolling node shows instead of itself, following the children `focus` is under
-    fn shown_child(&self, id: NodeId, focus: NodeId) -> Option<NodeId> {
-        let node = &self.nodes[id];
-        if !matches!(node.layout, Layout::Scroll) {
-            return None;
-        }
-        if let Some(&child) = node
-            .children
-            .iter()
-            .find(|&&child| self.contains(child, focus))
-        {
-            return Some(child);
-        }
-        match node.focus {
-            // the focus is on this node itself (its own `focus` may point to another screen's)
-            FocusIndex::Child(index) if id != focus => Some(node.children[index]),
-            // a container has nothing of its own to show
-            _ if node.main.is_none() && !node.children.is_empty() => {
-                Some(node.children[node.last_child.min(node.children.len() - 1)])
+        loop {
+            let node = &self.nodes[id];
+            if matches!(node.layout, Layout::Single)
+                && let Some(&child) = node
+                    .children
+                    .iter()
+                    .find(|&&child| self.contains(child, focus))
+            {
+                id = child;
+                continue;
             }
-            _ => None,
+            match (node.layout, node.focus) {
+                // the focus is on this node itself (its own `focus` may point to another screen's)
+                (Layout::Single, FocusIndex::Child(index)) if id != focus => {
+                    id = node.children[index];
+                }
+                // a container has nothing of its own to show
+                (Layout::Single, _) if node.main.is_none() && !node.children.is_empty() => {
+                    id = node.children[node.last_child.min(node.children.len() - 1)];
+                }
+                _ => return id,
+            }
         }
-    }
-
-    /// The half width children shown side by side with `child` (one of `id`'s, half width itself), as `[left, right]`
-    /// (`None`: empty), scrolled as little as can be from the last pair shown (#144). `remember` keeps the pair.
-    fn half_pair(&self, id: NodeId, child: NodeId, remember: bool) -> Option<[Option<NodeId>; 2]> {
-        let node = &self.nodes[id];
-        if !self.nodes[child].half {
-            return None;
-        }
-        let index = self.child_index(id, child);
-        let half = |index: usize| {
-            node.children
-                .get(index)
-                .is_some_and(|&child| self.nodes[child].half)
-        };
-        let last = node.pair.get();
-        let first = if (index == last || index == last + 1) && half(last) && half(last + 1) {
-            last
-        } else if index > last && index > 0 && half(index - 1) {
-            // moved right: it comes in on the right
-            index - 1
-        } else if half(index + 1) || index == 0 || !half(index - 1) {
-            index
-        } else {
-            index - 1
-        };
-        if remember {
-            node.pair.set(first);
-        }
-        let at = |index: usize| node.children.get(index).copied().filter(|_| half(index));
-        Some([at(first), at(first + 1)])
     }
 
     /// What the node shows on its own (for a split, its first pane) and the size it is drawn at, eg for a preview.
@@ -1598,7 +1551,6 @@ impl NodeTree {
                 self.focused_node(),
                 size,
                 self.active_screen,
-                true,
             );
             for pane in &panes {
                 self.resize(pane.node, pane.inner_size());
@@ -1628,7 +1580,7 @@ impl NodeTree {
             let Some(size) = screen.size else {
                 continue;
             };
-            let panes = self.layout(view_root, focus, size, index, false);
+            let panes = self.layout(view_root, focus, size, index);
             for pane in &panes {
                 if !shown.contains(&pane.node) {
                     self.resize(pane.node, pane.inner_size());
@@ -1684,29 +1636,30 @@ impl NodeTree {
     }
 
     /// The panes showing `view_root` at `size`, with focus on `focus`
-    /// (on `screen`); `remember` keeps which half width children were shown (`half_pair`)
+    /// (on `screen`)
     fn layout(
         &self,
         view_root: NodeId,
         focus: NodeId,
         size: DisplayContainerSize,
         screen: usize,
-        remember: bool,
     ) -> Vec<Pane> {
         let settings = settings::get();
         let (gap, border) = settings.gap_and_border_px();
         let mut panes = Vec::new();
-        let area = [
-            gap,
-            gap,
-            size.width.saturating_sub(2 * gap),
-            size.height.saturating_sub(2 * gap),
-        ];
-        self.push_panes(view_root, focus, area, [gap, border], remember, &mut panes);
-        // a lone half width pane keeps its frame
-        if let (false, [pane]) = (settings.always_frame, panes.as_mut_slice())
-            && pane.rect == area
-        {
+        self.push_panes(
+            view_root,
+            focus,
+            [
+                gap,
+                gap,
+                size.width.saturating_sub(2 * gap),
+                size.height.saturating_sub(2 * gap),
+            ],
+            [gap, border],
+            &mut panes,
+        );
+        if let (false, [pane]) = (settings.always_frame, panes.as_mut_slice()) {
             pane.rect = [0, 0, size.width, size.height];
             pane.border = 0;
             pane.framed = false;
@@ -1728,36 +1681,16 @@ impl NodeTree {
         panes
     }
 
-    /// Splits and half width children side by side leave `gap` between them
+    /// Splits leave `gap` between their children
     fn push_panes(
         &self,
-        mut id: NodeId,
+        id: NodeId,
         focus: NodeId,
-        mut rect: [u32; 4],
+        rect: [u32; 4],
         [gap, border]: [u32; 2],
-        remember: bool,
         panes: &mut Vec<Pane>,
     ) {
-        while let Some(child) = self.shown_child(id, focus) {
-            if let Some(pair) = self.half_pair(id, child, remember) {
-                let [x, y, width, height] = rect;
-                let left = width.saturating_sub(gap) / 2;
-                let halves = [
-                    [x, y, left, height],
-                    [x + left + gap, y, width.saturating_sub(left + gap), height],
-                ];
-                for (side, half) in pair.into_iter().zip(halves) {
-                    match side {
-                        Some(side) if side == child => rect = half,
-                        Some(side) => {
-                            self.push_panes(side, focus, half, [gap, border], remember, panes);
-                        }
-                        None => {}
-                    }
-                }
-            }
-            id = child;
-        }
+        let id = self.displayed_node_toward(id, focus);
         let node = &self.nodes[id];
         let Layout::Split(axis) = node.layout else {
             panes.push(Pane {
@@ -1784,7 +1717,7 @@ impl NodeTree {
                 Axis::Horizontal => [x + start, y, end - start, height],
                 Axis::Vertical => [x, y + start, width, end - start],
             };
-            self.push_panes(child, focus, child_rect, [gap, border], remember, panes);
+            self.push_panes(child, focus, child_rect, [gap, border], panes);
         }
     }
 
@@ -1866,7 +1799,7 @@ impl NodeTree {
                     } else {
                         id
                     };
-                    self.layout(view_root, id, size, self.active_screen, false)
+                    self.layout(view_root, id, size, self.active_screen)
                 })
                 .unwrap_or_default()
         });
@@ -1878,103 +1811,9 @@ impl NodeTree {
         }
     }
 
-    /// Every pane, bordered unless it is the only one; the focused one's border shows whether focus is inside it.
-    /// A root with nothing of its own (eg the root applet's) draws its `map` while it is focused (#145).
+    /// Every pane, bordered unless it is the only one; the focused one's border shows whether focus is inside it
     pub fn get_window(&self) -> UITree {
-        let root = &self.nodes[self.root];
-        if root.main.is_none() && root.layout == Layout::Scroll && !root.children.is_empty() {
-            self.get_window_with(Some(&|| self.map()))
-        } else {
-            self.get_window_with(None)
-        }
-    }
-
-    /// The zoomed-out view (#145): a row of scaled down tiles per depth, the root's children's, then those of the
-    /// child focus was last under (marked), and so on. Each row is scrolled to keep its marked tile in sight.
-    fn map(&self) -> UITree {
-        /// Most rows shown
-        const DEPTH: usize = 3;
-        let Some(size) = self.latest_size else {
-            return UITree::leaf(UIElement::Nothing);
-        };
-        let settings = settings::get();
-        let [width, height] = [size.width, size.height].map(|length| length.max(1) as f32);
-        let mut rows = Vec::new();
-        let mut id = self.root;
-        while rows.len() < DEPTH {
-            let node = &self.nodes[id];
-            let Some(last) = node.children.len().checked_sub(1) else {
-                break;
-            };
-            let marked = match node.focus {
-                FocusIndex::Child(index) => index,
-                _ => node.last_child,
-            }
-            .min(last);
-            rows.push((&node.children, marked));
-            id = node.children[marked];
-        }
-        let count = rows.len().max(1) as f32;
-        let tile_height = (height - ui::PAD * (count + 1.0)) / count;
-        let preview_height = (tile_height - ui::row_height()).max(1.0);
-        // the screen's shape, which the panes have
-        let tile_width = preview_height * width / height;
-        let mut tiles = Vec::new();
-        for (depth, (children, marked)) in (0..).zip(rows) {
-            let y = ui::PAD + depth as f32 * (tile_height + ui::PAD);
-            let left = |index: usize| ui::PAD + index as f32 * (tile_width + ui::PAD);
-            // the marked tile in sight, the row not past its first tile
-            let scroll = (left(marked) + tile_width + ui::PAD - width).max(0.0);
-            for (index, &child) in children.iter().enumerate() {
-                let x = left(index) - scroll;
-                let mut parts = Vec::new();
-                let node = &self.nodes[child];
-                let shown = match (&node.main, node.size) {
-                    (Some(main), Some(size)) => Some((screen_surface(main, self.active_screen), size)),
-                    _ => self.preview(child),
-                };
-                if let Some((surface, size)) = shown {
-                    let [applet_width, applet_height] =
-                        [size.width, size.height].map(|length| length.max(1) as f32);
-                    let scale = (tile_width / applet_width).min(preview_height / applet_height);
-                    parts.push(UITree::new_styled(
-                        UIElement::Scaled(scale),
-                        Style::absolute(
-                            [(tile_width - applet_width * scale) / 2.0, 0.0],
-                            [applet_width * scale, applet_height * scale],
-                        ),
-                        vec![UITree::new_container_styled(
-                            Style::absolute([0.0, 0.0], [applet_width, applet_height]),
-                            vec![surface],
-                        )],
-                    ));
-                }
-                parts.push(UITree::leaf_styled(
-                    ui::text(self.label(child), settings.palette.fg),
-                    Style::absolute(
-                        [
-                            ui::PAD / 2.0,
-                            preview_height + (ui::row_height() - font_size()) / 2.0,
-                        ],
-                        [(tile_width - ui::PAD / 2.0).max(0.0), font_size()],
-                    ),
-                ));
-                let border = if index == marked {
-                    settings.border.focused
-                } else {
-                    settings.border.unfocused
-                };
-                tiles.push(ui::frame(
-                    border,
-                    settings.radius,
-                    if index == marked { 2.0 } else { 1.0 },
-                    Style::absolute([x, y], [tile_width, tile_height]),
-                    parts,
-                ));
-            }
-        }
-        // a box, so rows scrolled past its sides aren't drawn outside it
-        UITree::new_container_styled(Style::absolute([0.0, 0.0], [width, height]), tiles)
+        self.get_window_with(None)
     }
 
     /// Like `get_window`, but with `at_root` drawn while its root is focused (eg a project's overview).

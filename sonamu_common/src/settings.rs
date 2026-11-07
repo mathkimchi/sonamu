@@ -167,7 +167,7 @@ pub struct TreeviewSettings {
     pub floating_size: [u32; 2],
 }
 
-/// 3 finger touchpad swipes between nodes (#141): left / right between siblings, up / down between parent and child
+/// 3 finger touchpad swipes between nodes (#141): up / down between siblings, left / right between parent and child
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[schemars(transform = optional_fields)]
 pub struct SwipeSettings {

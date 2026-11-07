@@ -314,7 +314,7 @@ impl ProjectApplet {
         Box::new(move |hook| {
             let contents = DetachedTree {
                 main: None,
-                layout: Layout::Scroll,
+                layout: Layout::Single,
                 wl_surface: None,
                 hibernated: None,
                 awaiting: None,
@@ -331,7 +331,7 @@ impl ProjectApplet {
     fn new(subtree: DetachedTree, hook: AppletContext) -> Self {
         let contents = DetachedTree {
             main: None,
-            layout: Layout::Scroll,
+            layout: Layout::Single,
             wl_surface: None,
             hibernated: None,
             awaiting: None,

@@ -1237,7 +1237,6 @@ impl StandardApplet for FileManagerApplet {
             }
             // TODO: a placed project dissolving here loses its contents (they'd need to be the node's children)
             NodeRequest::SwapSibling(_)
-            | NodeRequest::ToggleHalf
             | NodeRequest::Unwrap(_)
             | NodeRequest::StartWl(_)
             | NodeRequest::Replace(_) => {

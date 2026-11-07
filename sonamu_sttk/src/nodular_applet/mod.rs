@@ -258,8 +258,6 @@ pub enum NodeRequest {
     Close,
     /// Swaps the applet's node (with its subtree) with the sibling this many places over (-1: previous)
     SwapSibling(isize),
-    /// Toggles the applet's node between half and full width in its parent's strip (#144)
-    ToggleHalf,
     /// Replaces the applet's node with a split showing it and a new applet next to it
     Split {
         axis: Axis,

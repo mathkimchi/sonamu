@@ -1,5 +1,5 @@
 use sonamu_common::{
-    sap::packets::StandardRequest,
+    sap::{detached::Axis, packets::StandardRequest},
     settings,
 };
 use sonamu_ui::ui_event::{KeyModifiers, KeyTrait, UIEvent};
@@ -74,13 +74,14 @@ fn installed(program: &str) -> bool {
     std::env::var_os("PATH")
         .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
 }
+const SUPER_SHIFT: KeyModifiers = KeyModifiers::both(KeyModifiers::LOGO, KeyModifiers::SHIFT);
 
 /// Handle the standard keybinds like:
 /// - `Ctrl+Shift+Q` - Quit
 /// - `Super+W` - Close tab
 /// - `Super+T` / `Super+N` - Start the terminal / browser
 /// - `Ctrl+Shift+Plus` - Add child
-/// - `Super+F` - Toggle half width
+/// - `Super+Shift+|` / `Super+Shift+_` - Split side by side / stacked
 /// - `Super+P` - Put the node in a project
 /// - `Alt+Shift+W` / `Alt+Shift+S` - swap with the previous / next sibling
 ///
@@ -138,16 +139,6 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
         pressed: true,
         ..
     } = &ui_event
-        && matches!(key.to_char(), Some('f' | 'F'))
-    {
-        // Super+F -> toggle half width in the strip (#144)
-        Some(NodeRequest::ToggleHalf)
-    } else if let UIEvent::Key {
-        symbol: Some(key),
-        modifiers: KeyModifiers { logo: true, .. },
-        pressed: true,
-        ..
-    } = &ui_event
         && let Some(program) = match key.to_char() {
             Some('t') => Some(terminal()),
             Some('n') => Some(browser()),
@@ -168,6 +159,23 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
         Some(NodeRequest::AddChild(
             CommandHubApplet::get_boxed_initiator(),
         ))
+    } else if let UIEvent::Key {
+        symbol: Some(key),
+        modifiers: SUPER_SHIFT,
+        pressed: true,
+        ..
+    } = &ui_event
+        && let Some(axis) = match key.to_char() {
+            Some('|') => Some(Axis::Horizontal),
+            Some('_') => Some(Axis::Vertical),
+            _ => None,
+        }
+    {
+        // Super+Shift+| / Super+Shift+_ -> split with a CommandHub beside / below
+        Some(NodeRequest::Split {
+            axis,
+            new_pane: CommandHubApplet::get_boxed_initiator(),
+        })
     } else if let UIEvent::Key {
         symbol: Some(key),
         modifiers,

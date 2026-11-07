@@ -199,7 +199,7 @@
       ]
     },
     "SwipeSettings": {
-      "description": "3 finger touchpad swipes between nodes (#141): left / right between siblings, up / down between parent and child",
+      "description": "3 finger touchpad swipes between nodes (#141): up / down between siblings, left / right between parent and child",
       "type": "object",
       "properties": {
         "damping_ratio": {

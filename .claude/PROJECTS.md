@@ -19,7 +19,7 @@ shown rows; a project's row and its inner root are one row and one path).
 - A plain `StandardApplet` run by `AppletClient`; the server (the holder of its node) doesn't know it is a project.
   Its contents' mains are embedded (`AppletContext::embed`/`embed_detached`), their `EmbeddedId`s map to its
   `NodeTree`'s `NodeId`s.
-- **Its tree's root is a container** (no main, `Layout::Scroll`, labeled with the project's name) and *is* the
+- **Its tree's root is a container** (no main, `Layout::Single`, labeled with the project's name) and *is* the
   project's row: its treeview is its tree. Its panes are the container's children.
 - **Making one**: `NodeRequest::Wrap(ProjectApplet::wrapper())` (Super+P, the menu's Make project, hub `project`):
   after the batch, the holder replaces the node's subtree with a project node holding it. Wrap on a project's own root

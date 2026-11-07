@@ -55,14 +55,12 @@ Applets have no traversal of their own.
   under the same parent: a node's inner children come before its own, so `s` on the last inner one goes to the first
   outer one); `a` / `0`: parent (past the view root: its parent, widening the view); `d`, `1`-`8`, `9`: first, nth, last child.
 - Swipes (DRM backend only: `UIEvent::Swipe`, `Begin` / `Update(px)` / `End`), the root's (`handle_swipe`): 4 fingers up
-  (`zoom_out`, #145) select the holder around the focus (the path up to its last `Inner` step, else the root); 4 down
-  (`zoom_in`) go back down `remembered` to the next holder, selected, or to the last row, inside it; once a swipe
-  (50 px). The treeview shows only while keys moved the selector (`traversing_by_keys`; any swipe clears it). 3 fingers (#141, #142,
+  selects the focused row (out of its applet), 4 down is Enter; once a swipe (50 px). 3 fingers (#141, #142,
   `nodular_applet/swipe.rs`) move along a strip of shown rows, natural direction (content follows the fingers):
-  - The axis locks after 10 px. Horizontal (#144): the focused row's siblings (rows under the same parent row, so inner
-    then own children); fingers left bring in the next. Vertical: ancestors up to the first row, then down through each
-    row's remembered child (`RootNodeApplet::remembered`, the child row focus was last under, by path, unsaved; else the
-    first); fingers up bring in the child.
+  - The axis locks after 10 px. Vertical: the focused row's siblings (rows under the same parent row, so inner then own
+    children); fingers up bring in the next. Horizontal: ancestors up to the first row, then down through each row's
+    remembered child (`RootNodeApplet::remembered`, the child row focus was last under, by path, unsaved; else the
+    first); fingers left bring in the child.
   - The view is a position in rows (`swipe.distance_x` / `distance_y` px each), rubber-banded past the ends (`swipe.rubber_band`). On
     lift it settles on one of the two rows shown, the one the speed projected 200 ms ahead is nearer (`settle_target`;
     it never skips rows), focuses it, then springs there (`Settle`: a damped harmonic oscillator, `swipe.stiffness` /
@@ -121,7 +119,7 @@ published treeviews.
   - Undone by closing it: on `CloseRequest` (Ctrl+W on its node, or on its inner root) it detaches its contents and
     sends `NodeRequest::Unwrap(contents)`, so they take its place.
 - A **split** is a `SplitApplet` the same way: its inner tree's root is the split (`Layout::Split`, no main) and its
-  children are the panes. `NodeRequest::Split` (no keybind since #144; splits still load from sessions) wraps the node into one (`SplitApplet::wrapper`) with a new pane; closing it
+  children are the panes. Super+Shift+| / _ wraps the node into one (`SplitApplet::wrapper`) with a new pane; closing it
   gives its panes back, and one left with a single pane is replaced by it.
 
 Generic hooks that make this possible (`StandardApplet`, run by `AppletClient`):
@@ -135,20 +133,6 @@ Generic hooks that make this possible (`StandardApplet`, run by `AppletClient`):
 
 Ownership is what pluck/place moves between: a holder detaches clients from its loop and another attaches them
 (`ClientHandle::detach`, `DetachedClient::attach`).
-
-## Scrolling (#144)
-
-- A node's children are a horizontal strip (`Layout::Scroll`, the default; was `Single`): it shows the child focus is
-  under (`NodeTree::shown_child`), its main being its column in its parent's strip. A full width child shows alone.
-- `Super+F` (`NodeRequest::ToggleHalf`, saved as `SavedTree::half`) makes a node half width. A half width child is
-  shown beside a half width sibling (`NodeTree::half_pair`), scrolled as little as can be from the last pair shown
-  (`Node::pair`, kept only by the active screen's layout, not by swipes'); with none beside it, it is alone on the left.
-  A project's or split's inner root passes it to the project's node.
-- Zoom-out view (#145): what a holder draws while it is selected, not inside. A project's is its overview (cards); a
-  tree whose root has no main (the root applet's) draws `NodeTree::map`: a row of scaled tiles per depth (3 at most)
-  down the children focus was last under, marked, each row scrolled to its marked tile. Pinned to iterate on; it
-  takes no clicks yet.
-- Not yet: wider strips than two halves, and waking a hibernated half shown beside.
 
 ## Focus
 

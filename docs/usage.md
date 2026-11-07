@@ -30,7 +30,7 @@ Basic Usage Manual:
   - `Super + F`: toggle half-view (like Niri)
   <!-- - `Super + Shift + \` (ie `Super + |`): split to right -->
   <!-- - `Super + Shift + -`: split to bottom -->
-- Traversal Keys (use `Alt + <traversal key>` to show the tree view):
+- Traversal Keys (use `Alt + <traversal key>` to focus the tree view):
   - (Shift) + Tab: goes (up)/down in the tree view
   - W/S: goes to prev/next sibling
   - A/D: goes to parent/child
@@ -43,9 +43,9 @@ Basic Usage Manual:
   - Drag/drop nodes: yes
   - Right click: brings up options
 - Gestures:
-  - 3-finger swipe left/right: next/previous sibling (the view follows the fingers)
-  - 3-finger swipe up/down: child (the one last focused)/parent
-  - 4-finger swipe up/down: zoom out to the project (or the whole tree) around it/back in
+  - 3-finger swipe up/down: next/previous sibling (the view follows the fingers)
+  - 3-finger swipe left/right: child (the one last focused)/parent
+  - 4-finger swipe up/down: focus tree view/main content
 
 Niche keybinds not included,
 and these can be configured as well.

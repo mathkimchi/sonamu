@@ -38,9 +38,6 @@ pub struct SavedTree {
     pub layout: Layout,
     #[serde(default)]
     pub children: Vec<Self>,
-    /// Half width in its parent's strip (#144)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub half: bool,
     /// A container's name; only a project's inner root has one (the project's name)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,

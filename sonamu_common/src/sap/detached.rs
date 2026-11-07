@@ -62,10 +62,9 @@ impl std::fmt::Debug for DetachedClient {
 /// How a node shows itself and its children
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Layout {
-    /// Its main, or its children as a horizontal strip scrolled to the focused one (#144)
+    /// Its main, or the focused child
     #[default]
-    #[serde(alias = "Single")]
-    Scroll,
+    Single,
     /// All children at once, side by side along the axis (a split has no main)
     Split(Axis),
 }
@@ -73,7 +72,7 @@ impl Layout {
     /// The treeview label of a node with no main
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Scroll => "(empty)",
+            Self::Single => "(empty)",
             Self::Split(Axis::Horizontal) => "Split ⇆",
             Self::Split(Axis::Vertical) => "Split ⇅",
         }
@@ -107,7 +106,7 @@ impl DetachedTree {
     pub const fn leaf(main: DetachedClient) -> Self {
         Self {
             main: Some(main),
-            layout: Layout::Scroll,
+            layout: Layout::Single,
             wl_surface: None,
             hibernated: None,
             awaiting: None,
