@@ -81,7 +81,7 @@ pub struct Treeview {
     pub screen_frames_itself: Vec<bool>,
     /// With `screen_windows`, `focus` on each screen (eg a project's per-screen focus)
     pub screen_focus: Vec<WorldTreePath>,
-    /// Paths of `tree` whose children are all shown at once (eg a split's panes): a swipe between them moves the
+    /// Paths of `tree` whose children are all shown at once: a swipe between them moves the
     /// focus with the fingers rather than the content (#141)
     pub shown_at_once: Vec<WorldTreePath>,
 }

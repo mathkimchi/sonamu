@@ -4,7 +4,7 @@ use calloop::{EventLoop, LoopHandle, LoopSignal, channel::Sender};
 use sonamu_common::{
     sap::{
         client_handle::ClientHandle,
-        detached::{Axis, DetachedClient, DetachedTree},
+        detached::{DetachedClient, DetachedTree},
         packets::{
             AwaitedWl, NewWlSurface, NodeAction, OpenApplet, SpawnPosition, StandardEvent,
             StandardRequest, StateKind, Treeview, WlSurfaceEvent,
@@ -28,7 +28,6 @@ pub mod node_holder;
 pub mod node_tree;
 pub mod project_applet;
 pub mod root_node_applet;
-pub mod split_applet;
 pub mod swipe;
 mod traversal;
 pub(crate) mod treeview;
@@ -78,7 +77,7 @@ pub trait StandardApplet {
         Vec::new()
     }
 
-    /// Paths of its inner tree whose children are all shown at once (`Treeview::shown_at_once`, eg a split's panes)
+    /// Paths of its inner tree whose children are all shown at once (`Treeview::shown_at_once`)
     fn shown_at_once(&self) -> Vec<WorldTreePath> {
         Vec::new()
     }
@@ -104,7 +103,7 @@ pub trait StandardApplet {
         false
     }
 
-    /// Whether new children of its node go inside it instead (eg a project's or split's panes): a keybind, menu,
+    /// Whether new children of its node go inside it instead (eg a project's contents): a keybind, menu,
     /// drop, opened applet or wl window that would add one to its node is passed in, at its root (#83).
     /// Published with the treeview.
     fn holds_children(&self) -> bool {
@@ -258,11 +257,6 @@ pub enum NodeRequest {
     Close,
     /// Swaps the applet's node (with its subtree) with the sibling this many places over (-1: previous)
     SwapSibling(isize),
-    /// Replaces the applet's node with a split showing it and a new applet next to it
-    Split {
-        axis: Axis,
-        new_pane: NodularAppletInitializer,
-    },
     /// Replaces the applet's node and everything under it with a node whose applet is made from them
     /// (eg a project holding them as its inner tree)
     Wrap(WrapInitializer),

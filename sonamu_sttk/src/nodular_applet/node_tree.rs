@@ -10,7 +10,7 @@ use slotmap::SlotMap;
 use sonamu_common::{
     sap::{
         client_handle::ClientHandle,
-        detached::{Axis, DetachedClient, DetachedTree, Layout},
+        detached::{DetachedClient, DetachedTree, EMPTY_LABEL},
         packets::{AwaitedWl, NewWlSurface, SpawnPosition, StandardEvent, SwipeView, WlSurfaceId},
         session::{SavedApplet, SavedTree, SavedWl},
     },
@@ -40,14 +40,13 @@ slotmap::new_key_type! {
     pub struct NodeId;
 }
 
-/// Shows its main applet or the focused child, or all its children at once (a split).
 /// Starts the label of an inactive node's row in the treeview (after any `▾`/`▸`)
 pub(crate) const INACTIVE_MARK: &str = "⏾ ";
 
+/// Shows its main applet or the focused child
 struct Node {
-    /// Dropping it ends the applet. `None` for splits.
+    /// Dropping it ends the applet. `None` for containers.
     main: Option<ClientHandle>,
-    layout: Layout,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
     focus: FocusIndex,
@@ -57,7 +56,7 @@ struct Node {
     inner_wl_focus: Option<WlSurfaceId>,
     /// Its main's inner tree is hidden in the treeview
     collapsed: bool,
-    /// The child focus was last on; shown by a container (no main, not a split) while it is focused itself
+    /// The child focus was last on; shown by a container (no main) while it is focused itself
     last_child: usize,
     /// A restored wl client's tile (its main stands in) waiting for the client's toplevel
     awaiting: Option<AwaitedWl>,
@@ -69,10 +68,9 @@ struct Node {
     screen_views: Option<(Vec<Option<DisplayContainerSize>>, usize)>,
 }
 impl Node {
-    const fn new(main: Option<ClientHandle>, layout: Layout, parent: Option<NodeId>) -> Self {
+    const fn new(main: Option<ClientHandle>, parent: Option<NodeId>) -> Self {
         Self {
             main,
-            layout,
             parent,
             children: Vec::new(),
             focus: FocusIndex::Focusing,
@@ -266,7 +264,7 @@ impl NodeTree {
     ) -> NodeId {
         let spawn_client = &self.spawn_client;
         let id = self.nodes.insert_with_key(|id| {
-            Node::new(Some(spawn_client(id, initializer)), Layout::Single, parent)
+            Node::new(Some(spawn_client(id, initializer)), parent)
         });
         self.send_initial_size(id);
         id
@@ -279,11 +277,7 @@ impl NodeTree {
             inactive: tree.hibernated.is_some(),
             hibernated: tree.hibernated,
             awaiting: tree.awaiting,
-            ..Node::new(
-                tree.main.map(|main| attach_client(id, main)),
-                tree.layout,
-                parent,
-            )
+            ..Node::new(tree.main.map(|main| attach_client(id, main)), parent)
         });
         self.send_initial_size(id);
         if let Some(surface_id) = tree.wl_surface {
@@ -298,18 +292,31 @@ impl NodeTree {
 
     /// Makes the saved node and its descendants under `parent` (not added to its children),
     /// all hibernating until focused
-    fn restore_subtree(&mut self, parent: Option<NodeId>, saved: SavedTree) -> NodeId {
+    fn restore_subtree(&mut self, parent: Option<NodeId>, mut saved: SavedTree) -> NodeId {
+        // a split, saved before they were removed: a container of its panes
+        if let Some(SavedApplet::Spawner {
+            name,
+            inner: Some(inner),
+            ..
+        }) = &mut saved.main
+            && name == "split"
+        {
+            let inner = std::mem::take(&mut **inner);
+            let panes = if inner.main.is_some() {
+                vec![inner]
+            } else {
+                inner.children
+            };
+            saved.main = None;
+            saved.children.splice(0..0, panes);
+        }
         let hibernated = saved.main.clone();
         let main = saved.main.map(session::hibernate);
         let spawn_client = &self.spawn_client;
         let id = self.nodes.insert_with_key(|id| Node {
             inactive: hibernated.is_some(),
             hibernated,
-            ..Node::new(
-                main.map(|initializer| spawn_client(id, initializer)),
-                saved.layout,
-                parent,
-            )
+            ..Node::new(main.map(|initializer| spawn_client(id, initializer)), parent)
         });
         self.send_initial_size(id);
         for child in saved.children {
@@ -327,7 +334,6 @@ impl NodeTree {
             1 => saved.pop().unwrap(),
             _ => SavedTree {
                 main: None,
-                layout: Layout::Single,
                 children: saved,
                 label: None,
                 directory: None,
@@ -336,7 +342,7 @@ impl NodeTree {
         }
     }
 
-    /// The node, or its children if it is left out (a split left with one pane is too)
+    /// The node, or its children if it is left out
     fn save_subtree(&self, id: NodeId) -> Vec<SavedTree> {
         let node = &self.nodes[id];
         let children: Vec<_> = node
@@ -349,14 +355,10 @@ impl NodeTree {
                 Some(saved) => Some(saved),
                 None => return children,
             },
-            None if matches!(node.layout, Layout::Split(_)) && children.len() <= 1 => {
-                return children;
-            }
             None => None,
         };
         vec![SavedTree {
             main,
-            layout: node.layout,
             children,
             label: None,
             directory: None,
@@ -451,7 +453,6 @@ impl NodeTree {
         }
         DetachedTree {
             main: node.main.map(ClientHandle::detach),
-            layout: node.layout,
             wl_surface,
             hibernated: node.hibernated,
             awaiting: node.awaiting,
@@ -487,7 +488,7 @@ impl NodeTree {
     }
 
     /// Gives the event back if the node has no running applet to send it to
-    /// (splits have none, and an applet may have ended, eg by panicking)
+    /// (containers have none, and an applet may have ended, eg by panicking)
     // the error is just the event, as big as what was passed in
     #[allow(clippy::result_large_err)]
     pub fn try_send_event(&self, id: NodeId, event: StandardEvent) -> Result<(), StandardEvent> {
@@ -567,9 +568,7 @@ impl NodeTree {
         if self.contains(id, self.view_root) {
             self.view_root = parent_id;
         }
-        let plucked = self.detach_subtree(id);
-        self.collapse_split(parent_id);
-        Some(plucked)
+        Some(self.detach_subtree(id))
     }
 
     /// Whether `descendant` is `ancestor` or below it
@@ -615,23 +614,6 @@ impl NodeTree {
         self.damaged = true;
     }
 
-    /// A split left with one pane is replaced by that pane
-    fn collapse_split(&mut self, id: NodeId) {
-        let node = &self.nodes[id];
-        if !matches!(node.layout, Layout::Split(_)) || node.children.len() != 1 {
-            return;
-        }
-        let child = node.children[0];
-        let parent = node.parent;
-        self.replace_child(parent, id, child);
-        if self.view_root == id {
-            self.view_root = child;
-        }
-        self.nodes.remove(id);
-        self.nodes[child].parent = parent;
-        self.damaged = true;
-    }
-
     /// Puts `new` where `old` is among the parent's children (or makes it the root)
     fn replace_child(&mut self, parent: Option<NodeId>, old: NodeId, new: NodeId) {
         match parent {
@@ -666,7 +648,7 @@ impl NodeTree {
     /// Replaces the node with `tree` (eg a project's contents); the node's children move under the tree's root.
     /// The tree goes under the root if the node is gone.
     ///
-    /// A container root (no main, not a split, like a project's) is dropped, its children taking its place,
+    /// A container root (no main, like a project's) is dropped, its children taking its place,
     /// unless it would leave the tree without a root.
     pub fn unwrap(&mut self, id: NodeId, tree: DetachedTree) {
         let Some(node) = self.nodes.get(id) else {
@@ -689,7 +671,7 @@ impl NodeTree {
         self.damaged = true;
 
         let node = &self.nodes[new];
-        if node.main.is_some() || node.layout != Layout::Single {
+        if node.main.is_some() {
             return;
         }
         let children = node.children.clone();
@@ -983,7 +965,7 @@ impl NodeTree {
     /// Widens the view root if focus left it. Run after each batch of changes.
     pub fn update_view_root(&mut self) {
         let old = self.view_root;
-        // pluck, close and split move it themselves; just in case
+        // pluck and close move it themselves; just in case
         if !self.nodes.contains_key(self.view_root) {
             self.view_root = self.root;
         }
@@ -1185,24 +1167,17 @@ impl NodeTree {
         })
     }
 
-    /// Whether the node is a split (eg a `SplitApplet`'s inner root)
-    pub fn is_split(&self, id: NodeId) -> bool {
-        self.nodes
-            .get(id)
-            .is_some_and(|node| matches!(node.layout, Layout::Split(_)))
-    }
-
-    /// Its applet's treeview label (or its layout's)
+    /// Its applet's treeview label (or `EMPTY_LABEL`)
     pub fn label(&self, id: NodeId) -> String {
         self.applet_treeview(id).get_root_value().clone()
     }
 
-    /// Its main's inner tree (or its layout's label), marked `▾` if it has inner elements or children,
+    /// Its main's inner tree (or `EMPTY_LABEL`), marked `▾` if it has inner elements or children,
     /// or `▸` and hidden if collapsed (its children too, see `get_treeview_of`)
     fn applet_treeview(&self, id: NodeId) -> WorldTree<String> {
         let node = &self.nodes[id];
         let mut treeview = match &node.main {
-            None => WorldTree::Base(node.layout.label().to_string()),
+            None => WorldTree::Base(EMPTY_LABEL.to_string()),
             Some(main) => {
                 let published = main.get_treeview();
                 let mut treeview = published.tree;
@@ -1359,7 +1334,6 @@ impl NodeTree {
 
         self.wl_surfaces.retain(|_, node_id| *node_id != id);
         self.damaged = true;
-        self.collapse_split(parent_id);
         true
     }
 
@@ -1433,7 +1407,7 @@ impl NodeTree {
         if matches!(key, KeySymbol::Char(' ')) {
             self.toggle_collapsed(id);
         } else if matches!(key, KeySymbol::Enter) {
-            // confirms the selection: into its main, or a split's first pane
+            // confirms the selection: into its main, or a container's first child
             if node.main.is_some() {
                 node.focus = FocusIndex::Inner;
                 self.damaged = true;
@@ -1494,7 +1468,7 @@ impl NodeTree {
         );
     }
 
-    /// The node `id` shows: following focused children, but stopping at splits, which show every pane
+    /// The node `id` shows: following focused children
     fn displayed_node(&self, id: NodeId) -> NodeId {
         self.displayed_node_toward(id, self.focused_node())
     }
@@ -1504,8 +1478,7 @@ impl NodeTree {
     fn displayed_node_toward(&self, mut id: NodeId, focus: NodeId) -> NodeId {
         loop {
             let node = &self.nodes[id];
-            if matches!(node.layout, Layout::Single)
-                && let Some(&child) = node
+            if let Some(&child) = node
                     .children
                     .iter()
                     .find(|&&child| self.contains(child, focus))
@@ -1513,13 +1486,13 @@ impl NodeTree {
                 id = child;
                 continue;
             }
-            match (node.layout, node.focus) {
+            match node.focus {
                 // the focus is on this node itself (its own `focus` may point to another screen's)
-                (Layout::Single, FocusIndex::Child(index)) if id != focus => {
+                FocusIndex::Child(index) if id != focus => {
                     id = node.children[index];
                 }
                 // a container has nothing of its own to show
-                (Layout::Single, _) if node.main.is_none() && !node.children.is_empty() => {
+                _ if node.main.is_none() && !node.children.is_empty() => {
                     id = node.children[node.last_child.min(node.children.len() - 1)];
                 }
                 _ => return id,
@@ -1527,14 +1500,10 @@ impl NodeTree {
         }
     }
 
-    /// What the node shows on its own (for a split, its first pane) and the size it is drawn at, eg for a preview.
+    /// What the node shows on its own and the size it is drawn at, eg for a preview.
     /// `None` if that has no running applet or no size yet.
     pub fn preview(&self, id: NodeId) -> Option<(UITree, DisplayContainerSize)> {
-        let mut id = self.displayed_node(id);
-        while matches!(self.nodes[id].layout, Layout::Split(_)) {
-            id = self.displayed_node(*self.nodes[id].children.first()?);
-        }
-        let node = &self.nodes[id];
+        let node = &self.nodes[self.displayed_node(id)];
         Some((
             screen_surface(node.main.as_ref()?, self.active_screen),
             node.size?,
@@ -1646,19 +1615,17 @@ impl NodeTree {
     ) -> Vec<Pane> {
         let settings = settings::get();
         let (gap, border) = settings.gap_and_border_px();
-        let mut panes = Vec::new();
-        self.push_panes(
-            view_root,
-            focus,
-            [
+        let mut panes = vec![Pane {
+            node: self.displayed_node_toward(view_root, focus),
+            rect: [
                 gap,
                 gap,
                 size.width.saturating_sub(2 * gap),
                 size.height.saturating_sub(2 * gap),
             ],
-            [gap, border],
-            &mut panes,
-        );
+            border,
+            framed: true,
+        }];
         if let (false, [pane]) = (settings.always_frame, panes.as_mut_slice()) {
             pane.rect = [0, 0, size.width, size.height];
             pane.border = 0;
@@ -1679,46 +1646,6 @@ impl NodeTree {
             }
         }
         panes
-    }
-
-    /// Splits leave `gap` between their children
-    fn push_panes(
-        &self,
-        id: NodeId,
-        focus: NodeId,
-        rect: [u32; 4],
-        [gap, border]: [u32; 2],
-        panes: &mut Vec<Pane>,
-    ) {
-        let id = self.displayed_node_toward(id, focus);
-        let node = &self.nodes[id];
-        let Layout::Split(axis) = node.layout else {
-            panes.push(Pane {
-                node: id,
-                rect,
-                border,
-                framed: true,
-            });
-            return;
-        };
-
-        let [x, y, width, height] = rect;
-        let count = node.children.len() as u32;
-        let length = match axis {
-            Axis::Horizontal => width,
-            Axis::Vertical => height,
-        };
-        let length = length.saturating_sub(gap * count.saturating_sub(1));
-        for (index, &child) in (0..).zip(&node.children) {
-            // the last pane takes the rounding leftovers
-            let start = length * index / count + gap * index;
-            let end = length * (index + 1) / count + gap * index;
-            let child_rect = match axis {
-                Axis::Horizontal => [x + start, y, end - start, height],
-                Axis::Vertical => [x, y + start, width, end - start],
-            };
-            self.push_panes(child, focus, child_rect, [gap, border], panes);
-        }
     }
 
     /// Draws the swipe if both its ends are nodes of this world, else passes it into the node whose inner world
@@ -1836,20 +1763,13 @@ impl NodeTree {
             return view(focused, &self.panes);
         }
         let [from_panes, to_panes] = &swipe.panes;
-        // ends that show the same panes (eg both in a split) don't move, the focus ring does
+        // ends that show the same panes don't move, the focus ring does
         let nodes = |panes: &[Pane]| panes.iter().map(|pane| pane.node).collect::<Vec<_>>();
         if let Some(to) = swipe.to
             && (at_root.is_none() || (swipe.from != self.root && to != self.root))
             && nodes(from_panes) == nodes(to_panes)
         {
-            return self.ring_window(from_panes, swipe.from, Some(to), swipe.progress);
-        }
-        // past a split's first / last pane: the ring pushes against its edge rather than the panes sliding
-        if swipe.to.is_none()
-            && let Some(parent) = self.nodes[swipe.from].parent
-            && matches!(self.nodes[parent].layout, Layout::Split(_))
-        {
-            return self.ring_window(from_panes, swipe.from, None, swipe.progress);
+            return self.ring_window(from_panes, swipe.from, to, swipe.progress);
         }
         swipe::slide(
             size,
@@ -1860,16 +1780,8 @@ impl NodeTree {
         )
     }
 
-    /// `panes` without focus, and a focus ring partway from `from`'s pane to `to`'s.
-    /// With no `to` (past a split's first / last pane, `progress` rubber-banded, negative before the first), the ring
-    /// squashes against the split's edge: its leading edge stays and its trailing edge follows.
-    fn ring_window(
-        &self,
-        panes: &[Pane],
-        from: NodeId,
-        to: Option<NodeId>,
-        progress: f32,
-    ) -> UITree {
+    /// `panes` without focus, and a focus ring partway from `from`'s pane to `to`'s
+    fn ring_window(&self, panes: &[Pane], from: NodeId, to: NodeId, progress: f32) -> UITree {
         let rect = |id: NodeId| {
             let shown = self.displayed_node_toward(id, id);
             panes
@@ -1881,27 +1793,8 @@ impl NodeTree {
         let Some((from_rect, pane)) = rect(from) else {
             return window;
         };
-        let (to_rect, progress) = if let Some(to) = to {
-            let Some((to_rect, _)) = rect(to) else {
-                return window;
-            };
-            (to_rect, progress)
-        } else {
-            let axis = match self.nodes[from]
-                .parent
-                .map(|parent| self.nodes[parent].layout)
-            {
-                Some(Layout::Split(Axis::Vertical)) => 1,
-                _ => 0,
-            };
-            let mut squashed = from_rect;
-            let pushed = progress.abs() * from_rect[axis + 2];
-            squashed[axis + 2] -= pushed;
-            if progress > 0.0 {
-                // toward the end: the start edge follows
-                squashed[axis] += pushed;
-            }
-            (squashed, 1.0)
+        let Some((to_rect, _)) = rect(to) else {
+            return window;
         };
         let settings = settings::get();
         let color = match self.nodes[self.focused_node()].focus {
@@ -1917,16 +1810,13 @@ impl NodeTree {
         ])
     }
 
-    /// Paths whose children are all shown at once (`Treeview::shown_at_once`): its splits, and its applets' own
+    /// Paths whose children are all shown at once (`Treeview::shown_at_once`): its applets' own
     pub fn shown_at_once(&self) -> Vec<WorldTreePath> {
         let mut paths = Vec::new();
         for (id, node) in &self.nodes {
             let Some(path) = self.path_of(id) else {
                 continue;
             };
-            if matches!(node.layout, Layout::Split(_)) {
-                paths.push(WorldTreePath::from_tree_path(&path));
-            }
             if let Some(main) = &node.main {
                 paths.extend(
                     main.get_treeview()
@@ -2086,7 +1976,6 @@ fn icon(saved: Option<&SavedApplet>) -> Option<String> {
         } if name == "project" => {
             return contents.icon.clone().or(Some(PROJECT_ICON.to_string()));
         }
-        SavedApplet::Spawner { name, .. } if name == "split" => return None,
         SavedApplet::Spawner { name, .. } => match name.as_str() {
             "command_hub" => '\u{f054}',
             "file_manager" => '\u{f07b}',

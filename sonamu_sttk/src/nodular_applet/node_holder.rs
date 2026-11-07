@@ -8,7 +8,6 @@ use crate::{
         WrapInitializer,
         node_tree::{AttachClient, NodeId, NodeTree, SpawnClient},
         project_applet::ProjectApplet,
-        split_applet::SplitApplet,
     },
     standard_keybinds::{browser, terminal},
 };
@@ -70,7 +69,7 @@ pub struct NodeHolder {
     pub tree: NodeTree,
     /// Sends to the holder's node
     send: Box<dyn Fn(StandardRequest)>,
-    /// Its tree is a project's contents (or a split's panes), whose root stands for the applet itself
+    /// Its tree is a project's contents, whose root stands for the applet itself
     project: bool,
     /// The working directory of programs started in this tree (`NodeRequest::Run`); the runner's if `None`.
     /// Set with `set_directory`, so the tree's applets hear of it
@@ -84,8 +83,8 @@ pub struct NodeHolder {
     pending: Option<Pending>,
     /// Plucked after the event batch: detaching a client inside its own request callback panics
     to_pluck: Option<NodeId>,
-    /// Wrapped after the event batch, for the same reason; then focused inside if true (a split's new pane)
-    to_wrap: Option<(NodeId, WrapInitializer, bool)>,
+    /// Wrapped after the event batch, for the same reason
+    to_wrap: Option<(NodeId, WrapInitializer)>,
     /// Last sent with `StandardRequest::WlKeyboardFocus`
     focused_wl_surface: Option<WlSurfaceId>,
     /// A project's root was closed, so the project should give its contents back
@@ -158,7 +157,7 @@ impl NodeHolder {
         };
 
         // the applet may have something closer; it answers with `Plucked`.
-        // Without a running applet (eg a split) it would never answer.
+        // Without a running applet (eg a container) it would never answer.
         if let Some(inner) = inner
             && self
                 .tree
@@ -178,13 +177,9 @@ impl NodeHolder {
             let plucked = self.tree.pluck(id);
             self.send(StandardRequest::Plucked(plucked));
         }
-        if let Some((id, wrapper, inside)) = self.to_wrap.take() {
+        if let Some((id, wrapper)) = self.to_wrap.take() {
             let directory = self.directory.clone();
-            let new = self.tree.wrap(id, |subtree| wrapper(subtree, directory));
-            // a split focuses its new pane
-            if inside && let Some(new) = new {
-                self.tree.focus(new, true);
-            }
+            self.tree.wrap(id, |subtree| wrapper(subtree, directory));
         }
     }
 
@@ -376,7 +371,7 @@ impl NodeHolder {
                     self.pending = Some(Pending::Place(id));
                     return;
                 }
-                // no running applet (eg a split), so the node takes it
+                // no running applet (eg a container), so the node takes it
                 Err(StandardEvent::Place(_, _, given_back)) => tree = given_back,
                 Err(_) => unreachable!("the event is given back as is"),
             }
@@ -483,17 +478,10 @@ impl NodeHolder {
             NodeRequest::Close => {
                 self.tree.close(id);
             }
-            // the project's node splits, likewise
-            request @ NodeRequest::Split { .. } if self.project && id == self.tree.root() => {
-                return Some(request);
-            }
             NodeRequest::SwapSibling(shift) => self.tree.swap_sibling(id, shift),
-            NodeRequest::Split { axis, new_pane } => {
-                self.to_wrap = Some((id, SplitApplet::wrapper(axis, new_pane), true));
-            }
             // it is a project already
             NodeRequest::Wrap(_) if self.project && id == self.tree.root() => {}
-            NodeRequest::Wrap(wrapper) => self.to_wrap = Some((id, wrapper, false)),
+            NodeRequest::Wrap(wrapper) => self.to_wrap = Some((id, wrapper)),
             NodeRequest::Unwrap(tree) => self.tree.unwrap(id, tree),
             NodeRequest::Run(program) => {
                 self.run(&program);

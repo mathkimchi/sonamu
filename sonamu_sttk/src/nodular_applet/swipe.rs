@@ -1,7 +1,7 @@
 //! 3 finger swipes between nodes (#141, #142): the view follows the fingers along a strip of shown rows
 //! (siblings up / down, parent and child left / right) and settles on one when they lift.
 //! Natural direction: the content moves with the fingers, so fingers up bring in the next sibling; where the rows are
-//! all shown at once (eg a split's panes), the focus moves with the fingers instead.
+//! all shown at once, the focus moves with the fingers instead.
 //! `slide` and `ring` draw a swipe for holders (`StandardEvent::Swipe`).
 
 use super::treeview::TreeviewRow;

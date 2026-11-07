@@ -10,7 +10,7 @@ shown rows; a project's row and its inner root are one row and one path).
   wl surfaces, wl keyboard focus reports, wrapping. It sends up through a `Box<dyn Fn(StandardRequest)>`.
 - Paths it takes and sends are of its tree (`WorldTreePath`, see WORLD_TREE.md).
 - `handle_node_request` / `handle_ui_event` return a request for the holder's own node when the holder can't do it
-  itself (eg a split of a project's row). The root logs and drops it.
+  itself (eg wrapping a project's row). The root logs and drops it.
 - `client_spawners(loop, registry, fn)` makes the spawn/attach closures.
 - Root-only stuff stays in `RootNodeApplet`: the treeview panel and mouse, traversal, `last_drop`, help, view root keys.
 
@@ -19,7 +19,7 @@ shown rows; a project's row and its inner root are one row and one path).
 - A plain `StandardApplet` run by `AppletClient`; the server (the holder of its node) doesn't know it is a project.
   Its contents' mains are embedded (`AppletContext::embed`/`embed_detached`), their `EmbeddedId`s map to its
   `NodeTree`'s `NodeId`s.
-- **Its tree's root is a container** (no main, `Layout::Single`, labeled with the project's name) and *is* the
+- **Its tree's root is a container** (no main, labeled with the project's name) and *is* the
   project's row: its treeview is its tree. Its panes are the container's children.
 - **Making one**: `NodeRequest::Wrap(ProjectApplet::wrapper())` (Super+P, the menu's Make project, hub `project`):
   after the batch, the holder replaces the node's subtree with a project node holding it. Wrap on a project's own root
@@ -28,7 +28,7 @@ shown rows; a project's row and its inner root are one row and one path).
   `NodeRequest::Unwrap(tree)`; its node is replaced by the container's children (`NodeTree::unwrap`), the first focused
   if the project was. A project that is the root with several children keeps the container as the root (`(empty)`).
 - **New children go inside** (`holds_children`, #83): keybinds, New child ›, drops onto its row, opened applets and wl
-  windows for the project's node go to its root. Splits are the same.
+  windows for the project's node go to its root.
 - **Pluck/place** answer later (`Answer::Later`), through its holder. Plucking its row plucks the whole project.
   `Pluck(None)`/`Place(None)` use the applet's focus path.
 - **Wl surfaces**: one registered while focus is on or inside the project goes inside it. It reports its focused wl

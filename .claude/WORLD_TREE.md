@@ -66,27 +66,26 @@ Applets have no traversal of their own.
     it never skips rows), focuses it, then springs there (`Settle`: a damped harmonic oscillator, `swipe.stiffness` /
     `damping_ratio`, starting at the fingers' speed; ticked by a calloop timer). A new
     swipe during that carries on from where it was.
-  - Rows whose children are all shown at once (`Treeview::shown_at_once`: a split's panes; `NodeTree::shown_at_once`
-    gathers its `Layout::Split` nodes and its mains' lists) are swiped `reversed`: the focus ring follows the fingers.
+  - Rows whose children are all shown at once (`Treeview::shown_at_once`; `NodeTree::shown_at_once` gathers its
+    mains' lists; nothing publishes any since splits were removed) are swiped `reversed`: the focus ring follows the fingers.
   - Drawing: the root sends its tree `StandardEvent::Swipe(SwipeView { from, to, progress })` (the two rows the view is
     between). `NodeTree::set_swipe` draws it if both are its nodes, else passes it into the node whose inner world has
     both (a node and its inner root are one, so project ↔ its inner child is the project's), else drops it (ends in
     different worlds: inner ↔ own sibling, no animation). The holder lays out each end as if focused
     (`layout_swipe`, which also sizes and so shows their applets) and slides the two windows in a clipped box
-    (`swipe::slide`); ends showing the same panes (eg a split's) stay, and a focus ring stretches between their panes
-    like a liquid drop instead (`swipe::ring`: leading edges ease out, trailing ones ease in). Past a split's first / last
-    pane the ring squashes against the split's edge (rubber-banded) instead of the panes sliding. A project draws its
+    (`swipe::slide`); ends showing the same panes stay, and a focus ring stretches between their panes
+    like a liquid drop instead (`swipe::ring`: leading edges ease out, trailing ones ease in). A project draws its
     overview for its root (`get_window_with`). The file manager slides its documents (not its root). Only the active
     screen's tree draws it.
 - In the selector (the deepest holder's `NodeTree::handle_event`, or an applet's own, eg the file manager's documents):
   Space (or clicking its `▾`/`▸`) collapses/expands all its children, inner and own (the holder owning the row keeps
   the flag, unsaved; `NodeTree::applet_treeview`/`get_treeview_of` leave them out); Enter confirms (into the applet,
-  resuming where it was; a split's first pane). An applet whose row is its own root (`StandardApplet::selected_at_root`:
+  resuming where it was; a container's first child). An applet whose row is its own root (`StandardApplet::selected_at_root`:
   a project, its overview) is sent `Focus([])` whenever its node is selected (`NodeTree::selected`), so the row shows,
   and Enter goes to, its overview (#123). Modifiers on their own don't leave the selector; other keys go into the applet.
-- The standard keybinds (Ctrl+W, Ctrl+Shift++, splits, Super+P) act on the selected node.
+- The standard keybinds (Ctrl+W, Ctrl+Shift++, Super+P) act on the selected node.
   Ctrl+W asks its main to close (`CloseRequest`, see below) rather than closing it.
-  Something new for a node whose applet `holds_children` (projects, splits) goes inside it, at its root (#83):
+  Something new for a node whose applet `holds_children` (projects) goes inside it, at its root (#83):
   Ctrl+Shift++ / Super+T / Super+N (the keybind is redone inside it), New child ›, a drop onto its row, opened
   applets and wl windows (`NodeHolder`). Other applets' nodes get it as a child.
 
@@ -107,7 +106,7 @@ published treeviews.
   - A `ProjectApplet` holds a `NodeHolder` too, for the project's inner world.
 - **Applets own their inner world directly** (eg the file manager's documents, a project's `NodeTree`).
   Applets they hold are embedded (`AppletContext::embed`) on their own loop. They change their own node's children only
-  by `NodeRequest`s (AddChild, Close, Split, Wrap, ...) to the holder.
+  by `NodeRequest`s (AddChild, Close, Wrap, ...) to the holder.
 - A **project** is an ordinary `StandardApplet` (`ProjectApplet`). **Nothing above it knows it is a project**: its node
   just sees an applet with an inner world. Its inner world is a full `NodeTree`, whose root is a container node
   (no main, labeled with the project's name, `Project` until renamed), and the project node still has its own children
@@ -118,9 +117,8 @@ published treeviews.
     subtree with a node whose applet is made from it.
   - Undone by closing it: on `CloseRequest` (Ctrl+W on its node, or on its inner root) it detaches its contents and
     sends `NodeRequest::Unwrap(contents)`, so they take its place.
-- A **split** is a `SplitApplet` the same way: its inner tree's root is the split (`Layout::Split`, no main) and its
-  children are the panes. Super+Shift+| / _ wraps the node into one (`SplitApplet::wrapper`) with a new pane; closing it
-  gives its panes back, and one left with a single pane is replaced by it.
+- Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
+  container of its panes (`NodeTree::restore_subtree`).
 
 Generic hooks that make this possible (`StandardApplet`, run by `AppletClient`):
 
@@ -172,7 +170,7 @@ Enter makes a `Focusing` node `Inner`, and from then on keys go to its main.
   if active (its overview where that screen's focus is at its root, `at_root_on`), so switching screens changes
   nothing on them; `Treeview::screen_frames_itself` says which windows frame themselves, and
   `Treeview::screen_focus` where each screen's focus is inside it (for an inactive screen's treeview highlight).
-- Known gaps: splits (and anything inside them) and other applets look and focus the same on every screen;
+- Known gaps: applets other than projects look and focus the same on every screen;
   only the active screen's focus is saved in the session; no wallpaper or bar on the other screens (one wl output);
   no keybind to move between screens; monitors are always side by side, top aligned, at scale 1.
 
@@ -229,7 +227,7 @@ The holder converts them:
     `SavedApplet`), so it starts again when focused. Focus on it moves to its parent, else it would wake right away.
     A live wl tile asks its client to close its toplevel (forgetting the surface, so the node stays). A native
     applet with a saved form gets `StandardEvent::Deactivate` (`StandardApplet::deactivate`) and is dropped; waking
-    restores it from its saved form (`session::restore`, inner tree and all). Projects and splits stop their whole
+    restores it from its saved form (`session::restore`, inner tree and all). Projects stop their whole
     inner tree (`NodeTree::deactivate_all`: wl tiles get `CloseRequest`, native mains `Deactivate`, recursively);
     the file manager closes its wl documents and deactivates the others. Restored wl clients inside come back
     hibernated, but the file manager's wl documents start right away. Starting placeholders and applets without a
@@ -241,8 +239,8 @@ The holder converts them:
 
 ## Directories (#124)
 
-- A tree's directory is `NodeHolder::directory` (a project's, copied into splits and new projects; the runner's if `None`).
+- A tree's directory is `NodeHolder::directory` (a project's, copied into new projects; the runner's if `None`).
 - Applets ask with `NodeRequest::GetDirectory` (`AppletContext::get_directory`), answered with `StandardEvent::Directory`.
-  `NodeHolder::set_directory` (a project's `d`) sends it to every applet in the tree; a split passes it on to its panes, a nested project ignores it.
+  `NodeHolder::set_directory` (a project's `d`) sends it to every applet in the tree; a nested project ignores it.
 - The command hub starts `run` and `$` there; a file manager spawned without a path follows it.
 - Known gap: an applet placed into another tree keeps the old directory until it asks again.

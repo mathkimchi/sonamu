@@ -5,7 +5,6 @@ use crate::{
         node_holder::{NodeHolder, client_spawners},
         node_tree::{NodeId, NodeTree},
         project_applet::ProjectApplet,
-        split_applet::SplitApplet,
         swipe::{Settle, Strip, Swipe},
         traversal::{self, Traversal},
         treeview::{
@@ -361,9 +360,8 @@ impl RootNodeApplet {
         request_sender: Sender<StandardRequest>,
         event_loop: &LoopHandle<'static, Self>,
     ) -> Self {
-        // saved projects and splits are made again by these
+        // saved projects are made again by these
         applet_spawner_registry.insert("project".to_string(), ProjectApplet::get_applet_spawner());
-        applet_spawner_registry.insert("split".to_string(), SplitApplet::get_applet_spawner());
         // Super+? opens it
         applet_spawner_registry.insert("help".to_string(), ManPageApplet::get_applet_spawner());
         let applet_spawners = Arc::new(RwLock::new(applet_spawner_registry));

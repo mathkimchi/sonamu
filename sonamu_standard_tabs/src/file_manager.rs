@@ -1225,9 +1225,8 @@ impl StandardApplet for FileManagerApplet {
                 return;
             }
             NodeRequest::Standard(_) => return,
-            // documents can't hold children, split, be wrapped or hold wl surfaces or opened applets here, so this node does
+            // documents can't hold children, be wrapped or hold wl surfaces or opened applets here, so this node does
             request @ (NodeRequest::AddChild(_)
-            | NodeRequest::Split { .. }
             | NodeRequest::Wrap(_)
             | NodeRequest::Run(_)
             | NodeRequest::AddWlSurface(_)

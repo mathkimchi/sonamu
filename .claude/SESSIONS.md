@@ -6,29 +6,29 @@ Sonamu owns the session; apps' own session restore should be off.
 ## How it works
 
 - **Saved form** (`sonamu_common/src/sap/session.rs`): `Session { tree: SavedTree, focus, treeview_pinned }` (`treeview_pinned`: the root treeview's pin button). Without a saved session, the root is an empty project with the help (Manual) opened in it, and the treeview is pinned.
-  `SavedTree { main: Option<SavedApplet>, layout, children, label }` (`label`: only a project's inner root, its name).
+  `SavedTree { main: Option<SavedApplet>, children, label }` (`label`: only a project's inner root, its name).
   `SavedApplet` is one of `Spawner { name, args }` (made again by the registered applet spawner, like the command hub does)
   or `Wl(SavedWl { argv, cwd, app_id, title })`.
 - **Applets with an inner tree** (#130) save it as `Spawner::inner` (`session::saved_with_inner`), restored by
   `AppletSpawnerTrait::restore_initializer(args, inner)` (default: `create_initializer`, so other spawners never see it).
   JSON is only used to read and write the file; published saved forms stay structured.
   - `project`: no args, inner = its `NodeTree::save()` with label/directory/icon on the inner root (the treeview's
-    icon reads `inner.icon`). `split`: no args, inner = its `NodeTree::save()`. Both spawners are registered by
-    `RootNodeApplet` itself; `project` with no args (not restoring) is an empty project, `split` can't be made.
+    icon reads `inner.icon`). Registered by `RootNodeApplet` itself; with no args (not restoring) it is an empty
+    project. A saved `split` (removed) restores as a container of its inner tree's panes (`NodeTree::restore_subtree`);
+    an old `layout` key is ignored.
   - `file_manager`: args = its root (none when it follows its tree's directory), inner's children = its documents,
     each `main` saved by the document itself. Restored with `session::restore`, none active; a wl document (eg Okular)
     is started with `session::restore_command` and its window claimed by pid like a newly opened PDF (`starting`).
     A document's file is read back from its saved form (`saved_file`: a code editor's arg, a PDF in the wl argv).
 - **Publishing**: every applet publishes `StandardApplet::save()` as `Treeview::saved`, so a holder reads it
   synchronously like the treeview. `None` (the default, eg the help) leaves the node out, its children taking its place.
-  A split left with one pane is left out too. A project saves its whole `NodeTree` (`NodeTree::save`).
+  A project saves its whole `NodeTree` (`NodeTree::save`).
 - **Writing** (`RootNodeApplet::save_session`): every 2 s if changed, and before quitting. Atomic (temp + rename).
   Path: `$SONAMU_SESSION` (set but empty: no session), else `$XDG_STATE_HOME/sonamu/session.json`
   (`~/.local/state/sonamu/session.json`). An unparsable file is moved to `.json.bad`.
-- **Restoring** (`NodeTree::restore`, `session::restore`): every restored node (wl or native, also inside projects
-  and splits) starts hibernating (`session::hibernate`, "<label> (inactive)") and is made when focused, so only the
-  saved focus chain starts (`focus_path` wakes each node on it). Visible split panes other than the focused one stay
-  inactive. The file manager's documents are made with it (not hibernated). On start, if there's a session, `root_initializer` is ignored.
+- **Restoring** (`NodeTree::restore`, `session::restore`): every restored node (wl or native, also inside projects)
+  starts hibernating (`session::hibernate`, "<label> (inactive)") and is made when focused, so only the
+  saved focus chain starts (`focus_path` wakes each node on it). The file manager's documents are made with it (not hibernated). On start, if there's a session, `root_initializer` is ignored.
   Spawners are looked up on the applet's own thread (`AppletContext::find_applet_spawner`).
   Missing ones become a `RestoringApplet` placeholder ("Couldn't restore ...") that stays saved as it was until Ctrl+W.
 - **Wl clients**:
@@ -77,9 +77,8 @@ Sonamu owns the session; apps' own session restore should be off.
 
 ## Decisions
 
-- No `SavedApplet` variant per applet (projects and splits had them): every native applet is a `Spawner`, with its
+- No `SavedApplet` variant per applet (projects and splits, since removed, had them): every native applet is a `Spawner`, with its
   inner tree in `inner` if it has one (#130). Not JSON in an arg: that would serialize on every treeview publish. Sessions from before that don't parse (moved to `.json.bad`).
-- A restored split asks its node for its directory (`get_directory`), like a new one gets it from `wrapper` (#129).
 
 - Sonamu owns the session, not the apps: the alternative means guessing which restored window goes in which tile.
 - Saved state is published with the treeview, not collected by request and answer: synchronous, no new messages,

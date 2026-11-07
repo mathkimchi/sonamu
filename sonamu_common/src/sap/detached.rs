@@ -59,40 +59,14 @@ impl std::fmt::Debug for DetachedClient {
     }
 }
 
-/// How a node shows itself and its children
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Layout {
-    /// Its main, or the focused child
-    #[default]
-    Single,
-    /// All children at once, side by side along the axis (a split has no main)
-    Split(Axis),
-}
-impl Layout {
-    /// The treeview label of a node with no main
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Single => "(empty)",
-            Self::Split(Axis::Horizontal) => "Split ⇆",
-            Self::Split(Axis::Vertical) => "Split ⇅",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Axis {
-    /// Left to right
-    Horizontal,
-    /// Top to bottom
-    Vertical,
-}
+/// The treeview label of a node with no main (eg a container)
+pub const EMPTY_LABEL: &str = "(empty)";
 
 /// A plucked part of a tree: a client with its children
 #[derive(Debug)]
 pub struct DetachedTree {
-    /// `None` for nodes that only lay out their children (splits)
+    /// `None` for containers
     pub main: Option<DetachedClient>,
-    pub layout: Layout,
     /// Set if `main` shows this wl surface
     pub wl_surface: Option<WlSurfaceId>,
     /// `main` stands in for this saved applet, which starts when the node is focused (hibernating, #102)
@@ -106,7 +80,6 @@ impl DetachedTree {
     pub const fn leaf(main: DetachedClient) -> Self {
         Self {
             main: Some(main),
-            layout: Layout::Single,
             wl_surface: None,
             hibernated: None,
             awaiting: None,
@@ -148,7 +121,7 @@ impl DetachedTree {
     /// Like a holder's treeview: each client's treeview, arranged as the tree
     pub fn peek_treeview(&self) -> WorldTree<String> {
         let treeview = self.main.as_ref().map_or_else(
-            || WorldTree::Base(self.layout.label().to_string()),
+            || WorldTree::Base(EMPTY_LABEL.to_string()),
             DetachedClient::peek_treeview,
         );
         let mut node = RecursiveTreeNode::from_value(treeview);

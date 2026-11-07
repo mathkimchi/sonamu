@@ -15,7 +15,7 @@ use crate::{
 };
 use sonamu_common::{
     sap::{
-        detached::{DetachedClient, DetachedTree, Layout},
+        detached::{DetachedClient, DetachedTree},
         packets::{
             AwaitedWl, NewWlSurface, NodeAction, OpenApplet, SpawnPosition, StandardEvent,
             StandardRequest,
@@ -314,7 +314,6 @@ impl ProjectApplet {
         Box::new(move |hook| {
             let contents = DetachedTree {
                 main: None,
-                layout: Layout::Single,
                 wl_surface: None,
                 hibernated: None,
                 awaiting: None,
@@ -331,7 +330,6 @@ impl ProjectApplet {
     fn new(subtree: DetachedTree, hook: AppletContext) -> Self {
         let contents = DetachedTree {
             main: None,
-            layout: Layout::Single,
             wl_surface: None,
             hibernated: None,
             awaiting: None,

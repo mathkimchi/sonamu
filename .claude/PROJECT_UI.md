@@ -16,8 +16,7 @@
   before the name. Saved as `SavedTree::icon` on the inner root (like `label`), and the treeview's `icon` reads it
   from the published `project` spawner's `inner`.
 - Previews (#82): below the rows, a card per child of the inner root (`CARD_WIDTH` wide, the project's own shape, wrapping
-  into columns), each showing what that child shows (`NodeTree::preview`: its displayed node's surface, a split's first
-  pane) scaled down to fit with `UIElement::Scaled`, over its number and label. They update live, since a child's
+  into columns), each showing what that child shows (`NodeTree::preview`: its displayed node's surface) scaled down to fit with `UIElement::Scaled`, over its number and label. They update live, since a child's
   `Damage` damages the project's window. A click on one selects that child, like its row. Hidden while setting the
   directory (its options take those rows). The children keep their last pane size, or the tree's size if never shown.
 - `UIElement::Scaled(f)` (sonamu_ui): its children are laid out at full size, then drawn `f` times as big from its

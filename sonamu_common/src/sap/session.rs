@@ -1,6 +1,6 @@
 //! What a session is saved as, to be restored on the next start (see `.claude/SESSIONS.md`)
 
-use crate::{sap::detached::Layout, utils::tree::world_tree::WorldTreePath};
+use crate::utils::tree::world_tree::WorldTreePath;
 use serde::{Deserialize, Deserializer, Serialize, de::IgnoredAny};
 use std::path::PathBuf;
 
@@ -32,10 +32,8 @@ fn path_or_root<'de, D: Deserializer<'de>>(deserializer: D) -> Result<WorldTreeP
 /// A node, like a `DetachedTree` but saved
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedTree {
-    /// `None` for containers and splits
+    /// `None` for containers (a `layout` key from before splits were removed is ignored)
     pub main: Option<SavedApplet>,
-    #[serde(default)]
-    pub layout: Layout,
     #[serde(default)]
     pub children: Vec<Self>,
     /// A container's name; only a project's inner root has one (the project's name)
