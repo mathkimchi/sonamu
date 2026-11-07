@@ -122,7 +122,9 @@ published treeviews.
   node), `gap` apart. The strip is scrolled (`Node::scroll`, px) as little as can be to show the child focus is under
   whole; only the active screen's layout keeps the scroll. Siblings in sight are panes too, cut to the strip
   (`Pane::clip`), their applets keeping their full size. A column shows what its node shows, so strips nest inside
-  columns. All full width, it shows one node, as before. Not animated yet.
+  columns. All full width, it shows one node, as before. A swipe between siblings slides the strip from one's
+  scroll to the other's (`TreeSwipe::strip`, laid out with `Strips::fixed`), so the settle spring animates it; focus
+  moved by keys jumps.
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
   container of its panes (`NodeTree::restore_subtree`).
 

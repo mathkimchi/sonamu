@@ -70,6 +70,8 @@ struct Node {
     half: bool,
     /// How far its children's strip is scrolled, in px (#144)
     scroll: Cell<i32>,
+    /// How far the last layout scrolled it, kept or not (for a swipe's ends)
+    laid_scroll: Cell<i32>,
 }
 impl Node {
     const fn new(main: Option<ClientHandle>, parent: Option<NodeId>) -> Self {
@@ -88,6 +90,7 @@ impl Node {
             screen_views: None,
             half: false,
             scroll: Cell::new(0),
+            laid_scroll: Cell::new(0),
         }
     }
 }
@@ -143,6 +146,8 @@ struct TreeSwipe {
     progress: f32,
     /// What each end shows, from the last `update_layout`
     panes: [Vec<Pane>; 2],
+    /// Siblings' parent, and how far each end scrolls its strip: the strip slides between them (#144)
+    strip: Option<(NodeId, [i32; 2])>,
 }
 
 /// A screen showing the tree, as it was left when another became active
@@ -182,6 +187,18 @@ impl Pane {
         };
         inside(self.rect) && inside(self.clip)
     }
+}
+
+/// How `push_panes` lays out strips
+#[derive(Clone, Copy)]
+struct Strips {
+    /// Shown whole, scrolled to
+    focus: NodeId,
+    gap: i32,
+    /// Keeps how far each strip is scrolled
+    remember: bool,
+    /// This strip scrolled this far instead, showing every child in sight (a swipe between siblings)
+    fixed: Option<(NodeId, i32)>,
 }
 
 impl NodeTree {
@@ -1546,6 +1563,7 @@ impl NodeTree {
                 size,
                 self.active_screen,
                 true,
+                None,
             );
             for pane in &panes {
                 self.resize(pane.node, pane.inner_size());
@@ -1575,7 +1593,7 @@ impl NodeTree {
             let Some(size) = screen.size else {
                 continue;
             };
-            let panes = self.layout(view_root, focus, size, index, false);
+            let panes = self.layout(view_root, focus, size, index, false, None);
             for pane in &panes {
                 if !shown.contains(&pane.node) {
                     self.resize(pane.node, pane.inner_size());
@@ -1631,7 +1649,7 @@ impl NodeTree {
     }
 
     /// The panes showing `view_root` at `size`, with focus on `focus`
-    /// (on `screen`); `remember` keeps how far the strips are scrolled
+    /// (on `screen`); `remember` keeps how far the strips are scrolled, `fixed` scrolls one strip this far
     fn layout(
         &self,
         view_root: NodeId,
@@ -1639,6 +1657,7 @@ impl NodeTree {
         size: DisplayContainerSize,
         screen: usize,
         remember: bool,
+        fixed: Option<(NodeId, i32)>,
     ) -> Vec<Pane> {
         let settings = settings::get();
         let (gap, border) = settings.gap_and_border_px();
@@ -1646,7 +1665,13 @@ impl NodeTree {
         let full = [0, 0, size.width.cast_signed(), size.height.cast_signed()];
         let area = grow(full, -gap);
         let mut panes = Vec::new();
-        self.push_panes(view_root, focus, area, full, gap, remember, &mut panes);
+        let strips = Strips {
+            focus,
+            gap,
+            remember,
+            fixed,
+        };
+        self.push_panes(view_root, area, full, &strips, &mut panes);
         for pane in &mut panes {
             pane.border = border;
         }
@@ -1670,17 +1695,20 @@ impl NodeTree {
 
     /// The panes showing `id` in `rect`, cut to `clip`. A node's children are a strip (#144): side by side at their
     /// widths (half ones `Super+F`), scrolled as little as can be from where it was to show the one it shows whole.
-    #[allow(clippy::too_many_arguments)]
     fn push_panes(
         &self,
         mut id: NodeId,
-        focus: NodeId,
         mut rect: [i32; 4],
         mut clip: [i32; 4],
-        gap: i32,
-        remember: bool,
+        strips: &Strips,
         panes: &mut Vec<Pane>,
     ) {
+        let Strips {
+            focus,
+            gap,
+            remember,
+            fixed,
+        } = *strips;
         while let Some(child) = self.shown_child(id, focus) {
             let node = &self.nodes[id];
             let [x, y, width, height] = rect;
@@ -1708,13 +1736,19 @@ impl NodeTree {
                 .last()
                 .zip(widths.last())
                 .map_or(0, |(start, width)| start + width);
-            let scroll = node
-                .scroll
-                .get()
-                .min(end - width)
-                .max(0)
-                .min(starts[index])
-                .max(starts[index] + widths[index] - width);
+            let fixed = fixed.filter(|&(strip, _)| strip == id);
+            let scroll = fixed.map_or_else(
+                || {
+                    node.scroll
+                        .get()
+                        .min(end - width)
+                        .max(0)
+                        .min(starts[index])
+                        .max(starts[index] + widths[index] - width)
+                },
+                |(_, scroll)| scroll,
+            );
+            node.laid_scroll.set(scroll);
             if remember {
                 node.scroll.set(scroll);
             }
@@ -1722,17 +1756,13 @@ impl NodeTree {
             for (sibling, (&start, &column)) in node.children.iter().zip(starts.iter().zip(&widths))
             {
                 let left = x + start - scroll;
-                if *sibling != child && left < x + width && left + column > x {
-                    self.push_panes(
-                        *sibling,
-                        focus,
-                        [left, y, column, height],
-                        clip,
-                        gap,
-                        remember,
-                        panes,
-                    );
+                // scrolled to a fixed place, the shown child may be partly in sight too
+                if (*sibling != child || fixed.is_some()) && left < x + width && left + column > x {
+                    self.push_panes(*sibling, [left, y, column, height], clip, strips, panes);
                 }
+            }
+            if fixed.is_some() {
+                return;
             }
             rect = [x + starts[index] - scroll, y, widths[index], height];
             id = child;
@@ -1803,6 +1833,7 @@ impl NodeTree {
             to,
             progress,
             panes: Default::default(),
+            strip: None,
         });
         if let Some(size) = self.latest_size {
             self.layout_swipe(size);
@@ -1816,15 +1847,29 @@ impl NodeTree {
             return;
         };
         let ends = [Some(swipe.from), swipe.to];
+        // siblings: the strip they are in
+        let parent = self.nodes[swipe.from].parent.filter(|&parent| {
+            swipe
+                .to
+                .is_some_and(|to| self.nodes[to].parent == Some(parent))
+        });
+        let mut scrolls = [0; 2];
         let panes = ends.map(|end| {
             end.filter(|&id| self.nodes.contains_key(id))
                 .map(|id| {
-                    let view_root = if self.contains(self.view_root, id) {
-                        self.view_root
-                    } else {
-                        id
-                    };
-                    self.layout(view_root, id, size, self.active_screen, false)
+                    let panes = self.layout(
+                        self.view_root_for(id),
+                        id,
+                        size,
+                        self.active_screen,
+                        false,
+                        None,
+                    );
+                    if let Some(parent) = parent {
+                        let index = usize::from(Some(id) == swipe.to);
+                        scrolls[index] = self.nodes[parent].laid_scroll.get();
+                    }
+                    panes
                 })
                 .unwrap_or_default()
         });
@@ -1833,6 +1878,16 @@ impl NodeTree {
         }
         if let Some(swipe) = &mut self.swipe {
             swipe.panes = panes;
+            swipe.strip = parent.map(|parent| (parent, scrolls));
+        }
+    }
+
+    /// The view root to lay out `id` focused: the view root if it holds it, else `id` itself
+    fn view_root_for(&self, id: NodeId) -> NodeId {
+        if self.contains(self.view_root, id) {
+            self.view_root
+        } else {
+            id
         }
     }
 
@@ -1861,6 +1916,21 @@ impl NodeTree {
             return view(focused, &self.panes);
         }
         let [from_panes, to_panes] = &swipe.panes;
+        // siblings scrolled differently: the strip slides from one's scroll to the other's (#144)
+        if let Some((strip, [from_scroll, to_scroll])) = swipe.strip
+            && from_scroll != to_scroll
+        {
+            let scroll = from_scroll as f32 + (to_scroll - from_scroll) as f32 * swipe.progress;
+            let panes = self.layout(
+                self.view_root_for(swipe.from),
+                swipe.from,
+                size,
+                self.active_screen,
+                false,
+                Some((strip, scroll.round() as i32)),
+            );
+            return self.window(&panes, Some(focused), self.active_screen);
+        }
         // ends that show the same panes don't move, the focus ring does
         let nodes = |panes: &[Pane]| panes.iter().map(|pane| pane.node).collect::<Vec<_>>();
         if let Some(to) = swipe.to
