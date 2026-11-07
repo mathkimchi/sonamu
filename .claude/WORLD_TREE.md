@@ -120,9 +120,9 @@ published treeviews.
 - Strips (#144, `NodeTree::push_panes`): a node's children sit side by side at their widths, full or half
   (`Super+F`, `NodeRequest::ToggleHalf`, saved as `SavedTree::half`; a project's inner root passes it to the project's
   node), `gap` apart. The strip is scrolled (`Node::scroll`, px) as little as can be to show the child focus is under
-  whole; only the active screen's layout keeps the scroll. Siblings in sight are panes too, cut to the strip
-  (`Pane::clip`), their applets keeping their full size. A column shows what its node shows, so strips nest inside
-  columns. All full width, it shows one node, as before. A swipe between siblings slides the strip from one's
+  whole; only the active screen's layout keeps the scroll. Siblings in sight are panes too (each showing its
+  displayed node), cut to the strip (`Pane::clip`), their applets keeping their full size. Only the last strip toward
+  the displayed node is on screen: focus on `[0, 0]` shows `[0, 0]`'s siblings across the whole area, not `[0]`'s. All full width, it shows one node, as before. A swipe between siblings slides the strip from one's
   scroll to the other's (`TreeSwipe::strip`, laid out with `Strips::fixed`), so the settle spring animates it; focus
   moved by keys jumps.
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a

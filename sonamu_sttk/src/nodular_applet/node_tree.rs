@@ -1695,6 +1695,7 @@ impl NodeTree {
 
     /// The panes showing `id` in `rect`, cut to `clip`. A node's children are a strip (#144): side by side at their
     /// widths (half ones `Super+F`), scrolled as little as can be from where it was to show the one it shows whole.
+    /// Only the last strip toward what it shows is on screen: a child showing one of its own takes the whole `rect`.
     fn push_panes(
         &self,
         mut id: NodeId,
@@ -1710,6 +1711,11 @@ impl NodeTree {
             fixed,
         } = *strips;
         while let Some(child) = self.shown_child(id, focus) {
+            let fixed = fixed.filter(|&(strip, _)| strip == id);
+            if fixed.is_none() && self.shown_child(child, focus).is_some() {
+                id = child;
+                continue;
+            }
             let node = &self.nodes[id];
             let [x, y, width, height] = rect;
             let widths: Vec<i32> = node
@@ -1736,7 +1742,6 @@ impl NodeTree {
                 .last()
                 .zip(widths.last())
                 .map_or(0, |(start, width)| start + width);
-            let fixed = fixed.filter(|&(strip, _)| strip == id);
             let scroll = fixed.map_or_else(
                 || {
                     node.scroll
@@ -1758,7 +1763,13 @@ impl NodeTree {
                 let left = x + start - scroll;
                 // scrolled to a fixed place, the shown child may be partly in sight too
                 if (*sibling != child || fixed.is_some()) && left < x + width && left + column > x {
-                    self.push_panes(*sibling, [left, y, column, height], clip, strips, panes);
+                    panes.push(Pane {
+                        node: self.displayed_node_toward(*sibling, focus),
+                        rect: [left, y, column, height],
+                        clip,
+                        border: 0,
+                        framed: true,
+                    });
                 }
             }
             if fixed.is_some() {
