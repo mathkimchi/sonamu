@@ -66,9 +66,9 @@ Applets have no traversal of their own.
     it never skips rows), focuses it, then springs there (`Settle`: a damped harmonic oscillator, `swipe.stiffness` /
     `damping_ratio`, starting at the fingers' speed; ticked by a calloop timer). A new
     swipe during that carries on from where it was.
-  - Rows whose children are shown at once (`Treeview::shown_at_once`; `NodeTree::shown_at_once` gathers nodes with
-    several children side by side in its strips, and its mains' lists) are swiped `reversed`: the focus ring follows
-    the fingers. It is the whole strip's, so past the shown ones the strip scrolls against the fingers.
+  - Rows whose children are all shown at once (`Treeview::shown_at_once`; `NodeTree::shown_at_once` gathers its
+    mains' lists; nothing publishes any now) are swiped `reversed`: the focus ring follows the fingers. Half width
+    siblings side by side aren't: a swipe goes the same way whatever the widths (#144).
   - Drawing: the root sends its tree `StandardEvent::Swipe(SwipeView { from, to, progress })` (the two rows the view is
     between). `NodeTree::set_swipe` draws it if both are its nodes, else passes it into the node whose inner world has
     both (a node and its inner root are one, so project ↔ its inner child is the project's), else drops it (ends in

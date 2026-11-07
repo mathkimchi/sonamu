@@ -1993,26 +1993,9 @@ impl NodeTree {
         ])
     }
 
-    /// Paths whose children are shown at once (`Treeview::shown_at_once`): side by side here, and its applets' own
+    /// Paths whose children are all shown at once (`Treeview::shown_at_once`): its applets' own
     pub fn shown_at_once(&self) -> Vec<WorldTreePath> {
-        // and nodes with several children side by side on screen (#144)
-        let mut columns: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-        for pane in &self.panes {
-            let mut child = pane.node;
-            while let Some(parent) = self.nodes.get(child).and_then(|node| node.parent) {
-                let shown = columns.entry(parent).or_default();
-                if !shown.contains(&child) {
-                    shown.push(child);
-                }
-                child = parent;
-            }
-        }
-        let mut paths: Vec<_> = columns
-            .into_iter()
-            .filter(|(_, shown)| shown.len() > 1)
-            .filter_map(|(parent, _)| self.path_of(parent))
-            .map(|path| WorldTreePath::from_tree_path(&path))
-            .collect();
+        let mut paths = Vec::new();
         for (id, node) in &self.nodes {
             let Some(path) = self.path_of(id) else {
                 continue;
