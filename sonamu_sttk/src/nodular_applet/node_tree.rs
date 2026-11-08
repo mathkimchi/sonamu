@@ -2027,14 +2027,17 @@ impl NodeTree {
     /// Where 4 fingers down (Alt+Enter) go from the focus, as a path of this tree: the zoom-out view's center
     /// if focus is at a node without a main, else as far into the focused main as it says (its `zoom_focus`)
     pub fn zoom_target(&self) -> Option<WorldTreePath> {
+        let world_path = |id| {
+            let path = self.path_of(id)?;
+            Some(WorldTreePath(path.0.into_iter().map(Step::Child).collect()))
+        };
         let focused = self.focused_node();
         let Some(main) = &self.nodes[focused].main else {
-            let path = self.path_of(self.zoom_center()?)?;
-            return Some(WorldTreePath(path.0.into_iter().map(Step::Child).collect()));
+            return world_path(self.zoom_center()?);
         };
-        let inner = main.get_treeview().zoom_focus.clone()?;
-        let mut path = self.get_focus_path();
-        path.push_inner(&inner);
+        // from the node itself: `zoom_focus` is from its main's inner root
+        let mut path = world_path(focused)?;
+        path.push_inner(&main.get_treeview().zoom_focus.clone()?);
         Some(path)
     }
 
