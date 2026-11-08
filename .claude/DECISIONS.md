@@ -140,14 +140,23 @@ Scrolling, as built (details in `WORLD_TREE.md`, "Swipes" and "Strips"):
   doesn't carry it); non-active screens don't remember strip scroll; `swiped` stays set if focus moves without input.
 
 Zoom-out view, planned (re-confirm each point before building; a first attempt, `e6ba0e8`, was reverted in `ca0933d`):
-- Zoom-out view isn't a compositor state: it is what a holder (project, file manager, root) draws when selected
-  but not inside (extends `selected_at_root`; a project adds its settings). Plain nodes have no inner tree, so there is no
-  selected vs inside for them visually. Swipes and keys move focus as usual.
+- Zoom-out view isn't a compositor state (agreed 2026-11-08): while a node X is selected but not inside, X's tree is
+  drawn as the matrix centered on X; inside X, the normal view. Eg root ⊃ project P ⊃ terminal T, inside T: 4 up
+  selects T (P's tree zoomed out, on T), 4 up selects P (root's tree, on P), 4 down back to P's tree's remembered
+  focus, 4 down inside it. Traversal moves real focus (selection) within the zoomed tree.
 - Drawn with scaled live textures (like the project preview), never by resizing clients.
-- 4 fingers up selects the nearest enclosing holder (one per swipe, up to the root); 4 down goes back in.
-- Default zoomed-out layout: one row of scaled tiles per depth, stacked down the remembered chain (the swipe space
-  drawn small). Pinned: to iterate on.
-- The symbolic treeview is reached only by Alt (overlaps with `swiped`).
+- Reusable and embeddable: an element drawing a `NodeTree`'s matrix in a rect. Responsibilities as now: the holder
+  draws the matrix from its nodes' surfaces (like `NodeTree::preview`); each node draws its own cell (a project's
+  is its overview, which embeds the zoom view of its tree beside its existing UI; its preview cards go).
+- Zoom animation later; first an instant switch.
+- 4 fingers up/down stay `Traversal::Select` / Enter, one step per swipe.
+- Layout (agreed 2026-11-08): the swipe space drawn small. One row per depth down the remembered chain (ancestors
+  above, remembered children below), each row its strip at real widths, centered on the view the user would get
+  there (so half width chain nodes zigzag). A thin straight box around that column of views. Focus shows only by the
+  normal thin border, no extra highlight.
+- Scale: a setting, default 7 × 5 views (uniform scale, the smaller of the two fits; gaps as usual); beyond, cut off.
+- 2 finger scroll and arrow keys traverse it, snapping. TODO: decide what WASD does there.
+- The symbolic treeview shows only while Alt is held (Alt+traversal keys); `swiped` goes.
 - Paths stay `Vec<Step>`: "selected P" and "inside P" are focus, not path, so P's inner root needs no path of its own
   (the old `[[2], []]` stays unrepresentable).
 - When built: update `WORLD_TREE.md` for the new gestures (usage docs and help menu only if asked).
