@@ -32,7 +32,10 @@ impl ClientHandle {
         let surface = SharedState::new(StateKind::Surface, UITree::leaf(UIElement::Nothing));
         let treeview = SharedState::new(
             StateKind::Treeview,
-            Treeview::new(WorldTree::new_base(String::new())),
+            Treeview {
+                holds_children: client_initializer.holds_children(),
+                ..Treeview::new(WorldTree::new_base(String::new()))
+            },
         );
         let (event_tx, event_rx) = calloop::channel::channel();
         let (request_tx, request_rx) = calloop::channel::channel();

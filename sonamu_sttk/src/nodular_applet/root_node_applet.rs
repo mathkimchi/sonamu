@@ -364,7 +364,10 @@ impl RootNodeApplet {
         event_loop: &LoopHandle<'static, Self>,
     ) -> Self {
         // saved projects are made again by these
-        applet_spawner_registry.insert("project".to_string(), ProjectApplet::get_applet_spawner());
+        applet_spawner_registry.insert(
+            ProjectApplet::SPAWNER.to_string(),
+            ProjectApplet::get_applet_spawner(),
+        );
         // Super+? opens it
         applet_spawner_registry.insert("help".to_string(), ManPageApplet::get_applet_spawner());
         let applet_spawners = Arc::new(RwLock::new(applet_spawner_registry));

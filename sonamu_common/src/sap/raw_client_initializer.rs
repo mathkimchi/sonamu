@@ -13,6 +13,11 @@ use crate::sap::{
 /// `Request` is what the client sends to whoever holds its `ClientHandle`
 /// (the sar server takes `StandardRequest`, sttk nodes take their own superset).
 pub trait RawClientInitializer<Request = StandardRequest>: Send {
+    /// `Treeview::holds_children`, shown before the client first publishes
+    fn holds_children(&self) -> bool {
+        false
+    }
+
     fn init(
         // smth smth box needs to know size
         self: Box<Self>,

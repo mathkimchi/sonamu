@@ -97,7 +97,7 @@ pub struct ManPageApplet {
 impl ManPageApplet {
     #[must_use]
     pub fn get_boxed_initiator() -> NodularAppletInitializer {
-        Box::new(|hook: AppletContext| {
+        NodularAppletInitializer::new(|hook: AppletContext| {
             Box::new(Self {
                 scroll: 0,
                 size: DisplayContainerSize::new(800, 600),

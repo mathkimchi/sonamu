@@ -46,7 +46,7 @@ impl ImageViewerApplet {
         P: AsRef<std::path::Path> + Send + 'static,
         PathBuf: From<P>,
     {
-        Box::new(|hook: AppletContext| Box::new(Self::new(image_path, hook)))
+        NodularAppletInitializer::new(|hook: AppletContext| Box::new(Self::new(image_path, hook)))
     }
     #[must_use]
     pub fn get_applet_spawner() -> AppletSpawner {

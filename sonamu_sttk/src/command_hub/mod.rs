@@ -150,7 +150,7 @@ impl CommandHubApplet {
     }
     #[must_use]
     pub fn get_boxed_initiator() -> NodularAppletInitializer {
-        Box::new(|hook: AppletContext| Box::new(Self::new(hook)))
+        NodularAppletInitializer::new(|hook: AppletContext| Box::new(Self::new(hook)))
     }
     #[must_use]
     pub fn get_applet_spawner() -> AppletSpawner {

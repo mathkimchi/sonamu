@@ -103,13 +103,6 @@ pub trait StandardApplet {
         false
     }
 
-    /// Whether new children of its node go inside it instead (eg a project's contents): a keybind, menu,
-    /// drop, opened applet or wl window that would add one to its node is passed in, at its root (#83).
-    /// Published with the treeview.
-    fn holds_children(&self) -> bool {
-        false
-    }
-
     /// Whether selecting its node (its row) also puts its focus at its inner root (`Focus([])`), so it shows, and
     /// Enter goes to, what the row is rather than where it was (eg a project's overview, #123).
     /// Published with the treeview.
@@ -217,8 +210,37 @@ impl AppletWaker {
 pub struct EmbeddedId(u64);
 
 /// Makes the applet, on the applet's own thread
-pub type NodularAppletInitializer =
-    Box<dyn FnOnce(AppletContext) -> Box<dyn StandardApplet> + Send>;
+pub struct NodularAppletInitializer {
+    init: Box<dyn FnOnce(AppletContext) -> Box<dyn StandardApplet> + Send>,
+    /// New children of its node go inside it instead (eg a project's contents): a keybind, menu, drop,
+    /// opened applet or wl window that would add one to its node is passed in, at its root (#83).
+    /// Known before it runs, so its holder never adds a child to its node while it starts.
+    pub holds_children: bool,
+}
+impl NodularAppletInitializer {
+    pub fn new(
+        init: impl FnOnce(AppletContext) -> Box<dyn StandardApplet> + Send + 'static,
+    ) -> Self {
+        Self {
+            init: Box::new(init),
+            holds_children: false,
+        }
+    }
+
+    /// Like `new`, with `holds_children`
+    pub fn holding_children(
+        init: impl FnOnce(AppletContext) -> Box<dyn StandardApplet> + Send + 'static,
+    ) -> Self {
+        Self {
+            holds_children: true,
+            ..Self::new(init)
+        }
+    }
+
+    pub fn init(self, context: AppletContext) -> Box<dyn StandardApplet> {
+        (self.init)(context)
+    }
+}
 
 pub trait AppletSpawnerTrait: Send + Sync {
     fn create_initializer(&self, args: &[&str]) -> Option<NodularAppletInitializer>;
@@ -490,6 +512,10 @@ pub(crate) struct AppletClient {
     pub applet_spawners: AppletSpawnerRegistry,
 }
 impl RawClientInitializer<NodeRequest> for AppletClient {
+    fn holds_children(&self) -> bool {
+        self.initializer.holds_children
+    }
+
     fn init(
         self: Box<Self>,
         surface: SharedState<UITree>,
@@ -547,8 +573,9 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
             event_loop: event_loop.handle(),
             next_embedded_id: Rc::default(),
         };
+        let holds_children = self.initializer.holds_children;
         let mut state = AppletState {
-            applet: (self.initializer)(context),
+            applet: self.initializer.init(context),
             // until the node sends a size
             size: DisplayContainerSize::new(800, 600),
             surface: StatePublisher::new(surface),
@@ -572,7 +599,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         focus: state.applet.get_focus_path(),
                         traversing: state.applet.is_traversing(),
                         frames_itself: state.applet.frames_itself(),
-                        holds_children: state.applet.holds_children(),
+                        holds_children,
                         selected_at_root: state.applet.selected_at_root(),
                         saved: state.applet.save(),
                         awaiting_wl: state.applet.awaiting_wl(),

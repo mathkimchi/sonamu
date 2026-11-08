@@ -742,6 +742,7 @@ impl NodeTree {
         } else {
             self.root
         };
+        let (parent, position) = self.child_target(parent, position);
         let id = self.attach_subtree(Some(parent), tree);
         let children = &mut self.nodes[parent].children;
         match position {
@@ -819,6 +820,7 @@ impl NodeTree {
         if !self.nodes.contains_key(parent) {
             return None;
         }
+        let (parent, position) = self.child_target(parent, position);
         let id = self.insert_node(Some(parent), initializer);
         let children = &mut self.nodes[parent].children;
         match position {
@@ -839,6 +841,18 @@ impl NodeTree {
         }
         self.damaged = true;
         Some(id)
+    }
+
+    /// Where a child of `parent` at `position` goes. A node holding its children never gets one:
+    /// it goes right after it (eg one its hibernating or dissolving project gave back).
+    fn child_target(&self, parent: NodeId, position: SpawnPosition) -> (NodeId, SpawnPosition) {
+        if !self.holds_children(parent) {
+            return (parent, position);
+        }
+        if self.nodes[parent].parent.is_none() {
+            log::warn!("A child of the root, which holds its children");
+        }
+        self.spawn_target(parent, true)
     }
 
     /// Where something added at the node goes: as its last child, or if `sibling`, right after it
@@ -1184,7 +1198,7 @@ impl NodeTree {
         &self.nodes[id].children
     }
 
-    /// New children of the node go inside its main (see `StandardApplet::holds_children`)
+    /// New children of the node go inside its main (see `NodularAppletInitializer::holds_children`)
     pub fn holds_children(&self, id: NodeId) -> bool {
         self.nodes
             .get(id)

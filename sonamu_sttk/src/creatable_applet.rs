@@ -13,7 +13,7 @@ where
         |hook: AppletContext| Self::new(args, hook)
     }
     fn get_boxed_initiator(args: Args) -> NodularAppletInitializer {
-        Box::new(|hook: AppletContext| Box::new(Self::new(args, hook)))
+        NodularAppletInitializer::new(|hook: AppletContext| Box::new(Self::new(args, hook)))
     }
     // fn get_applet_spawner() -> AppletSpawner {
     //     struct EditorSpawner;

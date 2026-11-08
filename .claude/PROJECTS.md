@@ -28,7 +28,7 @@ shown rows; a project's row and its inner root are one row and one path).
   `NodeRequest::Unwrap(tree)`; its node is replaced by the container's children (`NodeTree::unwrap`), the first focused
   if the project was. A project that is the root with several children keeps the container as the root (`(empty)`).
 - **New children go inside** (`holds_children`, #83): keybinds, New child ›, drops onto its row, opened applets and wl
-  windows for the project's node go to its root.
+  windows for the project's node go to its root. Never a normal child (see WORLD_TREE.md).
 - **Pluck/place** answer later (`Answer::Later`), through its holder. Plucking its row plucks the whole project.
   `Pluck(None)`/`Place(None)` use the applet's focus path.
 - **Wl surfaces**: one registered while focus is on or inside the project goes inside it. It reports its focused wl

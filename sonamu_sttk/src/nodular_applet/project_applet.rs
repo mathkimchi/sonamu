@@ -262,7 +262,7 @@ impl ProjectApplet {
     /// in the directory of the tree it is made in
     pub fn wrapper() -> WrapInitializer {
         Box::new(|subtree, directory| {
-            Box::new(move |hook| {
+            NodularAppletInitializer::holding_children(move |hook| {
                 let mut project = Self::new(subtree, hook);
                 project.holder.directory = directory;
                 Box::new(project) as Box<dyn StandardApplet>
@@ -272,7 +272,7 @@ impl ProjectApplet {
 
     /// Makes a saved project again, holding its saved contents
     pub fn restorer(mut contents: SavedTree) -> NodularAppletInitializer {
-        Box::new(move |hook| {
+        NodularAppletInitializer::holding_children(move |hook| {
             let name = contents.label.take().unwrap_or_else(|| LABEL.to_string());
             let directory = contents.directory.take();
             let icon = contents.icon.take();
@@ -286,7 +286,10 @@ impl ProjectApplet {
         })
     }
 
-    /// Registered as `project` by the root, to restore saved projects (`save`); no args: an empty project
+    /// Its spawner's name in the registry
+    pub const SPAWNER: &str = "project";
+
+    /// Registered as `SPAWNER` by the root, to restore saved projects (`save`); no args: an empty project
     pub fn get_applet_spawner() -> AppletSpawner {
         struct Spawner;
         impl AppletSpawnerTrait for Spawner {
@@ -311,7 +314,7 @@ impl ProjectApplet {
 
     /// Makes a project with nothing in it, in `directory`
     pub fn empty(directory: Option<PathBuf>) -> NodularAppletInitializer {
-        Box::new(move |hook| {
+        NodularAppletInitializer::holding_children(move |hook| {
             let contents = DetachedTree {
                 main: None,
                 wl_surface: None,
@@ -990,10 +993,6 @@ impl StandardApplet for ProjectApplet {
         !self.dissolved && !self.at_root()
     }
 
-    fn holds_children(&self) -> bool {
-        !self.dissolved
-    }
-
     /// Its row is its overview
     fn selected_at_root(&self) -> bool {
         !self.dissolved
@@ -1073,7 +1072,7 @@ impl StandardApplet for ProjectApplet {
         contents.label = Some(self.name.clone());
         contents.directory.clone_from(&self.holder.directory);
         contents.icon.clone_from(&self.icon);
-        Some(session::saved_with_inner("project", Vec::new(), contents))
+        Some(session::saved_with_inner(Self::SPAWNER, Vec::new(), contents))
     }
 
     fn awaiting_wl(&self) -> Vec<AwaitedWl> {

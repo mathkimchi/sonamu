@@ -192,7 +192,7 @@ impl FileManagerApplet {
                 let follows_directory = root.is_none();
                 // until its node answers
                 let root = root.or_else(|| std::env::current_dir().ok())?;
-                Some(Box::new(move |hook: AppletContext| {
+                Some(NodularAppletInitializer::new(move |hook: AppletContext| {
                     if follows_directory {
                         hook.get_directory();
                     }

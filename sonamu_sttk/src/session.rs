@@ -2,7 +2,10 @@
 
 use crate::{
     command_hub::program_command,
-    nodular_applet::{AppletContext, NodeRequest, NodularAppletInitializer, StandardApplet},
+    nodular_applet::{
+        AppletContext, NodeRequest, NodularAppletInitializer, StandardApplet,
+        project_applet::ProjectApplet,
+    },
     standard_keybinds::standard_keybind_request,
     ui,
 };
@@ -95,7 +98,8 @@ pub fn restore(saved: SavedApplet) -> NodularAppletInitializer {
     match &saved {
         SavedApplet::Spawner { name, args, inner } => {
             let (name, args, inner) = (name.clone(), args.clone(), inner.clone());
-            let initializer: NodularAppletInitializer = Box::new(move |hook: AppletContext| {
+            let holds_children = holds_children(&saved);
+            let mut initializer = NodularAppletInitializer::new(move |hook: AppletContext| {
                 let args: Vec<&str> = args.iter().map(String::as_str).collect();
                 match hook
                     .find_applet_spawner(&name)
@@ -103,7 +107,7 @@ pub fn restore(saved: SavedApplet) -> NodularAppletInitializer {
                         Some(inner) => spawner.restore_initializer(&args, *inner),
                         None => spawner.create_initializer(&args),
                     }) {
-                    Some(initializer) => initializer(hook),
+                    Some(initializer) => initializer.init(hook),
                     None => Box::new(RestoringApplet {
                         label: format!("Couldn't restore {name} {}", args.join(" ")),
                         saved,
@@ -111,10 +115,16 @@ pub fn restore(saved: SavedApplet) -> NodularAppletInitializer {
                     }),
                 }
             });
+            initializer.holds_children = holds_children;
             initializer
         }
         SavedApplet::Wl(_) => hibernate(saved),
     }
+}
+
+/// Whether the saved applet's node holds its children (a project's, even while it hibernates)
+fn holds_children(saved: &SavedApplet) -> bool {
+    matches!(saved, SavedApplet::Spawner { name, .. } if name == ProjectApplet::SPAWNER)
 }
 
 /// Stands in for an applet that isn't running (restored or deactivated), saved as it was, until it is woken.
@@ -144,7 +154,7 @@ pub fn wake(wl: &SavedWl) -> (NodularAppletInitializer, Option<AwaitedWl>) {
     {
         let wl = wl.clone();
         return (
-            Box::new(move |hook| Box::new(RestorePrompt { wl, hook })),
+            NodularAppletInitializer::new(move |hook| Box::new(RestorePrompt { wl, hook })),
             None,
         );
     }
@@ -450,7 +460,11 @@ struct RestoringApplet {
 }
 impl RestoringApplet {
     fn initializer(saved: SavedApplet, label: String) -> NodularAppletInitializer {
-        Box::new(move |hook| Box::new(Self { saved, label, hook }))
+        let holds_children = holds_children(&saved);
+        let mut initializer =
+            NodularAppletInitializer::new(move |hook| Box::new(Self { saved, label, hook }));
+        initializer.holds_children = holds_children;
+        initializer
     }
 }
 impl StandardApplet for RestoringApplet {

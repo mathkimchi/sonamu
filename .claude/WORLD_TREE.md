@@ -93,6 +93,10 @@ Applets have no traversal of their own.
   Something new for a node whose applet `holds_children` (projects) goes inside it, at its root (#83):
   Ctrl+Shift++ / Super+T / Super+N (the keybind is redone inside it), New child ›, a drop onto its row, opened
   applets and wl windows (`NodeHolder`). Other applets' nodes get it as a child.
+  The flag is on the initializer (`NodularAppletInitializer::holding_children`; restored/hibernating projects by
+  spawner name), seeded into the shared `Treeview` at spawn: no race before the first publish (fresh-start help bug).
+  `NodeTree::child_target`: a normal child of a holding node (eg given back by a hibernating/dissolving project) goes
+  right after it instead.
 
 An applet with an inner world can still be selecting in it (a project's `NodeTree`, the file manager over its root
 and documents) when focus is on one of its rows; it publishes `traversing: true` then.
