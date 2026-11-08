@@ -57,8 +57,9 @@ Applets have no traversal of their own.
   outer one); `a` / `0`: parent (past the view root: its parent, widening the view); `d`, `1`-`8`, `9`: first, nth, last child.
   Alt+Enter: not traversing, like 4 fingers up; traversing, like 4 down.
 - Swipes (DRM backend only: `UIEvent::Swipe`, `Begin` / `Update(px)` / `End`), the root's (`handle_swipe`): 4 fingers up
-  (`Traversal::Select`) pops the focus path's last step, 4 down (`Enter`) goes to the remembered child
-  (`RootNodeApplet::remembered`), else the first shown; once a swipe (50 px). 3 fingers (#141, #142,
+  (`Traversal::Select`) leaves the innermost world: the path up to its last `Inner` step (`[[2], [1, 2]]` →
+  `[[2]]`), else `[]`. 4 down (`Enter`) follows `RootNodeApplet::remembered` into the next world as deep as focus was
+  there, stopping before another `Inner` step; nothing remembered: the first shown child; once a swipe (50 px). 3 fingers (#141, #142,
   `nodular_applet/swipe.rs`) move along a strip of shown rows, natural direction (content follows the fingers):
   - The axis locks after 10 px. Horizontal (#144): the focused row's siblings (rows under the same parent row, so inner
     then own children); fingers left bring in the next. Vertical: ancestors up to the first row, then down through each
@@ -210,7 +211,7 @@ The holder above stitches these in:
 - Its focus path appends the published focus.
 - The root shows the treeview per the `treeview` setting (#106): `position` left / right (a column, the panes get the
   rest of the width) or floating (default: centered over the panes, which keep their size; always framed), and
-  `pinned` (always shown) or not (pinned by default in a new session; unpinned: only while `NodeTree::is_traversing` after an Alt+traversal key with Alt still held
+  `pinned` (always shown) or not (pinned by default in a new session; unpinned: only after an Alt+traversal key with Alt still held
   (`RootNodeApplet::alt_traversal`, #145), or a treeview drag or menu is open). Key modifiers are from before the key,
   so an Alt release still has Alt; it is recognised by its evdev keycode.
   Floating is never pinned. See `treeview_area`, `applet_area` and `treeview_frame` in `root_node_applet.rs`.

@@ -150,7 +150,8 @@ Zoom-out view, planned (re-confirm each point before building; a first attempt, 
   draws the matrix from its nodes' surfaces (like `NodeTree::preview`); each node draws its own cell (a project's
   is its overview, which embeds the zoom view of its tree beside its existing UI; its preview cards go).
 - Zoom animation later; first an instant switch.
-- 4 fingers up pops a path step, 4 down goes to the remembered child (built).
+- 4 fingers up goes out to the node holding focus's world (`[[2], [1, 2]]` → `[[2]]`, else `[]`); 4 down back to
+  the remembered focus in the next world (built).
 - Layout (agreed 2026-11-08): the swipe space drawn small. One row per depth down the remembered chain (ancestors
   above, remembered children below), each row its strip at real widths, centered on the view the user would get
   there (so half width chain nodes zigzag). A thin straight box around that column of views. Focus shows only by the

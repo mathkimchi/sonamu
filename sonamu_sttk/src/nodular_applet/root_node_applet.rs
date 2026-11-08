@@ -31,7 +31,7 @@ use sonamu_common::{
     settings::{self, Settings, TreeviewFloating, TreeviewSide},
     utils::tree::{
         tree_node_path::TreeNodePath,
-        world_tree::{WorldTree, WorldTreePath},
+        world_tree::{Step, WorldTree, WorldTreePath},
     },
 };
 use sonamu_ui::{
@@ -64,7 +64,7 @@ pub struct RootNodeApplet {
     /// The last treeview drop and the node it was on.
     /// A drop can come before its drag's pluck finishes, which can shift the paths.
     last_drop: Option<(WorldTreePath, NodeId)>,
-    /// Pinned, or traversing with Alt held (see `update_treeview_visibility`)
+    /// Pinned, or Alt held after an Alt+traversal key (see `update_treeview_visibility`)
     treeview_shown: bool,
     /// An Alt+traversal key moved the selector and Alt is still held
     alt_traversal: bool,
@@ -153,12 +153,12 @@ impl RootNodeApplet {
         )
     }
 
-    /// Shows the treeview if pinned or traversing by Alt+keys, else hides it, resizing the applets if their area changed
+    /// Shows the treeview if pinned or Alt is held after an Alt+traversal key, else hides it, resizing the applets if their area changed
     /// (also when the treeview settings or pinning did)
     fn update_treeview_visibility(&mut self) {
         let settings = settings::get();
         let shown = self.treeview_pinned
-            || (self.holder.tree.is_traversing() && self.alt_traversal)
+            || self.alt_traversal
             // eg a drag or menu that started there
             || self.treeview_pointer.is_pressed();
         if shown != self.treeview_shown {
@@ -773,16 +773,25 @@ impl RootNodeApplet {
     fn traverse(&mut self, traversal: Traversal) {
         let focus = self.holder.tree.get_focus_path();
         let target = match traversal {
-            // one step out
+            // out of its world, to the node holding it (`[[2], [1, 2]]` to `[[2]]`), or to the root
             Traversal::Select => {
-                let mut parent = focus;
-                parent.0.pop().map(|_| parent)
+                let world = focus.0.iter().rposition(|step| matches!(step, Step::Inner(_)));
+                (!focus.0.is_empty()).then(|| WorldTreePath(focus.0[..world.unwrap_or(0)].to_vec()))
             }
-            // one step in: where focus was under it, else its first child
-            Traversal::Enter => match self.remembered.get(&focus) {
-                Some(child) => Some(child.clone()),
-                None => self.target(&focus, Traversal::Child(0)),
-            },
+            // into the next world, as deep as focus was in it (else its first row)
+            Traversal::Enter => {
+                let mut path = focus.clone();
+                while let Some(child) = self.remembered.get(&path)
+                    && (path == focus || !matches!(child.0.last(), Some(Step::Inner(_))))
+                {
+                    path = child.clone();
+                }
+                if path == focus {
+                    self.target(&focus, Traversal::Child(0))
+                } else {
+                    Some(path)
+                }
+            }
             _ => self.target(&focus, traversal),
         };
         if let Some(target) = target {
