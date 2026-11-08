@@ -46,6 +46,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// evdev keycodes (`UIEvent::Key::raw_keycode`)
+const KEY_LEFTALT: u32 = 56;
+const KEY_RIGHTALT: u32 = 100;
+
 /// Holds the tree of nodes, is held by a Basic Applet runner (applet runner).
 ///
 /// Every applet in the tree is a client of this, on its own thread.
@@ -60,11 +64,10 @@ pub struct RootNodeApplet {
     /// The last treeview drop and the node it was on.
     /// A drop can come before its drag's pluck finishes, which can shift the paths.
     last_drop: Option<(WorldTreePath, NodeId)>,
-    /// Pinned, or traversing (see `update_treeview_visibility`)
+    /// Pinned, or traversing with Alt held (see `update_treeview_visibility`)
     treeview_shown: bool,
-    /// A 3 finger swipe moved the selector last, so it doesn't show the treeview (until a key, click or 4 fingers).
-    /// Not cleared by focus going inside an applet: a project reports that late, so it would race the swipe.
-    swiped: bool,
+    /// An Alt+traversal key moved the selector and Alt is still held
+    alt_traversal: bool,
     /// Always shown, beside the panes; toggled by its pin button and saved in the session
     treeview_pinned: bool,
     /// The view root when it is a row inside an applet (double click, right click › Set as view root, Alt+R);
@@ -150,12 +153,12 @@ impl RootNodeApplet {
         )
     }
 
-    /// Shows the treeview if pinned or traversing, else hides it, resizing the applets if their area changed
+    /// Shows the treeview if pinned or traversing by Alt+keys, else hides it, resizing the applets if their area changed
     /// (also when the treeview settings or pinning did)
     fn update_treeview_visibility(&mut self) {
         let settings = settings::get();
         let shown = self.treeview_pinned
-            || (self.holder.tree.is_traversing() && !self.swiped)
+            || (self.holder.tree.is_traversing() && self.alt_traversal)
             // eg a drag or menu that started there
             || self.treeview_pointer.is_pressed();
         if shown != self.treeview_shown {
@@ -405,7 +408,7 @@ impl RootNodeApplet {
             last_drop: None,
             // the root node starts focused
             treeview_shown: true,
-            swiped: false,
+            alt_traversal: false,
             // a clean session starts pinned
             treeview_pinned: saved_session
                 .as_ref()
@@ -531,32 +534,23 @@ impl RootNodeApplet {
     fn handle_event(&mut self, event: StandardEvent) {
         if let StandardEvent::UIEvent(UIEvent::Swipe { fingers, phase }) = event {
             match fingers {
-                3 => {
-                    self.swiped = true;
-                    self.handle_swipe(phase);
-                }
-                4 => {
-                    self.swiped = false;
-                    self.handle_select_swipe(phase);
-                }
+                3 => self.handle_swipe(phase),
+                4 => self.handle_select_swipe(phase),
                 _ => {}
             }
             self.damage_if_tree_changed();
             return;
         }
-        if let StandardEvent::UIEvent(
-            UIEvent::Key {
-                symbol: Some(_),
-                pressed: true,
-                ..
-            }
-            | UIEvent::Mouse(MouseEvent {
-                kind: MouseEventKind::Button { pressed: true, .. },
-                ..
-            }),
-        ) = &event
+        // a key's modifiers are from before it, so an Alt release still has Alt
+        if let StandardEvent::UIEvent(UIEvent::Key {
+            modifiers,
+            raw_keycode,
+            pressed,
+            ..
+        }) = event
+            && (!modifiers.alt || (!pressed && matches!(raw_keycode, KEY_LEFTALT | KEY_RIGHTALT)))
         {
-            self.swiped = false;
+            self.alt_traversal = false;
         }
         if let StandardEvent::UIEvent(ui_event) = &event
             && let Some(keybind) = RootKeybind::of(ui_event)
@@ -576,7 +570,9 @@ impl RootNodeApplet {
         if let StandardEvent::UIEvent(ui_event) = &event
             && let Some(traversal) = Traversal::of(ui_event, self.holder.tree.is_traversing())
         {
-            self.swiped = false;
+            if let UIEvent::Key { modifiers, .. } = ui_event {
+                self.alt_traversal = modifiers.alt;
+            }
             self.traverse(traversal);
             self.damage_if_tree_changed();
             return;

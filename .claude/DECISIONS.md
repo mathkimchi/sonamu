@@ -135,9 +135,9 @@ Scrolling, as built (details in `WORLD_TREE.md`, "Swipes" and "Strips"):
 - A node's children are a horizontal strip, each full or half width (`Node::half`, `Super+F`, saved). The strip
   follows focus by minimal scroll (`Node::scroll`). Only the innermost strip toward the displayed node is on screen.
 - 3 fingers: left/right = siblings (slides the strip; between two halves both in sight the focus ring stretches
-  instead), up/down = parent/child. A 3 finger swipe doesn't show the treeview (`RootNodeApplet::swiped`).
+  instead), up/down = parent/child.
 - Gaps: key focus moves jump (no scroll animation); `half` is lost on pluck/place and `Super+P` (`DetachedTree`
-  doesn't carry it); non-active screens don't remember strip scroll; `swiped` stays set if focus moves without input.
+  doesn't carry it); non-active screens don't remember strip scroll.
 
 Zoom-out view, planned (re-confirm each point before building; a first attempt, `e6ba0e8`, was reverted in `ca0933d`):
 - Zoom-out view isn't a compositor state (agreed 2026-11-08): while a node X is selected but not inside, X's tree is
@@ -156,7 +156,7 @@ Zoom-out view, planned (re-confirm each point before building; a first attempt, 
   normal thin border, no extra highlight.
 - Scale: a setting, default 7 × 5 views (uniform scale, the smaller of the two fits; gaps as usual); beyond, cut off.
 - 2 finger scroll and arrow keys traverse it, snapping. TODO: decide what WASD does there.
-- The symbolic treeview shows only while Alt is held (Alt+traversal keys); `swiped` goes.
+- The symbolic treeview shows only while Alt is held (Alt+traversal keys). Built.
 - Paths stay `Vec<Step>`: "selected P" and "inside P" are focus, not path, so P's inner root needs no path of its own
   (the old `[[2], []]` stays unrepresentable).
 - When built: update `WORLD_TREE.md` for the new gestures (usage docs and help menu only if asked).

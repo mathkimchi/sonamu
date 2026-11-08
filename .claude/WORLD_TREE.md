@@ -67,9 +67,6 @@ Applets have no traversal of their own.
     it never skips rows), focuses it, then springs there (`Settle`: a damped harmonic oscillator, `swipe.stiffness` /
     `damping_ratio`, starting at the fingers' speed; ticked by a calloop timer). A new
     swipe during that carries on from where it was.
-  - A node selected by a 3 finger swipe doesn't show the treeview (`RootNodeApplet::swiped`, cleared by a key with a
-    symbol or a click reaching the root, or 4 fingers). Not by focus going inside an applet: a project reports its
-    `traversing` late, so right after a swipe into it the root would see "inside" and clear it.
   - Rows whose children are all shown at once (`Treeview::shown_at_once`; `NodeTree::shown_at_once` gathers its
     mains' lists; nothing publishes any now) are swiped `reversed`: the focus ring follows the fingers. Half width
     siblings side by side aren't: a swipe goes the same way whatever the widths (#144).
@@ -208,7 +205,9 @@ The holder above stitches these in:
 - Its focus path appends the published focus.
 - The root shows the treeview per the `treeview` setting (#106): `position` left / right (a column, the panes get the
   rest of the width) or floating (default: centered over the panes, which keep their size; always framed), and
-  `pinned` (always shown) or not (pinned by default in a new session; unpinned: only while `NodeTree::is_traversing`, or a treeview drag or menu is open).
+  `pinned` (always shown) or not (pinned by default in a new session; unpinned: only while `NodeTree::is_traversing` after an Alt+traversal key with Alt still held
+  (`RootNodeApplet::alt_traversal`, #145), or a treeview drag or menu is open). Key modifiers are from before the key,
+  so an Alt release still has Alt; it is recognised by its evdev keycode.
   Floating is never pinned. See `treeview_area`, `applet_area` and `treeview_frame` in `root_node_applet.rs`.
 - The treeview shows the **view root**'s subtree, any row (#83): the `NodeTree`'s view root for a node of the root's
   tree (it also picks the panes), else `RootNodeApplet::view_path` for a row inside an applet (its `NodeTree` view root
