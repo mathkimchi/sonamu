@@ -14,13 +14,12 @@
   character (eg an emoji) is used as is, Backspace goes back to the default (`PROJECT_ICON`), Esc cancels. Also shown
   before the name. Saved as `SavedTree::icon` on the inner root (like `label`), and the treeview's `icon` reads it
   from the published `project` spawner's `inner`.
-- Previews (#82): below the rows, a card per child of the inner root (`CARD_WIDTH` wide, the project's own shape, wrapping
-  into columns), each showing what that child shows (`NodeTree::preview`: its displayed node's surface) scaled down to fit with `UIElement::Scaled`, over its number and label. They update live, since a child's
-  `Damage` damages the project's window. A click on one selects that child, like its row. Hidden while setting the
-  directory (its options take those rows). The children keep their last pane size, or the tree's size if never shown.
+- Zoom-out view (#145, replaced #82's preview cards): below the rows, `NodeTree::zoom_window` of its tree fills the
+  rest (`zoom_top`), live since a child's `Damage` damages the project's window. Not clickable yet. Hidden while
+  setting the directory or icon (their options take those rows).
 - `UIElement::Scaled(f)` (sonamu_ui): its children are laid out at full size, then drawn `f` times as big from its
   top-left (rects incl. border and radius, text via glyphon's `TextArea::scale`, char grids, textures and wl
-  subsurfaces). Text is clipped only to a rectangle (glyphon bounds), so the preview is fitted inside its card instead of cut to it.
+  subsurfaces). Text is clipped only to a rectangle (glyphon bounds), so scaled content should fit its box rather than be cut to it.
 - Keys there, taken before the project's selector: `r` (no modifiers) starts renaming; `n` adds a command hub to the
   inner root and focuses inside it (unlike Ctrl+Shift++, which doesn't focus it); `t`/`b` start `TERMINAL`/`BROWSER`
   (`standard_keybinds`, shared with Super+T/N) with `NodeRequest::Run`, and since focus is at the inner root, the

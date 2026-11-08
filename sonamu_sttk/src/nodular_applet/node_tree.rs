@@ -1499,13 +1499,8 @@ impl NodeTree {
         );
     }
 
-    /// The node `id` shows: following focused children
-    fn displayed_node(&self, id: NodeId) -> NodeId {
-        self.displayed_node_toward(id, self.focused_node())
-    }
-
-    /// Like `displayed_node`, but following the children `focus` is under
-    /// (another screen's focus, which the nodes' own focus doesn't point to)
+    /// The node `id` shows, following the children `focus` is under
+    /// (eg another screen's focus, which the nodes' own focus doesn't point to)
     fn displayed_node_toward(&self, mut id: NodeId, focus: NodeId) -> NodeId {
         while let Some(child) = self.shown_child(id, focus) {
             id = child;
@@ -1532,16 +1527,6 @@ impl NodeTree {
             }
             _ => None,
         }
-    }
-
-    /// What the node shows on its own and the size it is drawn at, eg for a preview.
-    /// `None` if that has no running applet or no size yet.
-    pub fn preview(&self, id: NodeId) -> Option<(UITree, DisplayContainerSize)> {
-        let node = &self.nodes[self.displayed_node(id)];
-        Some((
-            screen_surface(node.main.as_ref()?, self.active_screen),
-            node.size?,
-        ))
     }
 
     /// Works out what is on screen, and resizes the shown applets to their panes.

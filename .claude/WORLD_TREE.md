@@ -119,7 +119,7 @@ published treeviews.
   (no main, labeled with the project's name, `Project` until renamed), and the project node still has its own children
   in the outer world.
   - While focus is at its inner root, it shows an overview instead of its panes (`.claude/PROJECT_UI.md`): its name
-    (`r` or click renames it), its contents (click selects one; with live scaled previews below) and rows adding a command hub (`n`), empty project (`p`), terminal (`t`) or browser (`b`) to it.
+    (`r` or click renames it), its contents (click selects one; its zoom-out view below) and rows adding a command hub (`n`), empty project (`p`), terminal (`t`) or browser (`b`) to it.
   - Made by `NodeRequest::Wrap(ProjectApplet::wrapper())` (Super+P, hub `project`): the holder replaces the node's
     subtree with a node whose applet is made from it.
   - Undone by closing it: on `CloseRequest` (Ctrl+W on its node, or on its inner root) it detaches its contents and
@@ -139,7 +139,7 @@ published treeviews.
   equal rows (containers) merge. The focused node's remembered child is the center: rows stack around its view, one
   `Scaled` (7 × 5 views, constants for now) over all of `size`, a thin box around the views' column. Panes don't take
   the mouse meanwhile. Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
-  `Scaled` box covers `size` and the panes sit in an equally big container.
+  `Scaled` box covers `size` and the panes sit in an equally big container. A project's overview embeds it.
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
   container of its panes (`NodeTree::restore_subtree`).
 

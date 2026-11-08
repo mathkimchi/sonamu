@@ -27,8 +27,8 @@ use sonamu_common::{
 };
 use sonamu_ui::{
     color::Color,
-    display_units::DisplayContainerSize,
-    ui_element::{Style, UIElement, UITree, font_size},
+    display_units::{DisplayContainerSize, ToPx},
+    ui_element::{Style, UIElement, UITree},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::{
@@ -74,7 +74,6 @@ const ICONS: [(char, &str); 20] = [
 /// Most directory options shown
 const MAX_OPTIONS: usize = 20;
 /// Of each of its contents' previews, below the rows
-const CARD_WIDTH: f32 = 320.0;
 /// What a `NEW_ROWS` row adds
 #[derive(Clone, Copy)]
 enum New {
@@ -387,82 +386,15 @@ impl ProjectApplet {
         }
     }
 
-    /// Where the overview shows a preview card of each of its contents (`[x, y, width, height]`), below the rows.
-    /// None while setting the directory, whose options take those rows.
-    fn card_rects(&self) -> Vec<[f32; 4]> {
+    /// Where the overview's zoom-out view of its tree starts (#145), below the rows.
+    /// None while setting the directory or icon, whose options take those rows.
+    fn zoom_top(&self) -> Option<f32> {
         if self.setting_directory.is_some() || self.picking_icon.is_some() {
-            return Vec::new();
+            return None;
         }
         let tree = &self.holder.tree;
-        let count = tree.children(tree.root()).len();
-        let rows = CONTENTS_ROW + count + NEW_ROWS.len();
-        let top = PAD + rows as f32 * row_height() + PAD;
-        let width = self.size.width as f32;
-        let card_width = CARD_WIDTH.min(width - 2.0 * PAD).max(1.0);
-        // the project's own shape, which its panes have, and a caption
-        let card_height = card_width * self.size.height as f32 / width.max(1.0) + row_height();
-        // non-negative, since it is at least 1
-        #[allow(clippy::cast_sign_loss)]
-        let columns = ((width - PAD) / (card_width + PAD)).floor().max(1.0) as usize;
-        (0..count)
-            .map(|index| {
-                let (row, column) = (index / columns, index % columns);
-                [
-                    PAD + column as f32 * (card_width + PAD),
-                    top + row as f32 * (card_height + PAD),
-                    card_width,
-                    card_height,
-                ]
-            })
-            .collect()
-    }
-
-    /// Its contents' preview cards: what each shows, scaled down to fit, over its number and label
-    fn get_cards(&self) -> Vec<UITree> {
-        let tree = &self.holder.tree;
-        let settings = settings::get();
-        (1..)
-            .zip(self.card_rects())
-            .zip(tree.children(tree.root()))
-            .map(|((number, [x, y, width, height]), &id)| {
-                let preview_height = height - row_height();
-                let mut parts = Vec::new();
-                if let Some((surface, size)) = tree.preview(id) {
-                    let [applet_width, applet_height] =
-                        [size.width, size.height].map(|length| length.max(1) as f32);
-                    let scale = (width / applet_width).min(preview_height / applet_height);
-                    parts.push(UITree::new_styled(
-                        UIElement::Scaled(scale),
-                        Style::absolute(
-                            [(width - applet_width * scale) / 2.0, 0.0],
-                            [applet_width * scale, applet_height * scale],
-                        ),
-                        vec![UITree::new_container_styled(
-                            Style::absolute([0.0, 0.0], [applet_width, applet_height]),
-                            vec![surface],
-                        )],
-                    ));
-                }
-                parts.push(UITree::leaf_styled(
-                    ui::text(format!("{number}  {}", tree.label(id)), settings.palette.fg),
-                    Style::absolute(
-                        [
-                            PAD / 2.0,
-                            preview_height + (row_height() - font_size()) / 2.0,
-                        ],
-                        [(width - PAD / 2.0).max(0.0), font_size()],
-                    ),
-                ));
-                ui::frame(
-                    settings.border.unfocused,
-                    settings.radius,
-                    1.0,
-                    Style::absolute([x, y], [width, height]),
-                    parts,
-                )
-                .with_pointer()
-            })
-            .collect()
+        let rows = CONTENTS_ROW + tree.children(tree.root()).len() + NEW_ROWS.len();
+        Some(PAD + rows as f32 * row_height() + PAD)
     }
 
     /// Starts typing a new directory, from the current one (the runner's if it has none)
@@ -593,7 +525,7 @@ impl ProjectApplet {
     fn handle_overview_event(&mut self, ui_event: UIEvent) -> Option<UIEvent> {
         match ui_event {
             UIEvent::Mouse(MouseEvent {
-                position: [x, y],
+                position: [_, y],
                 kind:
                     MouseEventKind::Button {
                         button: BTN_LEFT,
@@ -601,7 +533,7 @@ impl ProjectApplet {
                     },
                 ..
             }) => {
-                self.handle_overview_click(x, y);
+                self.handle_overview_click(y);
                 return None;
             }
             // the panes aren't shown
@@ -625,24 +557,10 @@ impl ProjectApplet {
     }
 
     /// Damages what it changed
-    fn handle_overview_click(&mut self, x: f64, y: f64) {
+    fn handle_overview_click(&mut self, y: f64) {
         let root = self.holder.tree.root();
-        let [x, y] = [x, y].map(|coord| coord as f32);
-        let card = self
-            .card_rects()
-            .iter()
-            .position(|&[left, top, width, height]| {
-                (left..left + width).contains(&x) && (top..top + height).contains(&y)
-            });
-        if let Some(index) = card {
-            let id = self.holder.tree.children(root)[index];
-            self.holder.tree.focus(id, false);
-            self.hook.damage_window();
-            self.hook.damage_treeview();
-            return;
-        }
         let contents = self.holder.tree.children(root).len();
-        match overview_rows().row_at(f64::from(y)) {
+        match overview_rows().row_at(y) {
             None => {}
             Some(row) if row >= CONTENTS_ROW && self.picking_icon.is_some() => {
                 if let Some(&(icon, _)) = ICONS.get(row - CONTENTS_ROW) {
@@ -770,7 +688,8 @@ impl ProjectApplet {
         }
     }
 
-    fn get_overview(&self, width: f32) -> UITree {
+    fn get_overview(&self, size: DisplayContainerSize) -> UITree {
+        let [width, height] = [size.width, size.height].map(|length| length as f32);
         let text = settings::get().palette.fg;
         let title = match &self.renaming {
             Some(name) => format!("{}  {name}▏", self.shown_icon()),
@@ -849,7 +768,15 @@ impl ProjectApplet {
                     row.with_pointer()
                 }
             })
-            .chain(self.get_cards())
+            .chain(self.zoom_top().map(|top| {
+                UITree::new_container_styled(
+                    Style::absolute([0.0, top], [width, (height - top).max(0.0)]),
+                    vec![self.holder.tree.zoom_window(DisplayContainerSize::new(
+                        size.width,
+                        size.height.saturating_sub(top.to_px()),
+                    ))],
+                )
+            }))
             .collect();
         UITree::new_styled(UIElement::Backgrounded(BG), Style::full_size(), rows)
     }
@@ -915,7 +842,7 @@ impl StandardApplet for ProjectApplet {
             return UITree::leaf(UIElement::Nothing);
         }
         let tree = &self.holder.tree;
-        let active = tree.get_window_with(Some(&|| self.get_overview(container_size.width as f32)));
+        let active = tree.get_window_with(Some(&|| self.get_overview(container_size)));
         if !self.screen_windows() {
             return active;
         }
@@ -929,8 +856,10 @@ impl StandardApplet for ProjectApplet {
                             .take()
                             .unwrap_or_else(|| UITree::leaf(UIElement::Nothing))
                     } else if self.at_root_on(screen) {
-                        let width = tree.screen_size(screen).map_or(0, |size| size.width);
-                        self.get_overview(width as f32)
+                        self.get_overview(
+                            tree.screen_size(screen)
+                                .unwrap_or(DisplayContainerSize::new(0, 0)),
+                        )
                     } else {
                         tree.get_screen_window(screen)
                     }
