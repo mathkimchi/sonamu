@@ -59,7 +59,8 @@ Applets have no traversal of their own.
 - Swipes (DRM backend only: `UIEvent::Swipe`, `Begin` / `Update(px)` / `End`), the root's (`handle_swipe`): 4 fingers up
   (`Traversal::Select`) leaves the innermost world: the path up to its last `Inner` step (`[[2], [1, 2]]` →
   `[[2]]`), else `[]`. 4 down (`Enter`) goes back to where focus last was in the next world
-  (`RootNodeApplet::world_focus`, by holder path, from `traversal::world_focus`); else the first shown child; once a swipe (50 px). 3 fingers (#141, #142,
+  (`RootNodeApplet::world_focus`, by holder path, from `traversal::world_focus`); else the first shown child if
+  that is in an inner world (or focus is at `[]`), so nothing without an inner tree; once a swipe (50 px). 3 fingers (#141, #142,
   `nodular_applet/swipe.rs`) move along a strip of shown rows, natural direction (content follows the fingers):
   - The axis locks after 10 px. Horizontal (#144): the focused row's siblings (rows under the same parent row, so inner
     then own children); fingers left bring in the next. Vertical: ancestors up to the first row, then down through each

@@ -781,10 +781,12 @@ impl RootNodeApplet {
                 let world = focus.0.iter().rposition(|step| matches!(step, Step::Inner(_)));
                 (!focus.0.is_empty()).then(|| WorldTreePath(focus.0[..world.unwrap_or(0)].to_vec()))
             }
-            // into the next world, where focus was in it (else its first row)
+            // into the next world, where focus was in it (else its first row); nothing without one
             Traversal::Enter => match self.world_focus.get(&focus) {
                 Some(path) => Some(path.clone()),
-                None => self.target(&focus, Traversal::Child(0)),
+                None => self.target(&focus, Traversal::Child(0)).filter(|child| {
+                    focus.0.is_empty() || matches!(child.0.last(), Some(Step::Inner(_)))
+                }),
             },
             _ => self.target(&focus, traversal),
         };
