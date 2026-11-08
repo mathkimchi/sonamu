@@ -73,7 +73,6 @@ const ICONS: [(char, &str); 20] = [
 ];
 /// Most directory options shown
 const MAX_OPTIONS: usize = 20;
-/// Of each of its contents' previews, below the rows
 /// What a `NEW_ROWS` row adds
 #[derive(Clone, Copy)]
 enum New {
@@ -95,7 +94,7 @@ const ERROR: Color = Color([0xE0, 0x6C, 0x75, 0xFF]);
 const BTN_LEFT: u32 = 0x110;
 
 /// The home directory, which paths show as `~`
-/// The overview's rows, each a line of text at its top (above the cards)
+/// The overview's rows, each a line of text at its top (above the zoom-out view)
 fn overview_rows() -> Rows {
     Rows::new(PAD)
 }
@@ -525,7 +524,7 @@ impl ProjectApplet {
     fn handle_overview_event(&mut self, ui_event: UIEvent) -> Option<UIEvent> {
         match ui_event {
             UIEvent::Mouse(MouseEvent {
-                position: [_, y],
+                position,
                 kind:
                     MouseEventKind::Button {
                         button: BTN_LEFT,
@@ -533,7 +532,7 @@ impl ProjectApplet {
                     },
                 ..
             }) => {
-                self.handle_overview_click(y);
+                self.handle_overview_click(position);
                 return None;
             }
             // its tree's zoom-out view
@@ -562,7 +561,17 @@ impl ProjectApplet {
     }
 
     /// Damages what it changed
-    fn handle_overview_click(&mut self, y: f64) {
+    fn handle_overview_click(&mut self, [x, y]: [f64; 2]) {
+        if let Some(top) = self.zoom_top()
+            && y >= f64::from(top)
+        {
+            let size = DisplayContainerSize::new(
+                self.size.width,
+                self.size.height.saturating_sub(top.to_px()),
+            );
+            self.holder.tree.zoom_click(size, [x, y - f64::from(top)]);
+            return;
+        }
         let root = self.holder.tree.root();
         let contents = self.holder.tree.children(root).len();
         match overview_rows().row_at(y) {

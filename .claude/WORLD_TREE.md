@@ -85,7 +85,7 @@ Applets have no traversal of their own.
     screen's tree draws it.
 - In the selector (the deepest holder's `NodeTree::handle_event`, or an applet's own, eg the file manager's documents):
   Space (or clicking its `▾`/`▸`) collapses/expands all its children, inner and own (the holder owning the row keeps
-  the flag, unsaved; `NodeTree::applet_treeview`/`get_treeview_of` leave them out); Enter goes to a container's first child. Focus
+  the flag, unsaved; `NodeTree::applet_treeview`/`get_treeview_of` leave them out); Enter focuses the zoom-out view's center. Focus
   ending at a node with a main sends it `Focus([])` (`NodeTree::selected`), eg a project shows its overview (#123).
 - The standard keybinds (Ctrl+W, Ctrl+Shift++, Super+P) act on the selected node.
   Ctrl+W asks its main to close (`CloseRequest`, see below) rather than closing it.
@@ -142,7 +142,8 @@ published treeviews.
   50 px a step; a project's overview passes it on) move the center like 3 fingers and set ancestors' `last_child`;
   focus stays. Rows stack around the center's view, one
   `Scaled` (7 × 5 views, constants for now) over all of `size`, a thin box around the views' column. Panes don't take
-  the mouse meanwhile (scroll moves the center). Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
+  the mouse meanwhile: scroll moves the center, a click (`zoom_click`, hit-testing `zoom_layout`) makes a node the
+  center, or focuses it if it already is. Enter in the selector also focuses the center. Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
   `Scaled` box covers `size` and the panes sit in an equally big container. A project's overview embeds it.
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
   container of its panes (`NodeTree::restore_subtree`).

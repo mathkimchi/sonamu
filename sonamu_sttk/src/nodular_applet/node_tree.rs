@@ -1,6 +1,8 @@
 use crate::{
     creatable_applet::CreatableNodularApplet,
-    nodular_applet::{NodeRequest, NodularAppletInitializer, swipe, traversal::Traversal},
+    nodular_applet::{
+        NodeRequest, NodularAppletInitializer, swipe, traversal::Traversal, treeview::BTN_LEFT,
+    },
     session,
     standard_keybinds::standard_keybind_request,
     ui,
@@ -193,6 +195,15 @@ impl Pane {
         };
         inside(self.rect) && inside(self.clip)
     }
+}
+
+/// The zoom-out view (`NodeTree::zoom_layout`), before its `scale`: its panes, center, and the box around the
+/// center's column (`[x, y, width, height]`)
+struct ZoomLayout {
+    panes: Vec<Pane>,
+    center: NodeId,
+    scale: f32,
+    column: [f32; 4],
 }
 
 /// How `push_panes` lays out strips
@@ -1463,10 +1474,10 @@ impl NodeTree {
         } else if matches!(key, KeySymbol::Char(' ')) {
             self.toggle_collapsed(id);
         } else if matches!(key, KeySymbol::Enter)
-            && let Some(&first) = node.children.first()
+            && let Some(center) = self.zoom_center()
         {
-            // into a container's first child
-            self.focus(first, false);
+            // into the zoom-out view's center
+            self.focus(center, false);
         }
     }
 
@@ -1483,8 +1494,17 @@ impl NodeTree {
     /// A press focuses the pane's applet.
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
         if self.zoomed_out() {
-            if let MouseEventKind::Scroll { delta, stop, .. } = mouse_event.kind {
-                self.zoom_scroll(delta, stop);
+            match mouse_event.kind {
+                MouseEventKind::Scroll { delta, stop, .. } => self.zoom_scroll(delta, stop),
+                MouseEventKind::Button {
+                    button: BTN_LEFT,
+                    pressed: true,
+                } => {
+                    if let Some(size) = self.latest_size {
+                        self.zoom_click(size, mouse_event.position);
+                    }
+                }
+                _ => {}
             }
             return;
         }
@@ -1958,12 +1978,17 @@ impl NodeTree {
             Traversal::Child(_) => self.remembered_child(center),
             _ => None,
         };
-        let Some(target) = target else {
-            return;
-        };
-        self.last_focus = target;
-        // its ancestors remember it, so the rows below follow it
-        let mut child = target;
+        if let Some(target) = target {
+            self.set_zoom_center(target);
+        }
+    }
+
+    /// Makes the node (below the focused one) the zoom-out view's center; its ancestors remember it, so the rows
+    /// below follow it
+    fn set_zoom_center(&mut self, id: NodeId) {
+        let focused = self.focused_node();
+        self.last_focus = id;
+        let mut child = id;
         while child != focused
             && let Some(parent) = self.nodes[child].parent
         {
@@ -2063,30 +2088,64 @@ impl NodeTree {
     /// remembered chain (ancestors above), each the view focus there gives with all its strip's siblings, centered
     /// on that view; the focused node's remembered child is in the middle, a thin box around the views' column.
     pub fn zoom_window(&self, size: DisplayContainerSize) -> UITree {
-        const COLUMNS: f32 = 7.0;
-        const ROWS: f32 = 5.0;
-        let Some(view) = self.latest_size else {
+        let Some(ZoomLayout {
+            panes,
+            center,
+            scale,
+            column,
+        }) = self.zoom_layout(size)
+        else {
             return UITree::leaf(UIElement::Nothing);
         };
-        let settings = settings::get();
-        let (gap, border) = settings.gap_and_border_px();
+        let border = settings::get().border.unfocused;
+        // a box: nothing is drawn outside `size`
+        UITree::new_styled(
+            UIElement::Scaled(scale),
+            Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]),
+            vec![
+                UITree::new_container_styled(
+                    Style::absolute(
+                        [0.0, 0.0],
+                        [size.width as f32 / scale, size.height as f32 / scale],
+                    ),
+                    vec![self.window(&panes, Some(center), self.active_screen)],
+                ),
+                ui::frame(
+                    border,
+                    0.0,
+                    1.0 / scale,
+                    Style::absolute(
+                        [column[0] - 2.0 / scale, column[1] - 2.0 / scale],
+                        [column[2] + 4.0 / scale, column[3] + 4.0 / scale],
+                    ),
+                    Vec::new(),
+                ),
+            ],
+        )
+    }
+
+    /// Where `zoom_window(size)` draws everything, before scaling
+    fn zoom_layout(&self, size: DisplayContainerSize) -> Option<ZoomLayout> {
+        const COLUMNS: f32 = 7.0;
+        const ROWS: f32 = 5.0;
+        let view = self.latest_size?;
+        let (gap, border) = settings::get().gap_and_border_px();
         let gap = gap.cast_signed();
         let full = [0, 0, view.width.cast_signed(), view.height.cast_signed()];
         let area = grow(full, -gap);
         let (rows, center) = self.zoom_rows(area, gap, border);
         let center_row = rows.iter().position(|(_, center)| *center).unwrap_or(0);
-        let row_count = rows.len();
 
         let [width, height] = [view.width, view.height].map(|length| length.max(1) as f32);
         let scale = (size.width as f32 / (COLUMNS * width)).min(size.height as f32 / (ROWS * height));
         let step = view.height.cast_signed() + gap;
         // the center view's middle at the middle of `size`
-        let origin = [
-            size.width as f32 / 2.0 - width * scale / 2.0,
-            size.height as f32 / 2.0 - height * scale / 2.0,
-        ];
-        let [x, y] = origin.map(|value| (value / scale).round() as i32);
-        let panes: Vec<Pane> = rows
+        let [x, y] = [
+            size.width as f32 / scale / 2.0 - width / 2.0,
+            size.height as f32 / scale / 2.0 - height / 2.0,
+        ]
+        .map(|value| value.round() as i32);
+        let panes = rows
             .iter()
             .enumerate()
             .flat_map(|(index, (panes, _))| {
@@ -2101,32 +2160,40 @@ impl NodeTree {
                 })
             })
             .collect();
-        let column_top = origin[1] - center_row as f32 * step as f32 * scale;
-        let column_height = ((row_count as f32 - 1.0) * step as f32 + height) * scale;
-        // a box: nothing is drawn outside `size`
-        UITree::new_styled(
-            UIElement::Scaled(scale),
-            Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]),
-            vec![
-                UITree::new_container_styled(
-                    Style::absolute(
-                        [0.0, 0.0],
-                        [size.width as f32 / scale, size.height as f32 / scale],
-                    ),
-                    vec![self.window(&panes, Some(center), self.active_screen)],
-                ),
-                ui::frame(
-                    settings.border.unfocused,
-                    0.0,
-                    1.0 / scale,
-                    Style::absolute(
-                        [(origin[0] - 2.0) / scale, (column_top - 2.0) / scale],
-                        [width + 4.0 / scale, column_height / scale + 4.0 / scale],
-                    ),
-                    Vec::new(),
-                ),
-            ],
-        )
+        let top = y - center_row as i32 * step;
+        let column_height = (rows.len() as i32 - 1) * step + view.height.cast_signed();
+        Some(ZoomLayout {
+            panes,
+            center,
+            scale,
+            column: [x as f32, top as f32, width, column_height as f32],
+        })
+    }
+
+    /// A click at `position` of the zoom-out view drawn at `size`: on the center, focuses it (going in); on
+    /// another node, makes that the center
+    pub fn zoom_click(&mut self, size: DisplayContainerSize, [x, y]: [f64; 2]) {
+        let Some(ZoomLayout {
+            panes,
+            center,
+            scale,
+            ..
+        }) = self.zoom_layout(size)
+        else {
+            return;
+        };
+        let scale = f64::from(scale);
+        let Some(pane) = panes
+            .iter()
+            .find(|pane| pane.contains([x / scale, y / scale]))
+        else {
+            return;
+        };
+        if pane.node == center {
+            self.focus(center, false);
+        } else {
+            self.set_zoom_center(pane.node);
+        }
     }
 
     /// Like `get_window`, but with `at_root` drawn while its root is focused (eg a project's overview).
