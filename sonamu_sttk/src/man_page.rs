@@ -52,6 +52,7 @@ const MAN_PAGE: &[ManSection] = &[
             entry("(Shift+)Tab", "goes (up)/down in the tree view"),
             entry("W/S", "goes to prev/next sibling"),
             entry("A/D", "goes to parent/child"),
+            entry("Alt+Enter", "focus tree view/main content (toggles)"),
         ],
     },
     ManSection {

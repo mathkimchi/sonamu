@@ -18,9 +18,9 @@ pub enum Traversal {
     LastChild,
     /// `w` / `s`
     Sibling(isize),
-    /// The focused row's node itself, rather than inside its applet (4 fingers up)
+    /// The focused row's node itself, rather than inside its applet (4 fingers up, Alt+Enter inside an applet)
     Select,
-    /// Into the selected row's applet, like Enter (4 fingers down)
+    /// Into the selected row's applet, like Enter (4 fingers down, Alt+Enter in the treeview)
     Enter,
 }
 impl Traversal {
@@ -45,6 +45,14 @@ impl Traversal {
                 // Alt+Shift+W/S swap siblings
                 if modifiers.shift {
                     return None;
+                }
+                // Alt+Enter toggles between the treeview and the applet
+                if c == '\n' {
+                    return modifiers.alt.then_some(if traversing {
+                        Self::Enter
+                    } else {
+                        Self::Select
+                    });
                 }
                 Some(match c {
                     'a' | '0' => Self::Parent,
