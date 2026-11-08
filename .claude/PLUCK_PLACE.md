@@ -74,6 +74,7 @@ Alt+P does both (first global keybind). The user then said: make the decisions, 
   or `RequestPlace` at the focused node if released outside the treeview.
 - A drop on a row's top/bottom edge inserts a sibling (`drop_target`), in the root's tree and in inner trees alike
   (projects insert via their `NodeHolder`); roots, inner roots and `‹` rows are appended to.
+  `InsertInner` is converted to `InsertChild` only by the holder owning the path's last node, so it survives nested projects.
   Applets without a `NodeTree` ignore the position.
 - Keyboard focus paths still work the same.
 - Marker bar on the focused row: yellow while traversing, green when keys go into an applet.

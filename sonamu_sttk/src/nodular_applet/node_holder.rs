@@ -350,8 +350,11 @@ impl NodeHolder {
         let path = path.cloned().unwrap_or_else(|| self.tree.get_focus_path());
         let (node_path, mut inner) = path.split_world();
         let (id, exact) = self.tree.closest_node_at(&node_path);
-        if let SpawnPosition::InsertInner { child_index } = position {
-            inner.get_or_insert_with(WorldTreePath::root);
+        // into the inner tree of the path's last node; if that's deeper, its holder converts it
+        if let SpawnPosition::InsertInner { child_index } = position
+            && inner.is_none()
+        {
+            inner = Some(WorldTreePath::root());
             position = SpawnPosition::InsertChild { child_index };
         }
         // onto a node holding its children: inside it
