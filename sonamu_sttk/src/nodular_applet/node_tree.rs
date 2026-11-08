@@ -25,7 +25,7 @@ use sonamu_common::{
 };
 use sonamu_ui::{
     display_units::DisplayContainerSize,
-    ui_element::{Style, UIElement, UITree},
+    ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::{cell::Cell, collections::HashMap, time::Instant};
@@ -148,8 +148,9 @@ pub struct NodeTree {
     zoom_anim: Option<ZoomAnim>,
     /// Whether focus was at a node without a main (zoomed out) at the last `update_layout`; `None` before it
     was_zoomed: Option<bool>,
-    /// The zoom-out view springing to its moved center: since when, and from how far off (px, before scaling)
-    zoom_pan: Option<(Instant, [f32; 2])>,
+    /// The zoom-out view springing to its moved center: since when, and from how far off: px (before scaling) and
+    /// rows down (rows are further apart than their views when zoomed out, by their titles)
+    zoom_pan: Option<(Instant, [f32; 2], f32)>,
 }
 
 /// The zoom-out view springing between a node's view (its center) and the whole view (#145)
@@ -1294,6 +1295,16 @@ impl NodeTree {
         treeview
     }
 
+    /// Its icon and label, without the treeview's marks (eg its title in the zoom-out view)
+    fn title(&self, id: NodeId) -> String {
+        let Some(main) = &self.nodes[id].main else {
+            return EMPTY_LABEL.to_string();
+        };
+        let published = main.get_treeview();
+        let label = published.tree.get_root_value();
+        icon(published.saved.as_ref()).map_or_else(|| label.clone(), |icon| format!("{icon} {label}"))
+    }
+
     /// Starts the focused node's wl client if it is hibernating
     pub fn wake_focused(&mut self) {
         let id = self.focused_node();
@@ -1994,7 +2005,7 @@ impl NodeTree {
         }
         if self
             .zoom_pan
-            .is_some_and(|(started, _)| swipe::spring_progress(started).is_none())
+            .is_some_and(|(started, ..)| swipe::spring_progress(started).is_none())
         {
             self.zoom_pan = None;
         }
@@ -2005,11 +2016,11 @@ impl NodeTree {
         self.zoom_anim.is_some() || self.zoom_pan.is_some()
     }
 
-    /// How far off its center the zoom-out view still is while panning to it (px, before scaling)
-    fn zoom_pan_offset(&self) -> [f32; 2] {
-        self.zoom_pan.map_or([0.0; 2], |(started, offset)| {
+    /// How far off its center the zoom-out view still is while panning to it (like `zoom_pan`)
+    fn zoom_pan_offset(&self) -> ([f32; 2], f32) {
+        self.zoom_pan.map_or(([0.0; 2], 0.0), |(started, offset, rows)| {
             let left = 1.0 - swipe::spring_progress(started).unwrap_or(1.0);
-            offset.map(|value| value * left)
+            (offset.map(|value| value * left), rows * left)
         })
     }
 
@@ -2067,7 +2078,7 @@ impl NodeTree {
         // the view pans from where the old center was, carrying on a pan underway
         let old = self.zoom_center();
         let before = old.and_then(|old| self.zoom_position(old));
-        let carried = self.zoom_pan_offset();
+        let (carried, carried_rows) = self.zoom_pan_offset();
         let focused = self.focused_node();
         self.last_focus = id;
         let mut child = id;
@@ -2077,11 +2088,12 @@ impl NodeTree {
             self.nodes[parent].last_child = self.child_index(parent, child);
             child = parent;
         }
-        if let (Some(old), Some(before)) = (old, before)
-            && let Some(after) = self.zoom_position(old)
+        if let (Some(old), Some((before, before_row))) = (old, before)
+            && let Some((after, after_row)) = self.zoom_position(old)
         {
             let offset = [0, 1].map(|axis| (before[axis] - after[axis]) as f32 + carried[axis]);
-            self.zoom_pan = Some((Instant::now(), offset));
+            let rows = (before_row - after_row) as f32 + carried_rows;
+            self.zoom_pan = Some((Instant::now(), offset, rows));
         }
         self.damaged = true;
     }
@@ -2187,17 +2199,15 @@ impl NodeTree {
         })
     }
 
-    /// Where the node's pane is in the zoom-out view, from its center view's top left (px, before scaling)
-    fn zoom_position(&self, id: NodeId) -> Option<[i32; 2]> {
+    /// Where the node's pane is in the zoom-out view: in its row's view (px, before scaling), and that row's offset from
+    /// the center's
+    fn zoom_position(&self, id: NodeId) -> Option<([i32; 2], i32)> {
         let ZoomRows {
-            rows,
-            center_row,
-            step,
-            ..
+            rows, center_row, ..
         } = self.zoom_rows()?;
         rows.iter().enumerate().find_map(|(index, panes)| {
             let pane = panes.iter().find(|pane| pane.node == id)?;
-            Some([pane.rect[0], pane.rect[1] + (index as i32 - center_row as i32) * step])
+            Some(([pane.rect[0], pane.rect[1]], index as i32 - center_row as i32))
         })
     }
 
@@ -2214,11 +2224,32 @@ impl NodeTree {
         else {
             return UITree::leaf(UIElement::Nothing);
         };
-        let border = settings::get().border.unfocused;
+        let settings = settings::get();
+        let border = settings.border.unfocused;
+        // above each pane once zoomed out, unscaled, apart from their neighbours'
+        const INSET: f32 = 4.0;
+        let titles = self
+            .zoom_progress()
+            .is_none()
+            .then(|| {
+                panes.iter().map(|pane| {
+                    let [x, y, width, _] = pane.rect.map(|value| value as f32 * scale);
+                    UITree::leaf_styled(
+                        ui::text(self.title(pane.node), settings.palette.fg),
+                        Style::absolute(
+                            [x + INSET, y - f32::midpoint(ui::row_height(), font_size())],
+                            [(width - 2.0 * INSET).max(0.0), font_size()],
+                        ),
+                    )
+                })
+            })
+            .into_iter()
+            .flatten();
+        let size_style = Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]);
         // a box: nothing is drawn outside `size`
-        UITree::new_styled(
+        let scaled = UITree::new_styled(
             UIElement::Scaled(scale),
-            Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]),
+            size_style.clone(),
             vec![
                 UITree::new_container_styled(
                     Style::absolute(
@@ -2238,7 +2269,8 @@ impl NodeTree {
                     Vec::new(),
                 ),
             ],
-        )
+        );
+        UITree::new_container_styled(size_style, std::iter::once(scaled).chain(titles).collect())
     }
 
     /// Where `zoom_window(size)` draws everything, before scaling, `zoomed` of the way (0 to 1) from the center's
@@ -2257,8 +2289,11 @@ impl NodeTree {
         let full_scale =
             (size.width as f32 / (across * width)).min(size.height as f32 / (down * height));
         let scale = 1.0 + (full_scale - 1.0) * zoomed;
+        // rows have room for their titles above them, which aren't scaled
+        let step = step as f32 + ui::row_height() * zoomed / scale;
         // the center view's middle at the middle of `size`, from its top left; off by the pan left
-        let pan = self.zoom_pan_offset();
+        let (pan, pan_rows) = self.zoom_pan_offset();
+        let pan = [pan[0], pan[1] + pan_rows * step];
         let [x, y] = [[size.width as f32, width, pan[0]], [size.height as f32, height, pan[1]]]
             .map(|[size, length, pan]| {
                 ((size / full_scale / 2.0 - length / 2.0) * full_scale * zoomed / scale + pan).round()
@@ -2268,7 +2303,7 @@ impl NodeTree {
             .iter()
             .enumerate()
             .flat_map(|(index, panes)| {
-                let y = y + (index as i32 - center_row as i32) * step;
+                let y = y + ((index as f32 - center_row as f32) * step).round() as i32;
                 panes.iter().map(move |pane| {
                     let rect = [pane.rect[0] + x, pane.rect[1] + y, pane.rect[2], pane.rect[3]];
                     Pane {
@@ -2279,13 +2314,13 @@ impl NodeTree {
                 })
             })
             .collect();
-        let top = y - center_row as i32 * step;
-        let column_height = (rows.len() as i32 - 1) * step + view.height.cast_signed();
+        let top = y as f32 - center_row as f32 * step;
+        let column_height = (rows.len() as f32 - 1.0) * step + height;
         Some(ZoomLayout {
             panes,
             center,
             scale,
-            column: [x as f32, top as f32, width, column_height as f32],
+            column: [x as f32, top, width, column_height],
         })
     }
 

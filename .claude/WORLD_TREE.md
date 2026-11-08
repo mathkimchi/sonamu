@@ -141,7 +141,7 @@ published treeviews.
   below the focused node, else its remembered child. Arrows (the selector, `move_zoom`) and scroll (`zoom_scroll`,
   50 px a step; a project's overview passes it on) move the center like 3 fingers and set ancestors' `last_child`;
   focus stays. Rows stack around the center's view, one
-  `Scaled` (`zoom_out` setting, default 7 × 5 views) over all of `size`, a thin box around the views' column. Panes don't take
+  `Scaled` (`zoom_out` setting, default 4 × 3 views) over all of `size`, a thin box around the views' column. Panes don't take
   the mouse meanwhile: scroll moves the center, a click (`zoom_click`, hit-testing `zoom_layout`) makes a node the
   center, or focuses it if it already is. Enter in the selector also focuses the center. Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
   `Scaled` box covers `size` and the panes sit in an equally big container. A project's overview embeds it.
@@ -153,6 +153,9 @@ published treeviews.
   Moving the center (`set_zoom_center`: arrows, scroll, clicks) pans: `zoom_pan` starts off by where the old center
   was minus where it is now (`zoom_position`, unscaled, so the area's size cancels; a pan underway carries on) and
   springs to 0. `zoom_animating` covers both, for holders' redraws.
+  Titles (`NodeTree::title`: icon and label, no treeview marks) sit above each pane at full text size once zoomed out,
+  in room the rows get for them (`row_height`, unscaled, so the step between rows depends on the scale; a pan keeps
+  its vertical offset as px in the row plus rows).
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
   container of its panes (`NodeTree::restore_subtree`).
 

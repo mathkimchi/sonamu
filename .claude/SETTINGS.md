@@ -88,6 +88,6 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 
 - Commands/keybinds by name from the same program. Only things that must run code in-process would need a dylib.
 - Settings editor: deferred; schema autocomplete covers most of it.
-- `zoom_out` (`[across, down]`, ints, default `[7, 5]`, each at least 1): how many views the zoom-out view (#145)
+- `zoom_out` (`[across, down]`, ints, default `[4, 3]`, each at least 1): how many views the zoom-out view (#145)
   fits; the smaller of the two scales wins (`NodeTree::zoom_layout`). The center view is in the middle, so an even
   count shows halves at the edges (4: 3 full, 2 halves).
