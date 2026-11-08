@@ -26,3 +26,6 @@ Found while debugging #60; nothing here is in the repo's code.
 - Session state stands in for input when only static looks matter: a file manager's `inner` children open documents,
   a `Wl` main restores as a placeholder. In one run (2026-11-05) `wtype` keys never reached Sonamu and `wlrctl`
   wasn't installed; same-binary screenshots were byte-identical, so `cmp` on two `grim` PNGs checks a refactor.
+- Focus moves without input (#145): a temporary env-gated hook in `RootNodeApplet::remember_focus` (runs each loop)
+  calling `self.traverse(Traversal::Select / Enter)` every 2 s and `eprintln!`ing `get_focus_path()` checked 4 finger
+  round trips through nested projects. Start focus deep via the session's `focus` (`[{"Inner":1},{"Child":0}]`).
