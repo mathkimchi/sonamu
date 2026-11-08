@@ -518,7 +518,7 @@ impl RootNodeApplet {
                         root.update_treeview_visibility();
                         root.holder.tree.update_layout();
                         // a frame each time the runner reads the last one
-                        if root.holder.tree.zoom_progress().is_some() {
+                        if root.holder.tree.zoom_animating() {
                             root.surface.damage();
                         }
                         root.holder.update_wl_focus();

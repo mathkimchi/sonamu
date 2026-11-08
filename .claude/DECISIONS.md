@@ -149,7 +149,7 @@ Zoom-out view, planned (re-confirm each point before building; a first attempt, 
 - Reusable and embeddable: an element drawing a `NodeTree`'s matrix in a rect. Responsibilities as now: the holder
   draws the matrix from its nodes' surfaces (like `NodeTree::preview`); each node draws its own cell (a project's
   is its overview, which embeds the zoom view of its tree beside its existing UI; its preview cards go).
-- Zoom animation: springs between the center's view and the whole view (built).
+- Zoom animation: springs between the center's view and the whole view; moving the center pans (built).
 - 4 fingers up goes out to the node holding focus's world (`[[2], [1, 2]]` → `[[2]]`, else `[]`); 4 down back to
   the remembered focus in the next world (built).
 - Layout (agreed 2026-11-08): the swipe space drawn small. One row per depth down the remembered chain (ancestors

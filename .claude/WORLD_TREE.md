@@ -150,6 +150,9 @@ published treeviews.
   and the whole view; zooming in, centered on the node going in. `zoom_progress` is `Some` meanwhile: holders damage
   each pass (paced by the reader's `DamageAck`; projects need no timer), the root's `get_window` keeps drawing it, and
   a project grows its zoom area from all of it to below its rows (`zoom_view`), or draws only that while zooming in.
+  Moving the center (`set_zoom_center`: arrows, scroll, clicks) pans: `zoom_pan` starts off by where the old center
+  was minus where it is now (`zoom_position`, unscaled, so the area's size cancels; a pan underway carries on) and
+  springs to 0. `zoom_animating` covers both, for holders' redraws.
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
   container of its panes (`NodeTree::restore_subtree`).
 

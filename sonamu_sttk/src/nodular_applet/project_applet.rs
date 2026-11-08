@@ -1066,7 +1066,7 @@ impl StandardApplet for ProjectApplet {
             self.hook.damage_treeview();
         }
         self.holder.tree.update_layout();
-        if self.holder.tree.zoom_progress().is_some() {
+        if self.holder.tree.zoom_animating() {
             self.hook.damage_window();
         }
         self.holder.update_wl_focus();
