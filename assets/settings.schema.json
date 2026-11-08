@@ -84,6 +84,16 @@
       "items": {
         "type": "string"
       }
+    },
+    "zoom_out": {
+      "description": "The zoom-out view (#145): how many views fit across and down (the smaller scale of the two)",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 2,
+      "minItems": 2
     }
   },
   "$defs": {

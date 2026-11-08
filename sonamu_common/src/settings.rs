@@ -59,6 +59,8 @@ pub struct Settings {
     pub font_size: f32,
     pub treeview: TreeviewSettings,
     pub swipe: SwipeSettings,
+    /// The zoom-out view (#145): how many views fit across and down (the smaller scale of the two)
+    pub zoom_out: [f32; 2],
     /// Global shortcuts that run a shell command
     pub keybinds: Vec<Keybind>,
     /// Programs restored running in their terminal (see `.claude/SESSIONS.md`)

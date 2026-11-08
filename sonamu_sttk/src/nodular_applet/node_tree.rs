@@ -2129,10 +2129,10 @@ impl NodeTree {
 
     /// Where `zoom_window(size)` draws everything, before scaling
     fn zoom_layout(&self, size: DisplayContainerSize) -> Option<ZoomLayout> {
-        const COLUMNS: f32 = 7.0;
-        const ROWS: f32 = 5.0;
         let view = self.latest_size?;
-        let (gap, border) = settings::get().gap_and_border_px();
+        let settings = settings::get();
+        let [across, down] = settings.zoom_out.map(|count| count.max(1.0));
+        let (gap, border) = settings.gap_and_border_px();
         let gap = gap.cast_signed();
         let full = [0, 0, view.width.cast_signed(), view.height.cast_signed()];
         let area = grow(full, -gap);
@@ -2140,7 +2140,7 @@ impl NodeTree {
         let center_row = rows.iter().position(|(_, center)| *center).unwrap_or(0);
 
         let [width, height] = [view.width, view.height].map(|length| length.max(1) as f32);
-        let scale = (size.width as f32 / (COLUMNS * width)).min(size.height as f32 / (ROWS * height));
+        let scale = (size.width as f32 / (across * width)).min(size.height as f32 / (down * height));
         let step = view.height.cast_signed() + gap;
         // the center view's middle at the middle of `size`
         let [x, y] = [
