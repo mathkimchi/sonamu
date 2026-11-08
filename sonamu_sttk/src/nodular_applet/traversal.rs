@@ -2,7 +2,7 @@
 //! so it crosses into and out of applets' inner trees like any other level.
 
 use super::treeview::TreeviewRow;
-use sonamu_common::utils::tree::world_tree::WorldTreePath;
+use sonamu_common::utils::tree::world_tree::{Step, WorldTreePath};
 use sonamu_ui::ui_event::{KeyTrait, UIEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +65,26 @@ impl Traversal {
     }
 }
 
+/// For each world `focus` goes through: the path of the node holding it (`[]`: the root's) and `focus` cut to that
+/// world (before the next `Inner` step); not a world it is only at the holder of
+pub fn world_focus(focus: &WorldTreePath) -> Vec<(WorldTreePath, WorldTreePath)> {
+    let worlds: Vec<usize> = (0..focus.0.len())
+        .filter(|&index| matches!(focus.0[index], Step::Inner(_)))
+        .collect();
+    let starts = std::iter::once(0).chain(worlds.iter().copied());
+    let ends = worlds.iter().copied().chain(std::iter::once(focus.0.len()));
+    starts
+        .zip(ends)
+        .filter(|(start, end)| start < end)
+        .map(|(start, end)| {
+            (
+                WorldTreePath(focus.0[..start].to_vec()),
+                WorldTreePath(focus.0[..end].to_vec()),
+            )
+        })
+        .collect()
+}
+
 /// The path to focus for a move from the row at `from` (`None`: focus isn't shown), if it moves.
 /// `rows` are the shown rows in order (no `‹` row).
 pub fn target(
@@ -121,7 +141,7 @@ pub fn target(
 
 #[cfg(test)]
 mod tests {
-    use super::{Traversal, target};
+    use super::{Traversal, target, world_focus};
     use crate::nodular_applet::treeview::treeview_rows;
     use sonamu_common::utils::tree::{
         recursive_tree::RecursiveTreeNode,
@@ -202,5 +222,21 @@ mod tests {
         assert_eq!(target(&rows, Some(5), Traversal::Next), path(&[]));
         // the last sibling stays
         assert_eq!(target(&rows, Some(5), Traversal::Sibling(1)), None);
+    }
+
+    #[test]
+    fn world_focus_per_world() {
+        use sonamu_common::utils::tree::world_tree::{Step::*, WorldTreePath};
+        let path = |steps: &[_]| WorldTreePath(steps.to_vec());
+        // [[2], [1, 2]]
+        assert_eq!(
+            world_focus(&path(&[Child(2), Inner(1), Child(2)])),
+            vec![
+                (path(&[]), path(&[Child(2)])),
+                (path(&[Child(2)]), path(&[Child(2), Inner(1), Child(2)])),
+            ]
+        );
+        // at the root: in no world deeper than it
+        assert_eq!(world_focus(&path(&[])), vec![]);
     }
 }
