@@ -28,7 +28,7 @@ use sonamu_ui::{
     ui_element::{Style, UIElement, UITree},
     ui_event::{KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
-use std::{cell::Cell, collections::HashMap};
+use std::{cell::Cell, collections::HashMap, time::Instant};
 
 #[derive(Debug, Clone, Copy)]
 enum FocusIndex {
@@ -144,6 +144,19 @@ pub struct NodeTree {
     last_focus: NodeId,
     /// How far a scroll in the zoom-out view moved, until it steps (`zoom_scroll`)
     zoom_scrolled: [f64; 2],
+    /// The zoom-out view growing out of, or back into, a node's view
+    zoom_anim: Option<ZoomAnim>,
+    /// Whether focus was at a node without a main (zoomed out) at the last `update_layout`; `None` before it
+    was_zoomed: Option<bool>,
+}
+
+/// The zoom-out view springing between a node's view (its center) and the whole view (#145)
+#[derive(Clone, Copy)]
+struct ZoomAnim {
+    started: Instant,
+    /// Zooming out, else in
+    out: bool,
+    center: NodeId,
 }
 
 /// A swipe between two nodes of the tree (`StandardEvent::Swipe`), drawn on the active screen
@@ -276,6 +289,8 @@ impl NodeTree {
             swipe_sent_to: None,
             last_focus: NodeId::default(),
             zoom_scrolled: [0.0; 2],
+            zoom_anim: None,
+            was_zoomed: None,
         };
         tree.root = insert_root(&mut tree);
         tree.view_root = tree.root;
@@ -1573,6 +1588,7 @@ impl NodeTree {
     /// Works out what is on screen, and resizes the shown applets to their panes.
     /// An applet on several screens gets the active one's pane, else the first one's.
     pub fn update_layout(&mut self) {
+        self.update_zoom_anim();
         let mut shown = Vec::new();
         if let Some(size) = self.latest_size {
             let panes = self.layout(
@@ -1929,7 +1945,7 @@ impl NodeTree {
     /// Every pane, bordered unless it is the only one; the focused one's border shows whether focus is inside it.
     /// Focus ending at a node without a main (eg the root) shows the zoom-out view instead (#145).
     pub fn get_window(&self) -> UITree {
-        if self.zoomed_out()
+        if (self.zoomed_out() || self.zoom_progress().is_some())
             && let Some(size) = self.latest_size
         {
             return self.zoom_window(size);
@@ -1940,6 +1956,37 @@ impl NodeTree {
     /// Whether the zoom-out view is shown, so panes don't take the pointer
     fn zoomed_out(&self) -> bool {
         self.swipe.is_none() && self.nodes[self.focused_node()].main.is_none()
+    }
+
+    /// Starts the zoom-out view springing when focus went to or from a node without a main, and ends it once there
+    fn update_zoom_anim(&mut self) {
+        let zoomed = self.nodes[self.focused_node()].main.is_none();
+        if self.was_zoomed.is_some_and(|was| was != zoomed) {
+            let center = if zoomed {
+                self.zoom_center()
+            } else {
+                Some(self.focused_node())
+            };
+            self.zoom_anim = center.map(|center| ZoomAnim {
+                started: Instant::now(),
+                out: zoomed,
+                center,
+            });
+        }
+        self.was_zoomed = Some(zoomed);
+        if self
+            .zoom_anim
+            .is_some_and(|anim| swipe::spring_progress(anim.started).is_none())
+        {
+            self.zoom_anim = None;
+        }
+    }
+
+    /// While the zoom-out view springs: how zoomed out it is, 0 (its center's view) to 1; holders redraw meanwhile
+    pub fn zoom_progress(&self) -> Option<f32> {
+        let anim = self.zoom_anim?;
+        let progress = swipe::spring_progress(anim.started).unwrap_or(1.0);
+        Some(if anim.out { progress } else { 1.0 - progress })
     }
 
     /// The child focus was last under
@@ -2045,7 +2092,11 @@ impl NodeTree {
     /// (`zoom_center`, else the focused node)
     fn zoom_rows(&self, area: [i32; 4], gap: i32, border: u32) -> (Vec<(Vec<Pane>, bool)>, NodeId) {
         let unclipped = [i32::MIN / 2, i32::MIN / 2, i32::MAX, i32::MAX];
-        let center = self.zoom_center().unwrap_or_else(|| self.focused_node());
+        // zooming in, on the node going in
+        let center = match self.zoom_anim {
+            Some(anim) if !anim.out && self.nodes.contains_key(anim.center) => anim.center,
+            _ => self.zoom_center().unwrap_or_else(|| self.focused_node()),
+        };
         let mut chain = Vec::new();
         let mut id = center;
         while id != self.view_root
@@ -2096,7 +2147,7 @@ impl NodeTree {
             center,
             scale,
             column,
-        }) = self.zoom_layout(size)
+        }) = self.zoom_layout(size, self.zoom_progress().unwrap_or(1.0))
         else {
             return UITree::leaf(UIElement::Nothing);
         };
@@ -2127,8 +2178,9 @@ impl NodeTree {
         )
     }
 
-    /// Where `zoom_window(size)` draws everything, before scaling
-    fn zoom_layout(&self, size: DisplayContainerSize) -> Option<ZoomLayout> {
+    /// Where `zoom_window(size)` draws everything, before scaling, `zoomed` of the way (0 to 1) from the center's
+    /// view filling `size` to all of it
+    fn zoom_layout(&self, size: DisplayContainerSize, zoomed: f32) -> Option<ZoomLayout> {
         let view = self.latest_size?;
         let settings = settings::get();
         let [across, down] = settings.zoom_out.map(|count| count.max(1) as f32);
@@ -2140,14 +2192,15 @@ impl NodeTree {
         let center_row = rows.iter().position(|(_, center)| *center).unwrap_or(0);
 
         let [width, height] = [view.width, view.height].map(|length| length.max(1) as f32);
-        let scale = (size.width as f32 / (across * width)).min(size.height as f32 / (down * height));
+        let full_scale =
+            (size.width as f32 / (across * width)).min(size.height as f32 / (down * height));
+        let scale = 1.0 + (full_scale - 1.0) * zoomed;
         let step = view.height.cast_signed() + gap;
-        // the center view's middle at the middle of `size`
-        let [x, y] = [
-            size.width as f32 / scale / 2.0 - width / 2.0,
-            size.height as f32 / scale / 2.0 - height / 2.0,
-        ]
-        .map(|value| value.round() as i32);
+        // the center view's middle at the middle of `size`, from its top left
+        let [x, y] = [[size.width as f32, width], [size.height as f32, height]]
+            .map(|[size, length]| {
+                ((size / full_scale / 2.0 - length / 2.0) * full_scale * zoomed / scale).round() as i32
+            });
         let panes = rows
             .iter()
             .enumerate()
@@ -2181,7 +2234,7 @@ impl NodeTree {
             center,
             scale,
             ..
-        }) = self.zoom_layout(size)
+        }) = self.zoom_layout(size, 1.0)
         else {
             return;
         };

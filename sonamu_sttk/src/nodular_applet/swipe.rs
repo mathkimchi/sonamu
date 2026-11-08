@@ -7,7 +7,9 @@
 use super::treeview::TreeviewRow;
 use crate::ui;
 use sonamu_common::{
-    sap::packets::SwipeView, settings::SwipeSettings, utils::tree::world_tree::WorldTreePath,
+    sap::packets::SwipeView,
+    settings::{self, SwipeSettings},
+    utils::tree::world_tree::WorldTreePath,
 };
 use sonamu_ui::{
     color::Color,
@@ -341,6 +343,22 @@ impl Spring {
                     + (velocity + zeta * omega * offset) / omega_d * (omega_d * t).sinh())
         }
     }
+}
+
+/// How far (0 to 1) something springing from 0 to 1 since `started` is, with the swipe settle spring;
+/// `None` once it arrived (eg the zoom-out view growing, #145)
+pub fn spring_progress(started: Instant) -> Option<f32> {
+    let settings = settings::get().swipe;
+    let spring = Spring {
+        stiffness: f64::from(settings.stiffness.max(1.0)),
+        damping_ratio: f64::from(settings.damping_ratio.max(0.01)),
+    };
+    let t = started.elapsed().as_secs_f64();
+    let offset = spring.offset(1.0, 0.0, t);
+    let speed = (spring.offset(1.0, 0.0, t + 0.001) - offset) / 0.001;
+    let arrived = t >= Spring::MAX_TIME
+        || (offset.abs() < Spring::EPSILON && speed.abs() < Spring::EPSILON * 10.0);
+    (!arrived).then_some((1.0 - offset) as f32)
 }
 
 /// Springing onto a row after the fingers lifted, starting at their speed

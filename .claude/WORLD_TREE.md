@@ -145,6 +145,11 @@ published treeviews.
   the mouse meanwhile: scroll moves the center, a click (`zoom_click`, hit-testing `zoom_layout`) makes a node the
   center, or focuses it if it already is. Enter in the selector also focuses the center. Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
   `Scaled` box covers `size` and the panes sit in an equally big container. A project's overview embeds it.
+  Animated (`ZoomAnim`, `update_zoom_anim` in `update_layout`): when focus goes to or from a node without a main, the
+  view springs (`swipe::spring_progress`, the swipe settle spring) between the center's view filling `size` (scale 1)
+  and the whole view; zooming in, centered on the node going in. `zoom_progress` is `Some` meanwhile: holders damage
+  each pass (paced by the reader's `DamageAck`; projects need no timer), the root's `get_window` keeps drawing it, and
+  a project grows its zoom area from all of it to below its rows (`zoom_view`), or draws only that while zooming in.
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
   container of its panes (`NodeTree::restore_subtree`).
 

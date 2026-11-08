@@ -703,7 +703,7 @@ impl ProjectApplet {
     }
 
     fn get_overview(&self, size: DisplayContainerSize) -> UITree {
-        let [width, height] = [size.width, size.height].map(|length| length as f32);
+        let width = size.width as f32;
         let text = settings::get().palette.fg;
         let title = match &self.renaming {
             Some(name) => format!("{}  {name}▏", self.shown_icon()),
@@ -782,17 +782,23 @@ impl ProjectApplet {
                     row.with_pointer()
                 }
             })
-            .chain(self.zoom_top().map(|top| {
-                UITree::new_container_styled(
-                    Style::absolute([0.0, top], [width, (height - top).max(0.0)]),
-                    vec![self.holder.tree.zoom_window(DisplayContainerSize::new(
-                        size.width,
-                        size.height.saturating_sub(top.to_px()),
-                    ))],
-                )
-            }))
+            .chain(self.zoom_view(size))
             .collect();
         UITree::new_styled(UIElement::Backgrounded(BG), Style::full_size(), rows)
+    }
+
+    /// Its tree's zoom-out view below the overview's rows; while it springs, from or to all of `size`
+    fn zoom_view(&self, size: DisplayContainerSize) -> Option<UITree> {
+        let tree = &self.holder.tree;
+        let top = self.zoom_top()? * tree.zoom_progress().unwrap_or(1.0);
+        let [width, height] = [size.width, size.height].map(|length| length as f32);
+        Some(UITree::new_container_styled(
+            Style::absolute([0.0, top], [width, (height - top).max(0.0)]),
+            vec![tree.zoom_window(DisplayContainerSize::new(
+                size.width,
+                size.height.saturating_sub(top.to_px()),
+            ))],
+        ))
     }
 }
 impl StandardApplet for ProjectApplet {
@@ -856,7 +862,11 @@ impl StandardApplet for ProjectApplet {
             return UITree::leaf(UIElement::Nothing);
         }
         let tree = &self.holder.tree;
-        let active = tree.get_window_with(Some(&|| self.get_overview(container_size)));
+        let active = match self.zoom_view(container_size) {
+            // zooming into a node: the zoom-out view grows into its view
+            Some(zoom) if !self.at_root() && tree.zoom_progress().is_some() => zoom,
+            _ => tree.get_window_with(Some(&|| self.get_overview(container_size))),
+        };
         if !self.screen_windows() {
             return active;
         }
@@ -1056,6 +1066,9 @@ impl StandardApplet for ProjectApplet {
             self.hook.damage_treeview();
         }
         self.holder.tree.update_layout();
+        if self.holder.tree.zoom_progress().is_some() {
+            self.hook.damage_window();
+        }
         self.holder.update_wl_focus();
     }
 }
