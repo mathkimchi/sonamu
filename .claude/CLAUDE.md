@@ -37,10 +37,11 @@ DEVLOG.md is 10k+ lines, read it with tail.
 # Rules
 
 - Do not change more than asked.
-- Never edit `docs/`, `README.md` or `DEVLOG.md`; they're the user's.
 - Keep changes small and simple.
 - Report issues we missed.
 - Follow general Rust idioms.
 - Use minimal tokens.
+- When explaining and writing to .claude, avoid verbosity. Every word must serve a purpose. Prefer clear shorthand over full sentence when sensible.
 - Update the files in .claude as things are discovered and changed.
+- Never edit `docs/`, `README.md` or `DEVLOG.md`.
 - Commits may wait for a gpg passphrase: if `git commit` hasn't finished after 20 s, commit again with `--no-gpg-sign` (eg `timeout 20 git commit ... || git commit --no-gpg-sign ...`).
