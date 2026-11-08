@@ -803,7 +803,7 @@ impl RootNodeApplet {
         let from = rows
             .iter()
             .position(|row| row.path == focused_row(&rows, focus));
-        traversal::target(&rows, from, traversal)
+        traversal::target(&rows, from, traversal, &self.remembered)
     }
 
     /// 3 fingers: the view follows them between nodes, and settles on one when they lift (`swipe`, #141)

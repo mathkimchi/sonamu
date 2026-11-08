@@ -4,6 +4,7 @@
 use super::treeview::TreeviewRow;
 use sonamu_common::utils::tree::world_tree::WorldTreePath;
 use sonamu_ui::ui_event::{KeyTrait, UIEvent};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Traversal {
@@ -12,8 +13,10 @@ pub enum Traversal {
     Prev,
     /// `a` (and `0`)
     Parent,
-    /// `d` is the first, `1`-`8` the others
+    /// `1`-`8`
     Child(usize),
+    /// `d`: the child focus was last under, else the first
+    RecentChild,
     /// `9`
     LastChild,
     /// `w` / `s`
@@ -52,7 +55,7 @@ impl Traversal {
                 }
                 Some(match c {
                     'a' | '0' => Self::Parent,
-                    'd' => Self::Child(0),
+                    'd' => Self::RecentChild,
                     '1'..='8' => Self::Child(c.to_digit(10)? as usize - 1),
                     '9' => Self::LastChild,
                     'w' => Self::Sibling(-1),
@@ -66,11 +69,12 @@ impl Traversal {
 }
 
 /// The path to focus for a move from the row at `from` (`None`: focus isn't shown), if it moves.
-/// `rows` are the shown rows in order (no `‹` row).
+/// `rows` are the shown rows in order (no `‹` row); `remembered` is each row's child focus was last under.
 pub fn target(
     rows: &[TreeviewRow],
     from: Option<usize>,
     traversal: Traversal,
+    remembered: &HashMap<WorldTreePath, WorldTreePath>,
 ) -> Option<WorldTreePath> {
     let Some(from) = from else {
         return rows.first().map(|row| row.path.clone());
@@ -95,6 +99,12 @@ pub fn target(
             row
         }
         Traversal::Child(index) => children().nth(index)?,
+        Traversal::RecentChild => {
+            let path = remembered.get(&rows[from].path);
+            children()
+                .find(|row| Some(&row.path) == path)
+                .or_else(|| children().next())?
+        }
         Traversal::LastChild => children().last()?,
         Traversal::Sibling(shift) => {
             let before = rows[..from]
@@ -122,6 +132,7 @@ pub fn target(
 #[cfg(test)]
 mod tests {
     use super::{Traversal, target};
+    use std::collections::HashMap;
     use crate::nodular_applet::treeview::treeview_rows;
     use sonamu_common::utils::tree::{
         recursive_tree::RecursiveTreeNode,
@@ -179,28 +190,41 @@ mod tests {
         let i2 = Some(3);
         let c1 = Some(4);
         assert_eq!(
-            target(&rows, i2, Traversal::Sibling(1)),
+            target(&rows, i2, Traversal::Sibling(1), &HashMap::new()),
             path(&[Child(0), Child(0)])
         );
         assert_eq!(
-            target(&rows, c1, Traversal::Sibling(-1)),
+            target(&rows, c1, Traversal::Sibling(-1), &HashMap::new()),
             path(&[Child(0), Inner(1)])
         );
         assert_eq!(
-            target(&rows, i2, Traversal::Next),
+            target(&rows, i2, Traversal::Next, &HashMap::new()),
             path(&[Child(0), Child(0)])
         );
-        assert_eq!(target(&rows, c1, Traversal::Parent), path(&[Child(0)]));
+        assert_eq!(target(&rows, c1, Traversal::Parent, &HashMap::new()), path(&[Child(0)]));
         assert_eq!(
-            target(&rows, Some(1), Traversal::Child(0)),
+            target(&rows, Some(1), Traversal::Child(0), &HashMap::new()),
             path(&[Child(0), Inner(0)])
         );
+        // the remembered child, else the first
         assert_eq!(
-            target(&rows, Some(1), Traversal::LastChild),
+            target(&rows, Some(1), Traversal::RecentChild, &HashMap::new()),
+            path(&[Child(0), Inner(0)])
+        );
+        let remembered = HashMap::from([(
+            WorldTreePath(vec![Child(0)]),
+            WorldTreePath(vec![Child(0), Child(1)]),
+        )]);
+        assert_eq!(
+            target(&rows, Some(1), Traversal::RecentChild, &remembered),
             path(&[Child(0), Child(1)])
         );
-        assert_eq!(target(&rows, Some(5), Traversal::Next), path(&[]));
+        assert_eq!(
+            target(&rows, Some(1), Traversal::LastChild, &HashMap::new()),
+            path(&[Child(0), Child(1)])
+        );
+        assert_eq!(target(&rows, Some(5), Traversal::Next, &HashMap::new()), path(&[]));
         // the last sibling stays
-        assert_eq!(target(&rows, Some(5), Traversal::Sibling(1)), None);
+        assert_eq!(target(&rows, Some(5), Traversal::Sibling(1), &HashMap::new()), None);
     }
 }

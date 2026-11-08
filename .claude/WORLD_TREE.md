@@ -54,7 +54,7 @@ Applets have no traversal of their own.
 - While traversing (`NodeTree::is_traversing`), plain keys; otherwise with Alt (`is_keybind`, so wl clients don't get them):
   Tab / Shift+Tab: next / previous row (wrapping); `w` / `s`: previous / next sibling (shown rows at the same depth
   under the same parent: a node's inner children come before its own, so `s` on the last inner one goes to the first
-  outer one); `a` / `0`: parent (past the view root: its parent, widening the view); `d`, `1`-`8`, `9`: first, nth, last child.
+  outer one); `a` / `0`: parent (past the view root: its parent, widening the view); `d`: the child focus was last under (root's `remembered`, as 3-finger swipes), else first; `1`-`8`, `9`: nth, last child.
   Alt+Enter: like 4 fingers down.
 - Swipes (DRM backend only: `UIEvent::Swipe`, `Begin` / `Update(px)` / `End`), the root's (`handle_swipe`): 4 fingers up
   (`Traversal::Select`) leaves the innermost world: the path up to its last `Inner` step (`[[2], [1, 2]]` →
