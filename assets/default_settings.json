@@ -29,7 +29,7 @@
     "stiffness": 1000.0,
     "damping_ratio": 1.0
   },
-  "zoom_out": [7, 5],
+  "zoom_out": [4, 3],
   "keybinds": [],
   "restore_programs": [],
   "startup": [],
