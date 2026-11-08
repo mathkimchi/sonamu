@@ -132,6 +132,13 @@ published treeviews.
   scroll to the other's (`TreeSwipe::strip`, laid out with `Strips::fixed`), so the settle spring animates it; focus
   moved by keys jumps. Between siblings both in sight (same panes, in any order) the focus ring stretches between them
   instead (`ring_window`).
+- Zoom-out view (#145, `NodeTree::zoom_window(size)`, embeddable): drawn by `get_window` while focus ends at a node
+  without a main (eg a container root). Rows (`zoom_rows`): one per node down the focused node's chain (ancestors,
+  then `last_child`s), each `push_panes` with that node focused and `Strips::whole` (every sibling, unclipped);
+  equal rows (containers) merge. The focused node's remembered child is the center: rows stack around its view, one
+  `Scaled` (7 × 5 views, constants for now) over all of `size`, a thin box around the views' column. Panes don't take
+  the mouse meanwhile. Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
+  `Scaled` box covers `size` and the panes sit in an equally big container.
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
   container of its panes (`NodeTree::restore_subtree`).
 

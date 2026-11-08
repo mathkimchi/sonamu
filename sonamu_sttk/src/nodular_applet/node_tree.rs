@@ -200,6 +200,8 @@ struct Strips {
     remember: bool,
     /// This strip scrolled this far instead, showing every child in sight (a swipe between siblings)
     fixed: Option<(NodeId, i32)>,
+    /// Every child of the last strip, in sight or not, unclipped (the zoom-out view, #145)
+    whole: bool,
 }
 
 impl NodeTree {
@@ -1462,6 +1464,9 @@ impl NodeTree {
     /// Sends the pane under the pointer (or the one holding the pointer grab) the event, relative to it.
     /// A press focuses the pane's applet.
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
+        if self.zoomed_out() {
+            return;
+        }
         let pane = match self.pointer_grab {
             Some(id) => self.panes.iter().find(|pane| pane.node == id),
             None => self
@@ -1657,6 +1662,7 @@ impl NodeTree {
             gap,
             remember,
             fixed,
+            whole: false,
         };
         self.push_panes(view_root, area, full, &strips, &mut panes);
         for pane in &mut panes {
@@ -1696,6 +1702,7 @@ impl NodeTree {
             gap,
             remember,
             fixed,
+            whole,
         } = *strips;
         while let Some(child) = self.shown_child(id, focus) {
             let fixed = fixed.filter(|&(strip, _)| strip == id);
@@ -1744,12 +1751,16 @@ impl NodeTree {
             if remember {
                 node.scroll.set(scroll);
             }
-            clip = intersect(clip, rect);
+            if !whole {
+                clip = intersect(clip, rect);
+            }
             for (sibling, (&start, &column)) in node.children.iter().zip(starts.iter().zip(&widths))
             {
                 let left = x + start - scroll;
                 // scrolled to a fixed place, the shown child may be partly in sight too
-                if (*sibling != child || fixed.is_some()) && left < x + width && left + column > x {
+                if (*sibling != child || fixed.is_some())
+                    && (whole || (left < x + width && left + column > x))
+                {
                     panes.push(Pane {
                         node: self.displayed_node_toward(*sibling, focus),
                         rect: [left, y, column, height],
@@ -1889,9 +1900,139 @@ impl NodeTree {
         }
     }
 
-    /// Every pane, bordered unless it is the only one; the focused one's border shows whether focus is inside it
+    /// Every pane, bordered unless it is the only one; the focused one's border shows whether focus is inside it.
+    /// Focus ending at a node without a main (eg the root) shows the zoom-out view instead (#145).
     pub fn get_window(&self) -> UITree {
+        if self.zoomed_out()
+            && let Some(size) = self.latest_size
+        {
+            return self.zoom_window(size);
+        }
         self.get_window_with(None)
+    }
+
+    /// Whether the zoom-out view is shown, so panes don't take the pointer
+    fn zoomed_out(&self) -> bool {
+        self.swipe.is_none() && self.nodes[self.focused_node()].main.is_none()
+    }
+
+    /// The zoom-out view's rows (in each view's own place), whether each has the center, and the center: the focused
+    /// node's remembered child (else itself)
+    fn zoom_rows(&self, area: [i32; 4], gap: i32, border: u32) -> (Vec<(Vec<Pane>, bool)>, NodeId) {
+        let unclipped = [i32::MIN / 2, i32::MIN / 2, i32::MAX, i32::MAX];
+        let focused = self.focused_node();
+        let mut chain = Vec::new();
+        let mut id = focused;
+        while id != self.view_root
+            && let Some(parent) = self.nodes[id].parent
+        {
+            chain.push(id);
+            id = parent;
+        }
+        chain.reverse();
+        let mut id = focused;
+        let mut center = None;
+        while let Some(&child) = self.nodes[id].children.get(self.nodes[id].last_child) {
+            center.get_or_insert(child);
+            chain.push(child);
+            id = child;
+        }
+        let center = center.unwrap_or(focused);
+
+        // a container shows the same row as the child it shows
+        let mut rows: Vec<(Vec<Pane>, bool)> = Vec::new();
+        for id in chain {
+            let strips = Strips {
+                focus: id,
+                gap,
+                remember: false,
+                fixed: None,
+                whole: true,
+            };
+            let mut panes = Vec::new();
+            self.push_panes(self.view_root, area, unclipped, &strips, &mut panes);
+            for pane in &mut panes {
+                pane.border = border;
+            }
+            let same = |(row, _): &(Vec<Pane>, bool)| {
+                row.iter().map(|pane| pane.node).eq(panes.iter().map(|pane| pane.node))
+            };
+            match rows.last_mut() {
+                Some(last) if same(last) => last.1 |= id == center,
+                _ => rows.push((panes, id == center)),
+            }
+        }
+        (rows, center)
+    }
+
+    /// The zoom-out view (#145) fitted in `size`: the swipe space drawn small. A row per node down the focused node's
+    /// remembered chain (ancestors above), each the view focus there gives with all its strip's siblings, centered
+    /// on that view; the focused node's remembered child is in the middle, a thin box around the views' column.
+    pub fn zoom_window(&self, size: DisplayContainerSize) -> UITree {
+        const COLUMNS: f32 = 7.0;
+        const ROWS: f32 = 5.0;
+        let Some(view) = self.latest_size else {
+            return UITree::leaf(UIElement::Nothing);
+        };
+        let settings = settings::get();
+        let (gap, border) = settings.gap_and_border_px();
+        let gap = gap.cast_signed();
+        let full = [0, 0, view.width.cast_signed(), view.height.cast_signed()];
+        let area = grow(full, -gap);
+        let (rows, center) = self.zoom_rows(area, gap, border);
+        let center_row = rows.iter().position(|(_, center)| *center).unwrap_or(0);
+        let row_count = rows.len();
+
+        let [width, height] = [view.width, view.height].map(|length| length.max(1) as f32);
+        let scale = (size.width as f32 / (COLUMNS * width)).min(size.height as f32 / (ROWS * height));
+        let step = view.height.cast_signed() + gap;
+        // the center view's middle at the middle of `size`
+        let origin = [
+            size.width as f32 / 2.0 - width * scale / 2.0,
+            size.height as f32 / 2.0 - height * scale / 2.0,
+        ];
+        let [x, y] = origin.map(|value| (value / scale).round() as i32);
+        let panes: Vec<Pane> = rows
+            .iter()
+            .enumerate()
+            .flat_map(|(index, (panes, _))| {
+                let y = y + (index as i32 - center_row as i32) * step;
+                panes.iter().map(move |pane| {
+                    let rect = [pane.rect[0] + x, pane.rect[1] + y, pane.rect[2], pane.rect[3]];
+                    Pane {
+                        rect,
+                        clip: rect,
+                        ..*pane
+                    }
+                })
+            })
+            .collect();
+        let column_top = origin[1] - center_row as f32 * step as f32 * scale;
+        let column_height = ((row_count as f32 - 1.0) * step as f32 + height) * scale;
+        // a box: nothing is drawn outside `size`
+        UITree::new_styled(
+            UIElement::Scaled(scale),
+            Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]),
+            vec![
+                UITree::new_container_styled(
+                    Style::absolute(
+                        [0.0, 0.0],
+                        [size.width as f32 / scale, size.height as f32 / scale],
+                    ),
+                    vec![self.window(&panes, Some(center), self.active_screen)],
+                ),
+                ui::frame(
+                    settings.border.unfocused,
+                    0.0,
+                    1.0 / scale,
+                    Style::absolute(
+                        [(origin[0] - 2.0) / scale, (column_top - 2.0) / scale],
+                        [width + 4.0 / scale, column_height / scale + 4.0 / scale],
+                    ),
+                    Vec::new(),
+                ),
+            ],
+        )
     }
 
     /// Like `get_window`, but with `at_root` drawn while its root is focused (eg a project's overview).
