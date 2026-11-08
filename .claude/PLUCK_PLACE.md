@@ -38,19 +38,18 @@ Alt+P does both (first global keybind). The user then said: make the decisions, 
 - Path resolution: `path[0]` picks the structural node (`NodeTree::node_at`), `path[1..]` is inside its applet.
   An empty path means the root node.
 - Pluck: if `path[1..]` isn't empty, the node's applet is asked (`Pluck(Some(path[1..]))`); otherwise, or if it answers `None`,
-  the node plucks itself. Focusing a node (`Focusing`) gives a 1-long path, so Alt+P on it plucks the node directly;
-  `Inner` focus gives `[node, root]`, so the applet is asked first (and every current applet says `None`).
+  the node plucks itself. Focus at a node's applet root gives a 1-long path, so Alt+P plucks the node directly; deeper focus asks the applet.
 - **The root node can't be plucked**: the answer is `Plucked(None)`. An invalid path also answers `None`.
 - **Structural plucks run after the event batch** (`to_pluck`), never inside a request callback:
   calloop panics in `into_source_inner` if the dispatcher being detached is the one currently dispatching
   (the applet's `Plucked(None)` arrives in exactly that callback).
-- After a pluck, the parent becomes focused (`Focusing`) if the plucked node was its focused child.
+- After a pluck, the parent becomes focused (`Here`) if the plucked node was its focused child.
 - Place: goes to the deepest existing node along `path[0]` (so an outdated path still places somewhere close).
   If the node was found exactly and `path[1..]` isn't empty, its applet is asked first; `Placed(Some(tree))` or a
-  1-long path adds the tree as the node's **last child**. The placed node gets focus (`Focusing`, so you see it and can move it).
+  1-long path adds the tree as the node's **last child**. The placed node gets focus (`Here`).
 - Placed nodes get new `NodeId`s (the slotmap key); `on_request` re-tags requests with the new id.
   Wl tiles keep their surface (`DetachedTree::wl_surface`), re-added to `NodeTree::wl_surfaces`.
-- Inner focus of placed nodes is reset to `Focusing`.
+- Focus of placed nodes is reset to `Here`.
 - One pluck/place in flight per root (`pending`); a reply from a different node is logged and dropped
   (dropping a tree ends its clients).
 - `StandardApplet` gets `pluck`/`place` with defaults (`None` / `Err(tree)`), handled in `AppletClient`'s loop.
@@ -70,14 +69,14 @@ Alt+P does both (first global keybind). The user then said: make the decisions, 
   indented by depth with guide lines. Rows are placed absolutely at a fixed height, so the root can hit-test clicks itself
   (sar does the layout, so the root can't ask it where things ended up).
 - Colors: focused row filled, hovered row lighter, drag source dimmed, drop target outlined.
-- Mouse: click a row focuses it (a node row gets `Focusing`; an inner-element row gets `Inner`, since focus inside applets is TODO).
+- Mouse: click a row focuses it (`Focus(row path)`).
   Press and drag past a threshold sends `RequestPluck(row)`; releasing sends `RequestPlace(row under cursor)`,
   or `RequestPlace` at the focused node if released outside the treeview.
 - A drop on a row's top/bottom edge inserts a sibling (`drop_target`), in the root's tree and in inner trees alike
   (projects insert via their `NodeHolder`); roots, inner roots and `‹` rows are appended to.
   Applets without a `NodeTree` ignore the position.
 - Keyboard focus paths still work the same.
-- Marker bar on the focused row: yellow when the node itself is focused (traversal keys), green when its applet is (keys go in).
+- Marker bar on the focused row: yellow while traversing, green when keys go into an applet.
 - Mouse events over the treeview, or during a press that started there, don't reach applets.
 - Wheel scrolling over the treeview is eaten (no scrolling yet, so long trees run off the bottom).
 - Labels clip at the panel's width (text is always 46px, so at 20% of a narrow window most labels clip).
@@ -100,7 +99,7 @@ Alt+P does both (first global keybind). The user then said: make the decisions, 
 - Should the plucked tree survive Alt+P while a pluck is in flight, or should Alt+P cancel?
 - A wl surface destroyed while plucked: the server still holds its tile, and it's placed back dead (`WlSurfaceDestroyed` only reaches the root's tree).
 - If an applet never answers `Pluck`/`Place` (eg it panicked), the root and server stay pending forever.
-- Should the plucked tree keep its inner focus (`FocusIndex`) instead of resetting to `Focusing`?
+- Should the plucked tree keep its inner focus (`FocusIndex`) instead of resetting to `Here`?
 
 ## Issues found
 

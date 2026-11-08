@@ -103,13 +103,6 @@ pub trait StandardApplet {
         false
     }
 
-    /// Whether selecting its node (its row) also puts its focus at its inner root (`Focus([])`), so it shows, and
-    /// Enter goes to, what the row is rather than where it was (eg a project's overview, #123).
-    /// Published with the treeview.
-    fn selected_at_root(&self) -> bool {
-        false
-    }
-
     /// Puts focus at the element at `path` (in the inner tree), eg it was clicked in the root's treeview
     /// or `e` went into this applet (`[[]]`, its inner root)
     fn focus(&mut self, _path: &WorldTreePath) {}
@@ -600,7 +593,6 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         traversing: state.applet.is_traversing(),
                         frames_itself: state.applet.frames_itself(),
                         holds_children,
-                        selected_at_root: state.applet.selected_at_root(),
                         saved: state.applet.save(),
                         awaiting_wl: state.applet.awaiting_wl(),
                         screen_windows: state.applet.screen_windows(),

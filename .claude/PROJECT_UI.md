@@ -4,8 +4,7 @@
 
 - The overview shows while the project's own tree is focused at its inner root (`focused_node() == root()`), i.e.
   on the project itself rather than on something in it. That is also the state right after Super+P, so a freshly
-  focused project node (not inside it) shows it too. The project can't tell whether its outer node is `Focusing`
-  (`FocusChanged` is never sent), so it doesn't key off that.
+  focus path ending at the project node shows it too (#145: no separate selected state).
 - It replaces the panes there (they were the last child's pane before). Rows, from the top: name, directory, key hint,
   `1  <label>` per child of the inner root, then `NEW_ROWS` (command hub `n`, project `p`, terminal `t`, browser `b`). Rows are a fixed height so the project hit-tests clicks itself.
 - `p` (#81) adds an empty project (`ProjectApplet::empty`, no contents, this project's directory) to the inner

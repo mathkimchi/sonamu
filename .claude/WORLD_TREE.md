@@ -38,13 +38,14 @@ An inner world's root is the node's own row, so it has no path of its own: every
 
 `split_world` gives the node in the outermost world and the rest as a path of that node's own world
 (`Inner(i)` becomes `Child(i)`); `join`/`push_inner` go the other way.
-"Inside" a node (keys going to its main) isn't part of the path: it is the node's `FocusIndex::Inner`
-(`NodeTree::screen_focus_inside` for the treeview's marker).
+Focus is the path alone (#145): a path ending at a node with a main is inside that main, at its root; there is no
+separate "selected" state. Only a node without a main (container, root) at the path's end takes keys itself.
+`NodeTree::screen_focus_inside` (treeview marker) is whether keys go into an applet that isn't traversing.
 The saved session's `focus` falls back to the root if it can't be read (eg saved before #83).
 
 ## Traversal keys
 
-The treeview selector shows when focus is on a node rather than inside an applet taking input.
+Traversing (`is_traversing`): focus ends at a node without a main, or in an applet's own selector.
 Traversal is the root's (#83, `nodular_applet/traversal.rs`): it moves by the **shown rows** (`view_tree_rows`, the
 view root's subtree without collapsed parts), so it crosses into and out of applets' inner trees like any other level,
 then focuses the target with `Focus(path)` (`NodeTree::focus_path`, passed down to the applet owning the row).
@@ -54,9 +55,10 @@ Applets have no traversal of their own.
   Tab / Shift+Tab: next / previous row (wrapping); `w` / `s`: previous / next sibling (shown rows at the same depth
   under the same parent: a node's inner children come before its own, so `s` on the last inner one goes to the first
   outer one); `a` / `0`: parent (past the view root: its parent, widening the view); `d`, `1`-`8`, `9`: first, nth, last child.
-  Alt+Enter toggles: inside an applet it selects the focused row (like 4 fingers up), in the treeview it is Enter.
+  Alt+Enter: not traversing, like 4 fingers up; traversing, like 4 down.
 - Swipes (DRM backend only: `UIEvent::Swipe`, `Begin` / `Update(px)` / `End`), the root's (`handle_swipe`): 4 fingers up
-  selects the focused row (out of its applet), 4 down is Enter; once a swipe (50 px). 3 fingers (#141, #142,
+  (`Traversal::Select`) pops the focus path's last step, 4 down (`Enter`) goes to the remembered child
+  (`RootNodeApplet::remembered`), else the first shown; once a swipe (50 px). 3 fingers (#141, #142,
   `nodular_applet/swipe.rs`) move along a strip of shown rows, natural direction (content follows the fingers):
   - The axis locks after 10 px. Horizontal (#144): the focused row's siblings (rows under the same parent row, so inner
     then own children); fingers left bring in the next. Vertical: ancestors up to the first row, then down through each
@@ -81,10 +83,8 @@ Applets have no traversal of their own.
     screen's tree draws it.
 - In the selector (the deepest holder's `NodeTree::handle_event`, or an applet's own, eg the file manager's documents):
   Space (or clicking its `▾`/`▸`) collapses/expands all its children, inner and own (the holder owning the row keeps
-  the flag, unsaved; `NodeTree::applet_treeview`/`get_treeview_of` leave them out); Enter confirms (into the applet,
-  resuming where it was; a container's first child). An applet whose row is its own root (`StandardApplet::selected_at_root`:
-  a project, its overview) is sent `Focus([])` whenever its node is selected (`NodeTree::selected`), so the row shows,
-  and Enter goes to, its overview (#123). Modifiers on their own don't leave the selector; other keys go into the applet.
+  the flag, unsaved; `NodeTree::applet_treeview`/`get_treeview_of` leave them out); Enter goes to a container's first child. Focus
+  ending at a node with a main sends it `Focus([])` (`NodeTree::selected`), eg a project shows its overview (#123).
 - The standard keybinds (Ctrl+W, Ctrl+Shift++, Super+P) act on the selected node.
   Ctrl+W asks its main to close (`CloseRequest`, see below) rather than closing it.
   Something new for a node whose applet `holds_children` (projects) goes inside it, at its root (#83):
@@ -151,18 +151,16 @@ Ownership is what pluck/place moves between: a holder detaches clients from its 
 
 Each node stores one `FocusIndex`:
 
-- `Focusing`: the node itself is selected (the treeview selector, yellow marker).
-- `Inner`: focus is inside its main (keys go to it, green marker). Where exactly inside is up to the main.
+- `Here`: focus ends at it: inside its main (where is up to the main), else the node itself (selector).
 - `Child(i)`: focus is down in child `i` (same world).
 
 The full focus path is built bottom-up:
 
 - A `Child(i)` node prefixes `i` to its child's node path.
-- An `Inner` node appends its main's published focus path (`push_inner`), so at its main's root it is just the node.
+- A `Here` node appends its main's published focus path (`push_inner`), so at its main's root it is just the node.
 
 Moving focus goes down the same way: the root picks the target row (see Traversal keys) and sends `Focus(path)`;
-each holder focuses its node (`Focusing` if the path ends there, else `Inner` with the rest sent to its main).
-Enter makes a `Focusing` node `Inner`, and from then on keys go to its main.
+each holder focuses its node (`Here`), sending its main the rest of the path, or `Focus([])` if it ends there.
 
 ## Screens (#60)
 
@@ -215,8 +213,8 @@ The holder above stitches these in:
   row, or back to the whole tree) and Alt+R (the focused row's parent). Above it is a dim `‹ parent` row; focusing it
   (or focus leaving the view any other way) widens the view (`update_view_root`, `update_view_path`).
   Inner rows look like any other (#83: no box or shading); the panel scrolls with the wheel and follows focus.
-- `is_traversing` follows `Inner` nodes down into
-  their mains' `traversing`, since a path inside a project can still be a selection (eg `[Child(p), Inner(0)]` with the project selecting its child). A project at its own root (its overview) isn't traversing (#123): selecting it is its outer node's `Focusing`.
+- `is_traversing` follows `Here` nodes down into
+  their mains' `traversing`, since a path inside a project can still be a selection (eg `[Child(p), Inner(0)]` with the project selecting its child). A project at its own root (its overview) isn't traversing (#123).
 
 ## Paths across holders
 

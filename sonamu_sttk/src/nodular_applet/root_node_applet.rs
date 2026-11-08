@@ -773,37 +773,36 @@ impl RootNodeApplet {
     fn traverse(&mut self, traversal: Traversal) {
         let focus = self.holder.tree.get_focus_path();
         let target = match traversal {
-            // its row's node itself
-            Traversal::Select => Some(focus),
-            // like Enter in the selector, wherever it is
-            Traversal::Enter => {
-                let _ = self
-                    .holder
-                    .handle_ui_event(StandardEvent::UIEvent(UIEvent::Key {
-                        symbol: Some(KeySymbol::Enter),
-                        modifiers: KeyModifiers::NONE,
-                        raw_keycode: 0,
-                        pressed: true,
-                    }));
-                None
+            // one step out
+            Traversal::Select => {
+                let mut parent = focus;
+                parent.0.pop().map(|_| parent)
             }
-            _ => {
-                let rows = view_tree_rows(
-                    &self.holder.tree,
-                    self.view_path.as_ref(),
-                    self.holder.tree.active_screen(),
-                    false,
-                );
-                let from = rows
-                    .iter()
-                    .position(|row| row.path == focused_row(&rows, &focus));
-                traversal::target(&rows, from, traversal)
-            }
+            // one step in: where focus was under it, else its first child
+            Traversal::Enter => match self.remembered.get(&focus) {
+                Some(child) => Some(child.clone()),
+                None => self.target(&focus, Traversal::Child(0)),
+            },
+            _ => self.target(&focus, traversal),
         };
         if let Some(target) = target {
             self.holder.focus(&target);
             self.surface.damage();
         }
+    }
+
+    /// Where `traversal` goes from `focus` among the shown rows
+    fn target(&self, focus: &WorldTreePath, traversal: Traversal) -> Option<WorldTreePath> {
+        let rows = view_tree_rows(
+            &self.holder.tree,
+            self.view_path.as_ref(),
+            self.holder.tree.active_screen(),
+            false,
+        );
+        let from = rows
+            .iter()
+            .position(|row| row.path == focused_row(&rows, focus));
+        traversal::target(&rows, from, traversal)
     }
 
     /// 3 fingers: the view follows them between nodes, and settles on one when they lift (`swipe`, #141)
@@ -910,11 +909,11 @@ impl RootNodeApplet {
                 if x.abs() > y.abs() {
                     return;
                 }
-                if y < 0.0 {
-                    self.traverse(Traversal::Select);
-                } else if self.holder.tree.is_traversing() {
-                    self.traverse(Traversal::Enter);
-                }
+                self.traverse(if y < 0.0 {
+                    Traversal::Select
+                } else {
+                    Traversal::Enter
+                });
             }
             SwipePhase::End { .. } => self.select_swipe = None,
         }

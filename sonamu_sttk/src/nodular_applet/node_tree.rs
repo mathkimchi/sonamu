@@ -30,8 +30,9 @@ use std::{cell::Cell, collections::HashMap};
 
 #[derive(Debug, Clone, Copy)]
 enum FocusIndex {
-    Focusing,
-    Inner,
+    /// Focus is at this node: inside its main if it has one (at its root unless the main's own focus is deeper),
+    /// else the node itself (eg a container: the selector)
+    Here,
     Child(usize),
 }
 
@@ -79,7 +80,7 @@ impl Node {
             main,
             parent,
             children: Vec::new(),
-            focus: FocusIndex::Focusing,
+            focus: FocusIndex::Here,
             size: None,
             inner_wl_focus: None,
             collapsed: false,
@@ -588,11 +589,11 @@ impl NodeTree {
         let parent = &mut self.nodes[parent_id];
         parent.children.remove(index);
         parent.focus = match parent.focus {
-            FocusIndex::Child(focused) if focused == index => FocusIndex::Focusing,
+            FocusIndex::Child(focused) if focused == index => FocusIndex::Here,
             FocusIndex::Child(focused) if focused > index => FocusIndex::Child(focused - 1),
             focus => focus,
         };
-        if matches!(parent.focus, FocusIndex::Focusing) {
+        if matches!(parent.focus, FocusIndex::Here) {
             self.selected(parent_id);
         }
         self.damaged = true;
@@ -752,7 +753,7 @@ impl NodeTree {
             _ => children.push(id),
         }
         self.focus_node(id);
-        self.nodes[id].focus = FocusIndex::Focusing;
+        self.nodes[id].focus = FocusIndex::Here;
         self.damaged = true;
         id
     }
@@ -778,11 +779,7 @@ impl NodeTree {
             return;
         };
         self.focus_node(id);
-        self.nodes[id].focus = if inner.is_none() {
-            FocusIndex::Focusing
-        } else {
-            FocusIndex::Inner
-        };
+        self.nodes[id].focus = FocusIndex::Here;
         // so the path inside goes to the woken applet
         self.wake_focused();
         match inner {
@@ -791,12 +788,9 @@ impl NodeTree {
         }
     }
 
-    /// The node itself was selected: its main goes to its root if that's what its row is
-    /// (`Treeview::selected_at_root`, eg a project shows its overview)
+    /// Focus ends at the node itself: its main goes to its root (eg a project shows its overview)
     fn selected(&self, id: NodeId) {
-        if let Some(main) = &self.nodes[id].main
-            && main.get_treeview().selected_at_root
-        {
+        if let Some(main) = &self.nodes[id].main {
             main.send_event(StandardEvent::Focus(WorldTreePath::root()));
         }
     }
@@ -968,15 +962,13 @@ impl NodeTree {
         }
     }
 
-    /// Focuses the node itself, or inside its applet if `inner`
+    /// Focuses the node: where its applet's focus is if `inner`, else at the applet's root
     pub fn focus(&mut self, id: NodeId, inner: bool) {
         self.focus_node(id);
-        self.nodes[id].focus = if inner {
-            FocusIndex::Inner
-        } else {
+        self.nodes[id].focus = FocusIndex::Here;
+        if !inner {
             self.selected(id);
-            FocusIndex::Focusing
-        };
+        }
     }
 
     /// Nodes with a main, which may hold more of the tree inside
@@ -1342,7 +1334,7 @@ impl NodeTree {
     pub fn is_inner(&self, id: NodeId) -> bool {
         self.nodes
             .get(id)
-            .is_some_and(|node| matches!(node.focus, FocusIndex::Inner))
+            .is_some_and(|node| node.main.is_some() && matches!(node.focus, FocusIndex::Here))
     }
 
     /// Closes the node; its parent adopts its children in its place.
@@ -1375,13 +1367,13 @@ impl NodeTree {
             .children
             .splice(index..=index, closed.children.iter().copied());
         parent.focus = match parent.focus {
-            FocusIndex::Child(focused) if focused == index => FocusIndex::Focusing,
+            FocusIndex::Child(focused) if focused == index => FocusIndex::Here,
             FocusIndex::Child(focused) if focused > index => {
                 FocusIndex::Child(focused + closed.children.len() - 1)
             }
             focus => focus,
         };
-        if matches!(parent.focus, FocusIndex::Focusing) {
+        if matches!(parent.focus, FocusIndex::Here) {
             self.selected(parent_id);
         }
 
@@ -1399,12 +1391,8 @@ impl NodeTree {
         id
     }
 
-    /// `None` while a node itself is focused (`Focusing`), since it takes the keys then
     pub fn focused_wl_surface(&self) -> Option<WlSurfaceId> {
         let id = self.focused_node();
-        if matches!(self.nodes[id].focus, FocusIndex::Focusing) {
-            return None;
-        }
         self.wl_surfaces
             .iter()
             .find_map(|(&surface_id, &node_id)| (node_id == id).then_some(surface_id))
@@ -1428,18 +1416,13 @@ impl NodeTree {
 
         let id = self.focused_node();
         let node = &mut self.nodes[id];
-        if let Some(main) = &node.main
-            && matches!(node.focus, FocusIndex::Inner)
-        {
+        if let Some(main) = &node.main {
             main.send_event(event);
             return;
         }
 
-        // the node itself is focused (or it has no main), so this is the treeview selector
+        // a node without a main (eg a container) is focused itself, so this is the treeview selector
         let StandardEvent::UIEvent(ui_event) = event else {
-            if let Some(main) = &node.main {
-                main.send_event(event);
-            }
             return;
         };
         if let Some(request) = standard_keybind_request(&ui_event) {
@@ -1459,31 +1442,21 @@ impl NodeTree {
         // traversal keys are the root's (`traversal`)
         if matches!(key, KeySymbol::Char(' ')) {
             self.toggle_collapsed(id);
-        } else if matches!(key, KeySymbol::Enter) {
-            // confirms the selection: into its main, or a container's first child
-            if node.main.is_some() {
-                node.focus = FocusIndex::Inner;
-                self.damaged = true;
-            } else if let Some(&first) = node.children.first() {
-                self.focus_node(first);
-                self.nodes[first].focus = FocusIndex::Focusing;
-            }
-        } else if let Some(main) = &node.main {
-            // any other key goes into the main
-            node.focus = FocusIndex::Inner;
-            main.send_event(StandardEvent::UIEvent(ui_event));
-            self.damaged = true;
+        } else if matches!(key, KeySymbol::Enter)
+            && let Some(&first) = node.children.first()
+        {
+            // into a container's first child
+            self.focus(first, false);
         }
     }
 
-    /// Whether the node itself is focused at the end of the focus path (the treeview selector),
-    /// rather than inside an applet. Asks the main if focus is inside it (eg a project's own selector).
+    /// Whether a node without a main is focused at the end of the focus path (the treeview selector),
+    /// rather than an applet. Asks the main if focus is in one (eg a project's own selector).
     pub fn is_traversing(&self) -> bool {
-        let node = &self.nodes[self.focused_node()];
-        match (&node.main, node.focus) {
-            (Some(main), FocusIndex::Inner) => main.get_treeview().traversing,
-            _ => true,
-        }
+        self.nodes[self.focused_node()]
+            .main
+            .as_ref()
+            .is_none_or(|main| main.get_treeview().traversing)
     }
 
     /// Sends the pane under the pointer (or the one holding the pointer grab) the event, relative to it.
@@ -1510,7 +1483,7 @@ impl NodeTree {
                     .is_some_and(|node| node.main.is_some())
             {
                 self.focus_node(pane.node);
-                self.nodes[pane.node].focus = FocusIndex::Inner;
+                self.nodes[pane.node].focus = FocusIndex::Here;
             }
         }
         mouse_event.position[0] -= f64::from(pane.rect[0]) + f64::from(pane.border);
@@ -1994,9 +1967,10 @@ impl NodeTree {
             return window;
         };
         let settings = settings::get();
-        let color = match self.nodes[self.focused_node()].focus {
-            FocusIndex::Inner => settings.border.focused,
-            _ => settings.palette.accent,
+        let color = if self.is_inner(self.focused_node()) {
+            settings.border.focused
+        } else {
+            settings.palette.accent
         };
         let radius = if pane.framed { settings.radius } else { 0.0 };
         // at least the usual width, so an unframed pane's focus still shows
@@ -2047,7 +2021,7 @@ impl NodeTree {
                 let node = &self.nodes[pane.node];
                 let border = match node.focus {
                     _ if Some(pane.node) != focused => settings.border.unfocused,
-                    FocusIndex::Inner => settings.border.focused,
+                    FocusIndex::Here if node.main.is_some() => settings.border.focused,
                     _ => settings.palette.accent,
                 };
                 let surface = node.main.as_ref().map_or_else(
@@ -2120,9 +2094,8 @@ impl NodeTree {
     fn get_focus_path_of(&self, id: NodeId) -> WorldTreePath {
         let node = &self.nodes[id];
         match node.focus {
-            FocusIndex::Focusing => WorldTreePath::root(),
             // this node, then the focus inside its main's inner tree
-            FocusIndex::Inner => {
+            FocusIndex::Here => {
                 let mut path = WorldTreePath::root();
                 if let Some(main) = &node.main {
                     path.push_inner(&main.get_treeview().focus);

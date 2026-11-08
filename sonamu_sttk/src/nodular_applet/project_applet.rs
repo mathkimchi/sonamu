@@ -993,11 +993,6 @@ impl StandardApplet for ProjectApplet {
         !self.dissolved && !self.at_root()
     }
 
-    /// Its row is its overview
-    fn selected_at_root(&self) -> bool {
-        !self.dissolved
-    }
-
     fn focus(&mut self, path: &WorldTreePath) {
         if !self.dissolved {
             self.holder.focus(path);

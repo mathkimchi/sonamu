@@ -140,16 +140,17 @@ Scrolling, as built (details in `WORLD_TREE.md`, "Swipes" and "Strips"):
   doesn't carry it); non-active screens don't remember strip scroll.
 
 Zoom-out view, planned (re-confirm each point before building; a first attempt, `e6ba0e8`, was reverted in `ca0933d`):
-- Zoom-out view isn't a compositor state (agreed 2026-11-08): while a node X is selected but not inside, X's tree is
-  drawn as the matrix centered on X; inside X, the normal view. Eg root ⊃ project P ⊃ terminal T, inside T: 4 up
-  selects T (P's tree zoomed out, on T), 4 up selects P (root's tree, on P), 4 down back to P's tree's remembered
-  focus, 4 down inside it. Traversal moves real focus (selection) within the zoomed tree.
+- Focus is the path alone; `Focusing` vs `Inner` is gone (built, `FocusIndex::Here`). Zoom-out isn't a compositor
+  state: focus ending at a holder (at its applet's root; or a container / the root) draws that holder's tree as the
+  matrix, centered on its remembered focus; ending at a leaf, the normal view. Eg root ⊃ project P ⊃ terminal T,
+  `[1, Inner 0]` in T: 4 up → `[1]` (P's tree zoomed, on T), 4 up → `[]` (root's tree, on P), 4 down → `[1]`,
+  4 down → `[1, Inner 0]`. Traversal moves real focus within the zoomed tree.
 - Drawn with scaled live textures (like the project preview), never by resizing clients.
 - Reusable and embeddable: an element drawing a `NodeTree`'s matrix in a rect. Responsibilities as now: the holder
   draws the matrix from its nodes' surfaces (like `NodeTree::preview`); each node draws its own cell (a project's
   is its overview, which embeds the zoom view of its tree beside its existing UI; its preview cards go).
 - Zoom animation later; first an instant switch.
-- 4 fingers up/down stay `Traversal::Select` / Enter, one step per swipe.
+- 4 fingers up pops a path step, 4 down goes to the remembered child (built).
 - Layout (agreed 2026-11-08): the swipe space drawn small. One row per depth down the remembered chain (ancestors
   above, remembered children below), each row its strip at real widths, centered on the view the user would get
   there (so half width chain nodes zigzag). A thin straight box around that column of views. Focus shows only by the
