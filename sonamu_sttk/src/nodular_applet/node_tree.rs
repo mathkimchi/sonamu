@@ -2131,7 +2131,7 @@ impl NodeTree {
     fn zoom_layout(&self, size: DisplayContainerSize) -> Option<ZoomLayout> {
         let view = self.latest_size?;
         let settings = settings::get();
-        let [across, down] = settings.zoom_out.map(|count| count.max(1.0));
+        let [across, down] = settings.zoom_out.map(|count| count.max(1) as f32);
         let (gap, border) = settings.gap_and_border_px();
         let gap = gap.cast_signed();
         let full = [0, 0, view.width.cast_signed(), view.height.cast_signed()];
