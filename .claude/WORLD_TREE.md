@@ -55,7 +55,7 @@ Applets have no traversal of their own.
   Tab / Shift+Tab: next / previous row (wrapping); `w` / `s`: previous / next sibling (shown rows at the same depth
   under the same parent: a node's inner children come before its own, so `s` on the last inner one goes to the first
   outer one); `a` / `0`: parent (past the view root: its parent, widening the view); `d`, `1`-`8`, `9`: first, nth, last child.
-  Alt+Enter: not traversing, like 4 fingers up; traversing, like 4 down.
+  Alt+Enter: like 4 fingers down.
 - Swipes (DRM backend only: `UIEvent::Swipe`, `Begin` / `Update(px)` / `End`), the root's (`handle_swipe`): 4 fingers up
   (`Traversal::Select`) leaves the innermost world: the path up to its last `Inner` step (`[[2], [1, 2]]` →
   `[[2]]`), else `[]`. 4 down (`Enter`) follows `RootNodeApplet::remembered` into the next world as deep as focus was
