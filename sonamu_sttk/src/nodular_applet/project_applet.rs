@@ -536,6 +536,11 @@ impl ProjectApplet {
                 self.handle_overview_click(y);
                 return None;
             }
+            // its tree's zoom-out view
+            UIEvent::Mouse(MouseEvent {
+                kind: MouseEventKind::Scroll { delta, stop, .. },
+                ..
+            }) => self.holder.tree.zoom_scroll(delta, stop),
             // the panes aren't shown
             UIEvent::Mouse(_) => {}
             UIEvent::Key {
@@ -866,6 +871,12 @@ impl StandardApplet for ProjectApplet {
                 })
                 .collect(),
         )
+    }
+
+    fn zoom_focus(&self) -> Option<WorldTreePath> {
+        (!self.dissolved)
+            .then(|| self.holder.tree.zoom_target())
+            .flatten()
     }
 
     fn screen_windows(&self) -> bool {

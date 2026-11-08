@@ -1,6 +1,6 @@
 use crate::{
     creatable_applet::CreatableNodularApplet,
-    nodular_applet::{NodeRequest, NodularAppletInitializer, swipe},
+    nodular_applet::{NodeRequest, NodularAppletInitializer, swipe, traversal::Traversal},
     session,
     standard_keybinds::standard_keybind_request,
     ui,
@@ -137,6 +137,11 @@ pub struct NodeTree {
     swipe: Option<TreeSwipe>,
     /// The node a swipe was passed into (its main's inner world has both ends), to stop it there
     swipe_sent_to: Option<NodeId>,
+
+    /// Where focus last was below the root: the zoom-out view's center (`zoom_center`, #145)
+    last_focus: NodeId,
+    /// How far a scroll in the zoom-out view moved, until it steps (`zoom_scroll`)
+    zoom_scrolled: [f64; 2],
 }
 
 /// A swipe between two nodes of the tree (`StandardEvent::Swipe`), drawn on the active screen
@@ -258,6 +263,8 @@ impl NodeTree {
             active_screen: 0,
             swipe: None,
             swipe_sent_to: None,
+            last_focus: NodeId::default(),
+            zoom_scrolled: [0.0; 2],
         };
         tree.root = insert_root(&mut tree);
         tree.view_root = tree.root;
@@ -762,6 +769,9 @@ impl NodeTree {
 
     /// Points every ancestor's focus down to the node, without changing the node's own focus
     fn focus_node(&mut self, id: NodeId) {
+        if id != self.root {
+            self.last_focus = id;
+        }
         let mut child = id;
         while let Some(parent) = self.nodes[child].parent {
             let index = self.child_index(parent, child);
@@ -1442,7 +1452,15 @@ impl NodeTree {
             return;
         };
         // traversal keys are the root's (`traversal`)
-        if matches!(key, KeySymbol::Char(' ')) {
+        if let Some(zoom_move) = match key {
+            KeySymbol::ArrowKeyLeft => Some(Traversal::Sibling(-1)),
+            KeySymbol::ArrowKeyRight => Some(Traversal::Sibling(1)),
+            KeySymbol::ArrowKeyUp => Some(Traversal::Parent),
+            KeySymbol::ArrowKeyDown => Some(Traversal::Child(0)),
+            _ => None,
+        } {
+            self.move_zoom(zoom_move);
+        } else if matches!(key, KeySymbol::Char(' ')) {
             self.toggle_collapsed(id);
         } else if matches!(key, KeySymbol::Enter)
             && let Some(&first) = node.children.first()
@@ -1465,6 +1483,9 @@ impl NodeTree {
     /// A press focuses the pane's applet.
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
         if self.zoomed_out() {
+            if let MouseEventKind::Scroll { delta, stop, .. } = mouse_event.kind {
+                self.zoom_scroll(delta, stop);
+            }
             return;
         }
         let pane = match self.pointer_grab {
@@ -1901,13 +1922,104 @@ impl NodeTree {
         self.swipe.is_none() && self.nodes[self.focused_node()].main.is_none()
     }
 
-    /// The zoom-out view's rows (in each view's own place), whether each has the center, and the center: the focused
-    /// node's remembered child (else itself)
+    /// The child focus was last under
+    fn remembered_child(&self, id: NodeId) -> Option<NodeId> {
+        let node = &self.nodes[id];
+        node.children
+            .get(node.last_child.min(node.children.len().saturating_sub(1)))
+            .copied()
+    }
+
+    /// The zoom-out view's center: where focus last was below the focused node, else its remembered child
+    fn zoom_center(&self) -> Option<NodeId> {
+        let focused = self.focused_node();
+        if self.nodes.contains_key(self.last_focus)
+            && self.last_focus != focused
+            && self.contains(focused, self.last_focus)
+        {
+            return Some(self.last_focus);
+        }
+        self.remembered_child(focused)
+    }
+
+    /// Moves the zoom-out view's center like 3 fingers (siblings, parent, remembered child), staying below the
+    /// focused node; focus stays
+    pub fn move_zoom(&mut self, traversal: Traversal) {
+        let focused = self.focused_node();
+        let Some(center) = self.zoom_center() else {
+            return;
+        };
+        let target = match traversal {
+            Traversal::Sibling(shift) => self.nodes[center].parent.and_then(|parent| {
+                let index = self.child_index(parent, center).checked_add_signed(shift)?;
+                self.nodes[parent].children.get(index).copied()
+            }),
+            Traversal::Parent => self.nodes[center].parent.filter(|&parent| parent != focused),
+            Traversal::Child(_) => self.remembered_child(center),
+            _ => None,
+        };
+        let Some(target) = target else {
+            return;
+        };
+        self.last_focus = target;
+        // its ancestors remember it, so the rows below follow it
+        let mut child = target;
+        while child != focused
+            && let Some(parent) = self.nodes[child].parent
+        {
+            self.nodes[parent].last_child = self.child_index(parent, child);
+            child = parent;
+        }
+        self.damaged = true;
+    }
+
+    /// A scroll in the zoom-out view: past a step, moves its center one node (sideways: siblings, down: child)
+    pub fn zoom_scroll(&mut self, [x, y]: [f64; 2], stop: [bool; 2]) {
+        const STEP: f64 = 50.0;
+        let [moved_x, moved_y] = &mut self.zoom_scrolled;
+        *moved_x += x;
+        *moved_y += y;
+        let [moved_x, moved_y] = self.zoom_scrolled;
+        let zoom_move = if moved_x.abs() >= STEP {
+            Some(Traversal::Sibling(if moved_x > 0.0 { 1 } else { -1 }))
+        } else if moved_y.abs() >= STEP {
+            Some(if moved_y > 0.0 {
+                Traversal::Child(0)
+            } else {
+                Traversal::Parent
+            })
+        } else {
+            None
+        };
+        if let Some(zoom_move) = zoom_move {
+            self.move_zoom(zoom_move);
+        }
+        if zoom_move.is_some() || stop.contains(&true) {
+            self.zoom_scrolled = [0.0; 2];
+        }
+    }
+
+    /// Where 4 fingers down (Alt+Enter) go from the focus, as a path of this tree: the zoom-out view's center
+    /// if focus is at a node without a main, else as far into the focused main as it says (its `zoom_focus`)
+    pub fn zoom_target(&self) -> Option<WorldTreePath> {
+        let focused = self.focused_node();
+        let Some(main) = &self.nodes[focused].main else {
+            let path = self.path_of(self.zoom_center()?)?;
+            return Some(WorldTreePath(path.0.into_iter().map(Step::Child).collect()));
+        };
+        let inner = main.get_treeview().zoom_focus.clone()?;
+        let mut path = self.get_focus_path();
+        path.push_inner(&inner);
+        Some(path)
+    }
+
+    /// The zoom-out view's rows (in each view's own place), whether each has the center, and the center
+    /// (`zoom_center`, else the focused node)
     fn zoom_rows(&self, area: [i32; 4], gap: i32, border: u32) -> (Vec<(Vec<Pane>, bool)>, NodeId) {
         let unclipped = [i32::MIN / 2, i32::MIN / 2, i32::MAX, i32::MAX];
-        let focused = self.focused_node();
+        let center = self.zoom_center().unwrap_or_else(|| self.focused_node());
         let mut chain = Vec::new();
-        let mut id = focused;
+        let mut id = center;
         while id != self.view_root
             && let Some(parent) = self.nodes[id].parent
         {
@@ -1915,14 +2027,11 @@ impl NodeTree {
             id = parent;
         }
         chain.reverse();
-        let mut id = focused;
-        let mut center = None;
-        while let Some(&child) = self.nodes[id].children.get(self.nodes[id].last_child) {
-            center.get_or_insert(child);
+        let mut id = center;
+        while let Some(child) = self.remembered_child(id) {
             chain.push(child);
             id = child;
         }
-        let center = center.unwrap_or(focused);
 
         // a container shows the same row as the child it shows
         let mut rows: Vec<(Vec<Pane>, bool)> = Vec::new();

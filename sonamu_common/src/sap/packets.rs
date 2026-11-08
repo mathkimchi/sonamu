@@ -82,6 +82,8 @@ pub struct Treeview {
     /// Paths of `tree` whose children are all shown at once: a swipe between them moves the
     /// focus with the fingers rather than the content (#141)
     pub shown_at_once: Vec<WorldTreePath>,
+    /// Where going in (4 fingers down) goes from its focus, in its inner tree; `None`: nowhere (#145)
+    pub zoom_focus: Option<WorldTreePath>,
 }
 impl Treeview {
     /// Focus inside the root, not traversing, not saved
@@ -98,6 +100,7 @@ impl Treeview {
             screen_frames_itself: Vec::new(),
             screen_focus: Vec::new(),
             shown_at_once: Vec::new(),
+            zoom_focus: None,
         }
     }
 }

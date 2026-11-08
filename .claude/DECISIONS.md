@@ -157,7 +157,8 @@ Zoom-out view, planned (re-confirm each point before building; a first attempt, 
   there (so half width chain nodes zigzag). A thin straight box around that column of views. Focus shows only by the
   normal thin border, no extra highlight. Built; the project overview embeds it.
 - Scale: a setting, default 7 × 5 views (uniform scale, the smaller of the two fits; gaps as usual); beyond, cut off.
-- 2 finger scroll and arrow keys traverse it, snapping. TODO: decide what WASD does there.
+- 2 finger scroll and arrow keys traverse it, snapping (built): they move the tree's `last_focus`, the center, not
+  focus; 4 down / Alt+Enter enter it. TODO: decide what WASD does there.
 - The symbolic treeview shows only while Alt is held (Alt+traversal keys). Built.
 - Paths stay `Vec<Step>`: "selected P" and "inside P" are focus, not path, so P's inner root needs no path of its own
   (the old `[[2], []]` stays unrepresentable).

@@ -96,8 +96,6 @@ pub struct RootNodeApplet {
     select_swipe: Option<[f64; 2]>,
     /// The child row each row last had focus under, for swipes into children (#142); not saved
     remembered: HashMap<WorldTreePath, WorldTreePath>,
-    /// Where focus last was in each world, by the path of the node holding it (`[]`: the root's), for 4 fingers down
-    world_focus: HashMap<WorldTreePath, WorldTreePath>,
     /// When Ctrl+Shift+Q was pressed, while it asks to press it again (#139)
     quit_asked: Option<Instant>,
     loop_handle: LoopHandle<'static, Self>,
@@ -429,7 +427,6 @@ impl RootNodeApplet {
             settling: false,
             select_swipe: None,
             remembered: HashMap::new(),
-            world_focus: HashMap::new(),
             quit_asked: None,
             loop_handle: event_loop.clone(),
         };
@@ -781,13 +778,8 @@ impl RootNodeApplet {
                 let world = focus.0.iter().rposition(|step| matches!(step, Step::Inner(_)));
                 (!focus.0.is_empty()).then(|| WorldTreePath(focus.0[..world.unwrap_or(0)].to_vec()))
             }
-            // into the next world, where focus was in it (else its first row); nothing without one
-            Traversal::Enter => match self.world_focus.get(&focus) {
-                Some(path) => Some(path.clone()),
-                None => self.target(&focus, Traversal::Child(0)).filter(|child| {
-                    focus.0.is_empty() || matches!(child.0.last(), Some(Step::Inner(_)))
-                }),
-            },
+            // to the zoom-out view's center; nothing without one
+            Traversal::Enter => self.holder.tree.zoom_target(),
             _ => self.target(&focus, traversal),
         };
         if let Some(target) = target {
@@ -924,10 +916,9 @@ impl RootNodeApplet {
         }
     }
 
-    /// Remembers the child each row on the focus path has focus under (#142), and where it is in each world
+    /// Remembers the child each row on the focus path has focus under (#142)
     fn remember_focus(&mut self) {
         let focus = self.holder.tree.get_focus_path();
-        self.world_focus.extend(traversal::world_focus(&focus));
         for end in 1..=focus.0.len() {
             self.remembered.insert(
                 WorldTreePath(focus.0[..end - 1].to_vec()),

@@ -58,9 +58,9 @@ Applets have no traversal of their own.
   Alt+Enter: like 4 fingers down.
 - Swipes (DRM backend only: `UIEvent::Swipe`, `Begin` / `Update(px)` / `End`), the root's (`handle_swipe`): 4 fingers up
   (`Traversal::Select`) leaves the innermost world: the path up to its last `Inner` step (`[[2], [1, 2]]` →
-  `[[2]]`), else `[]`. 4 down (`Enter`) goes back to where focus last was in the next world
-  (`RootNodeApplet::world_focus`, by holder path, from `traversal::world_focus`); else the first shown child if
-  that is in an inner world (or focus is at `[]`), so nothing without an inner tree; once a swipe (50 px). 3 fingers (#141, #142,
+  `[[2]]`), else `[]`. 4 down (`Enter`) goes to `NodeTree::zoom_target`: the zoom-out view's center if focus
+  is at a node without a main, else into the focused main as far as its `Treeview::zoom_focus` says (a project
+  publishes its tree's `zoom_target`, so it recurses); nothing without an inner tree; once a swipe (50 px). 3 fingers (#141, #142,
   `nodular_applet/swipe.rs`) move along a strip of shown rows, natural direction (content follows the fingers):
   - The axis locks after 10 px. Horizontal (#144): the focused row's siblings (rows under the same parent row, so inner
     then own children); fingers left bring in the next. Vertical: ancestors up to the first row, then down through each
@@ -135,11 +135,14 @@ published treeviews.
   moved by keys jumps. Between siblings both in sight (same panes, in any order) the focus ring stretches between them
   instead (`ring_window`).
 - Zoom-out view (#145, `NodeTree::zoom_window(size)`, embeddable): drawn by `get_window` while focus ends at a node
-  without a main (eg a container root). Rows (`zoom_rows`): one per node down the focused node's chain (ancestors,
+  without a main (eg a container root). Rows (`zoom_rows`): one per node down the center's chain (ancestors,
   then `last_child`s), each `push_panes` with that node focused and `Strips::whole` (every sibling, unclipped);
-  equal rows (containers) merge. The focused node's remembered child is the center: rows stack around its view, one
+  equal rows (containers) merge. The center (`zoom_center`) is `NodeTree::last_focus` (set by `focus_node`) if it is
+  below the focused node, else its remembered child. Arrows (the selector, `move_zoom`) and scroll (`zoom_scroll`,
+  50 px a step; a project's overview passes it on) move the center like 3 fingers and set ancestors' `last_child`;
+  focus stays. Rows stack around the center's view, one
   `Scaled` (7 × 5 views, constants for now) over all of `size`, a thin box around the views' column. Panes don't take
-  the mouse meanwhile. Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
+  the mouse meanwhile (scroll moves the center). Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
   `Scaled` box covers `size` and the panes sit in an equally big container. A project's overview embeds it.
 - Splits (`SplitApplet`, `Layout`) were removed, to be replaced by scrolling (#144). A saved split restores as a
   container of its panes (`NodeTree::restore_subtree`).

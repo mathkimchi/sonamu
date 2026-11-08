@@ -82,6 +82,11 @@ pub trait StandardApplet {
         Vec::new()
     }
 
+    /// Where going in (4 fingers down) goes from its focus, in its inner tree (`Treeview::zoom_focus`, #145)
+    fn zoom_focus(&self) -> Option<WorldTreePath> {
+        None
+    }
+
     /// The applet's inner tree; its node shows it as is.
     fn get_treeview(&self) -> WorldTree<String>;
 
@@ -599,6 +604,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         screen_frames_itself: state.applet.screen_frames_itself(),
                         screen_focus: state.applet.screen_focus(),
                         shown_at_once: state.applet.shown_at_once(),
+                        zoom_focus: state.applet.zoom_focus(),
                     },
                     &state.request_sender,
                 );
