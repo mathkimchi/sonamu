@@ -9,5 +9,5 @@ if pkill -INT -x wf-recorder; then
 else
   mkdir -p ~/Videos
   notify "Recording"
-  exec wf-recorder -f ~/Videos/rec-$(date +%F-%H%M%S).mp4
+  exec wf-recorder -f ~/Videos/Recordings/$(date +%F-%H%M%S).mp4
 fi
