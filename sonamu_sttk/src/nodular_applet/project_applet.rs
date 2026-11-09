@@ -528,11 +528,11 @@ impl ProjectApplet {
                 kind:
                     MouseEventKind::Button {
                         button: BTN_LEFT,
-                        pressed: true,
+                        pressed,
                     },
                 ..
             }) => {
-                self.handle_overview_click(position);
+                self.handle_overview_button(position, pressed);
                 return None;
             }
             // its tree's zoom-out view
@@ -561,15 +561,21 @@ impl ProjectApplet {
     }
 
     /// Damages what it changed
-    fn handle_overview_click(&mut self, [x, y]: [f64; 2]) {
+    /// A left press or release; releases are only the zoom-out view's (eg the end of a drag there)
+    fn handle_overview_button(&mut self, [x, y]: [f64; 2], pressed: bool) {
         if let Some(top) = self.zoom_top()
-            && y >= f64::from(top)
+            && (y >= f64::from(top) || !pressed)
         {
             let size = DisplayContainerSize::new(
                 self.size.width,
                 self.size.height.saturating_sub(top.to_px()),
             );
-            self.holder.tree.zoom_click(size, [x, y - f64::from(top)]);
+            self.holder
+                .tree
+                .zoom_button(size, [x, y - f64::from(top)], pressed);
+            return;
+        }
+        if !pressed {
             return;
         }
         let root = self.holder.tree.root();

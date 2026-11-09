@@ -15,7 +15,7 @@
   before the name. Saved as `SavedTree::icon` on the inner root (like `label`), and the treeview's `icon` reads it
   from the published `project` spawner's `inner`.
 - Zoom-out view (#145, replaced #82's preview cards): below the rows, `NodeTree::zoom_window` of its tree fills the
-  rest (`zoom_top`), live since a child's `Damage` damages the project's window. Clicks there go to `NodeTree::zoom_click`. Hidden while
+  rest (`zoom_top`), live since a child's `Damage` damages the project's window. Left presses and releases there go to `NodeTree::zoom_button`. Hidden while
   setting the directory or icon (their options take those rows).
 - `UIElement::Scaled(f)` (sonamu_ui): its children are laid out at full size, then drawn `f` times as big from its
   top-left (rects incl. border and radius, text via glyphon's `TextArea::scale`, char grids, textures and wl

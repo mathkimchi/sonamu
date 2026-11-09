@@ -144,6 +144,8 @@ pub struct NodeTree {
     last_focus: NodeId,
     /// How far a scroll in the zoom-out view moved, until it steps (`zoom_scroll`)
     zoom_scrolled: [f64; 2],
+    /// The node a press in the zoom-out view was on, and where, until its release (`zoom_button`)
+    zoom_press: Option<(NodeId, [f64; 2])>,
     /// The zoom-out view growing out of, or back into, a node's view
     zoom_anim: Option<ZoomAnim>,
     /// Whether focus was at a node without a main (zoomed out) at the last `update_layout`; `None` before it
@@ -301,6 +303,7 @@ impl NodeTree {
             swipe_sent_to: None,
             last_focus: NodeId::default(),
             zoom_scrolled: [0.0; 2],
+            zoom_press: None,
             zoom_anim: None,
             was_zoomed: None,
             zoom_pan: None,
@@ -1494,6 +1497,7 @@ impl NodeTree {
         // releases, and modifiers on their own, stay in the selector
         let UIEvent::Key {
             symbol: Some(key),
+            modifiers,
             pressed: true,
             ..
         } = ui_event
@@ -1501,7 +1505,15 @@ impl NodeTree {
             return;
         };
         // traversal keys are the root's (`traversal`)
-        if let Some(zoom_move) = match key {
+        if modifiers.shift
+            && let Some(shift) = match key {
+                KeySymbol::ArrowKeyLeft => Some(-1),
+                KeySymbol::ArrowKeyRight => Some(1),
+                _ => None,
+            }
+        {
+            self.swap_zoom_center(shift);
+        } else if let Some(zoom_move) = match key {
             KeySymbol::ArrowKeyLeft => Some(Traversal::Sibling(-1)),
             KeySymbol::ArrowKeyRight => Some(Traversal::Sibling(1)),
             KeySymbol::ArrowKeyUp => Some(Traversal::Parent),
@@ -1536,10 +1548,10 @@ impl NodeTree {
                 MouseEventKind::Scroll { delta, stop, .. } => self.zoom_scroll(delta, stop),
                 MouseEventKind::Button {
                     button: BTN_LEFT,
-                    pressed: true,
+                    pressed,
                 } => {
                     if let Some(size) = self.latest_size {
-                        self.zoom_click(size, mouse_event.position);
+                        self.zoom_button(size, mouse_event.position, pressed);
                     }
                 }
                 _ => {}
@@ -2072,6 +2084,14 @@ impl NodeTree {
         }
     }
 
+    /// Swaps the zoom-out view's center with a sibling; it stays the center
+    fn swap_zoom_center(&mut self, shift: isize) {
+        if let Some(center) = self.zoom_center() {
+            self.swap_sibling(center, shift);
+            self.set_zoom_center(center);
+        }
+    }
+
     /// Makes the node (below the focused one) the zoom-out view's center; its ancestors remember it, so the rows
     /// below follow it
     fn set_zoom_center(&mut self, id: NodeId) {
@@ -2324,29 +2344,46 @@ impl NodeTree {
         })
     }
 
-    /// A click at `position` of the zoom-out view drawn at `size`: on the center, focuses it (going in); on
-    /// another node, makes that the center
-    pub fn zoom_click(&mut self, size: DisplayContainerSize, [x, y]: [f64; 2]) {
-        let Some(ZoomLayout {
-            panes,
-            center,
-            scale,
-            ..
-        }) = self.zoom_layout(size, 1.0)
-        else {
-            return;
-        };
+    /// The node under `position` of the zoom-out view drawn at `size`
+    fn zoom_node_at(&self, size: DisplayContainerSize, [x, y]: [f64; 2]) -> Option<NodeId> {
+        let ZoomLayout { panes, scale, .. } = self.zoom_layout(size, 1.0)?;
         let scale = f64::from(scale);
-        let Some(pane) = panes
+        panes
             .iter()
             .find(|pane| pane.contains([x / scale, y / scale]))
-        else {
+            .map(|pane| pane.node)
+    }
+
+    /// A left press or release at `position` of the zoom-out view drawn at `size`. A click on the center focuses it
+    /// (going in), on another node makes that the center. A drag onto a sibling moves the node to its place, as
+    /// the center.
+    pub fn zoom_button(&mut self, size: DisplayContainerSize, position: [f64; 2], pressed: bool) {
+        const DRAG_THRESHOLD: f64 = 12.0;
+        if pressed {
+            self.zoom_press = self.zoom_node_at(size, position).map(|id| (id, position));
+            return;
+        }
+        let Some((id, from)) = self.zoom_press.take() else {
             return;
         };
-        if pane.node == center {
-            self.focus(center, false);
+        if !self.nodes.contains_key(id) {
+            return;
+        }
+        if (position[0] - from[0]).hypot(position[1] - from[1]) > DRAG_THRESHOLD {
+            if let Some(target) = self.zoom_node_at(size, position)
+                && let Some(parent) = self.nodes[id].parent
+                && self.nodes[target].parent == Some(parent)
+            {
+                let [index, to] = [id, target].map(|node| self.child_index(parent, node));
+                for _ in 0..index.abs_diff(to) {
+                    self.swap_sibling(id, if to > index { 1 } else { -1 });
+                }
+                self.set_zoom_center(id);
+            }
+        } else if Some(id) == self.zoom_center() {
+            self.focus(id, false);
         } else {
-            self.set_zoom_center(pane.node);
+            self.set_zoom_center(id);
         }
     }
 

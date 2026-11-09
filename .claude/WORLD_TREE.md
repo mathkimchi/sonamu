@@ -140,10 +140,10 @@ published treeviews.
   equal rows (containers) merge. The center (`zoom_center`) is `NodeTree::last_focus` (set by `focus_node`) if it is
   below the focused node, else its remembered child. Arrows (the selector, `move_zoom`) and scroll (`zoom_scroll`,
   50 px a step; a project's overview passes it on) move the center like 3 fingers and set ancestors' `last_child`;
-  focus stays. Rows stack around the center's view, one
+  focus stays; Shift+Left/Right swap the center with a sibling (`swap_zoom_center`). Rows stack around the center's view, one
   `Scaled` (`zoom_out` setting, default 4 × 3 views) over all of `size`, a thin box around the views' column. Panes don't take
-  the mouse meanwhile: scroll moves the center, a click (`zoom_click`, hit-testing `zoom_layout`) makes a node the
-  center, or focuses it if it already is. Enter in the selector also focuses the center. Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
+  the mouse meanwhile: scroll moves the center, a click (`zoom_button`, on release, hit-testing `zoom_layout`) makes a node the
+  center, or focuses it if it already is; a drag (past 12 px) onto a sibling moves the node there (adjacent swaps), as the center. Enter in the selector also focuses the center. Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
   `Scaled` box covers `size` and the panes sit in an equally big container. A project's overview embeds it.
   Animated (`ZoomAnim`, `update_zoom_anim` in `update_layout`): when focus goes to or from a node without a main, the
   view springs (`swipe::spring_progress`, the swipe settle spring) between the center's view filling `size` (scale 1)
