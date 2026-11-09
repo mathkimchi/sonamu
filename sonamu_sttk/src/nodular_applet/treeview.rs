@@ -53,7 +53,8 @@ const HOVER_BG: Color = with_opacity(Color([0x26, 0x2A, 0x32, 0]));
 const FOCUS_BG: Color = with_opacity(Color([0x1C, 0x3D, 0x2E, 0]));
 const GUIDE: Color = with_opacity(Color([0x3B, 0x40, 0x49, 0]));
 const DRAGGED_TEXT: Color = Color([0x55, 0x5A, 0x64, 0]);
-const DROP_TARGET: Color = with_opacity(Color::CYAN);
+/// Also for the zoom-out view's drop line
+pub const DROP_TARGET: Color = with_opacity(Color::CYAN);
 /// The share of a row's height at its top and at its bottom that drops between siblings
 const EDGE_ZONE: f32 = 0.25;
 const INSERT_LINE_HEIGHT: f32 = 3.0;

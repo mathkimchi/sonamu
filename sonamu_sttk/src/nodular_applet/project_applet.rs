@@ -540,6 +540,16 @@ impl ProjectApplet {
                 kind: MouseEventKind::Scroll { delta, stop, .. },
                 ..
             }) => self.holder.tree.zoom_scroll(delta, stop),
+            // a drag in its tree's zoom-out view
+            UIEvent::Mouse(MouseEvent {
+                position: [x, y],
+                kind: MouseEventKind::Motion,
+                ..
+            }) => {
+                if let Some(top) = self.zoom_top() {
+                    self.holder.tree.zoom_motion([x, y - f64::from(top)]);
+                }
+            }
             // the panes aren't shown
             UIEvent::Mouse(_) => {}
             UIEvent::Key {

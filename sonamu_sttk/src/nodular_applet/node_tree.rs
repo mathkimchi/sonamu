@@ -1,7 +1,7 @@
 use crate::{
     creatable_applet::CreatableNodularApplet,
     nodular_applet::{
-        NodeRequest, NodularAppletInitializer, swipe, traversal::Traversal, treeview::BTN_LEFT,
+        NodeRequest, NodularAppletInitializer, swipe, traversal::Traversal, treeview::{BTN_LEFT, DROP_TARGET},
     },
     session,
     standard_keybinds::standard_keybind_request,
@@ -144,8 +144,9 @@ pub struct NodeTree {
     last_focus: NodeId,
     /// How far a scroll in the zoom-out view moved, until it steps (`zoom_scroll`)
     zoom_scrolled: [f64; 2],
-    /// The node a press in the zoom-out view was on, and where, until its release (`zoom_button`)
-    zoom_press: Option<(NodeId, [f64; 2])>,
+    /// The node a press in the zoom-out view was on, where, and where the pointer is now, until its release
+    /// (`zoom_button`)
+    zoom_press: Option<(NodeId, [f64; 2], [f64; 2])>,
     /// The zoom-out view growing out of, or back into, a node's view
     zoom_anim: Option<ZoomAnim>,
     /// Whether focus was at a node without a main (zoomed out) at the last `update_layout`; `None` before it
@@ -1554,6 +1555,7 @@ impl NodeTree {
                         self.zoom_button(size, mouse_event.position, pressed);
                     }
                 }
+                MouseEventKind::Motion => self.zoom_motion(mouse_event.position),
                 _ => {}
             }
             return;
@@ -2248,6 +2250,7 @@ impl NodeTree {
         let border = settings.border.unfocused;
         // above each pane once zoomed out, unscaled, apart from their neighbours'
         const INSET: f32 = 4.0;
+        const DROP_LINE: f32 = 3.0;
         let titles = self
             .zoom_progress()
             .is_none()
@@ -2265,6 +2268,15 @@ impl NodeTree {
             })
             .into_iter()
             .flatten();
+        // a drag's drop: a line on the side of the sibling it goes to
+        let drop_line = self.zoom_drop(size).and_then(|(id, target)| {
+            let parent = self.nodes[id].parent?;
+            let after = self.child_index(parent, target) > self.child_index(parent, id);
+            let pane = panes.iter().find(|pane| pane.node == target)?;
+            let [x, y, width, height] = pane.rect.map(|value| value as f32 * scale);
+            let x = if after { x + width + 1.0 } else { x - 1.0 - DROP_LINE };
+            Some(ui::rect(DROP_TARGET, [x, y], [DROP_LINE, height]))
+        });
         let size_style = Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]);
         // a box: nothing is drawn outside `size`
         let scaled = UITree::new_styled(
@@ -2290,7 +2302,13 @@ impl NodeTree {
                 ),
             ],
         );
-        UITree::new_container_styled(size_style, std::iter::once(scaled).chain(titles).collect())
+        UITree::new_container_styled(
+            size_style,
+            std::iter::once(scaled)
+                .chain(titles)
+                .chain(drop_line)
+                .collect(),
+        )
     }
 
     /// Where `zoom_window(size)` draws everything, before scaling, `zoomed` of the way (0 to 1) from the center's
@@ -2354,36 +2372,60 @@ impl NodeTree {
             .map(|pane| pane.node)
     }
 
+    /// Whether the pointer moved far enough from `from` for a drag
+    fn zoom_dragged(from: [f64; 2], at: [f64; 2]) -> bool {
+        const DRAG_THRESHOLD: f64 = 12.0;
+        (at[0] - from[0]).hypot(at[1] - from[1]) > DRAG_THRESHOLD
+    }
+
+    /// The dragged node and the sibling it is over, during a drag in the zoom-out view drawn at `size`
+    fn zoom_drop(&self, size: DisplayContainerSize) -> Option<(NodeId, NodeId)> {
+        let (id, from, at) = self.zoom_press?;
+        if !self.nodes.contains_key(id) || !Self::zoom_dragged(from, at) {
+            return None;
+        }
+        let target = self.zoom_node_at(size, at)?;
+        let parent = self.nodes[id].parent?;
+        (target != id && self.nodes[target].parent == Some(parent)).then_some((id, target))
+    }
+
+    /// The pointer moved in the zoom-out view; a drag there shows where it drops
+    pub fn zoom_motion(&mut self, position: [f64; 2]) {
+        if let Some((_, _, at)) = &mut self.zoom_press {
+            *at = position;
+            self.damaged = true;
+        }
+    }
+
     /// A left press or release at `position` of the zoom-out view drawn at `size`. A click on the center focuses it
     /// (going in), on another node makes that the center. A drag onto a sibling moves the node to its place, as
     /// the center.
     pub fn zoom_button(&mut self, size: DisplayContainerSize, position: [f64; 2], pressed: bool) {
-        const DRAG_THRESHOLD: f64 = 12.0;
         if pressed {
-            self.zoom_press = self.zoom_node_at(size, position).map(|id| (id, position));
+            self.zoom_press = self
+                .zoom_node_at(size, position)
+                .map(|id| (id, position, position));
             return;
         }
-        let Some((id, from)) = self.zoom_press.take() else {
+        self.zoom_motion(position);
+        let drop = self.zoom_drop(size);
+        let Some((id, from, _)) = self.zoom_press.take() else {
             return;
         };
-        if !self.nodes.contains_key(id) {
-            return;
-        }
-        if (position[0] - from[0]).hypot(position[1] - from[1]) > DRAG_THRESHOLD {
-            if let Some(target) = self.zoom_node_at(size, position)
-                && let Some(parent) = self.nodes[id].parent
-                && self.nodes[target].parent == Some(parent)
-            {
-                let [index, to] = [id, target].map(|node| self.child_index(parent, node));
-                for _ in 0..index.abs_diff(to) {
-                    self.swap_sibling(id, if to > index { 1 } else { -1 });
-                }
+        if let Some((id, target)) = drop {
+            let parent = self.nodes[id].parent.expect("a sibling's");
+            let [index, to] = [id, target].map(|node| self.child_index(parent, node));
+            for _ in 0..index.abs_diff(to) {
+                self.swap_sibling(id, if to > index { 1 } else { -1 });
+            }
+            self.set_zoom_center(id);
+        } else if self.nodes.contains_key(id) && !Self::zoom_dragged(from, position) {
+            // a click
+            if Some(id) == self.zoom_center() {
+                self.focus(id, false);
+            } else {
                 self.set_zoom_center(id);
             }
-        } else if Some(id) == self.zoom_center() {
-            self.focus(id, false);
-        } else {
-            self.set_zoom_center(id);
         }
     }
 
