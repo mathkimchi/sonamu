@@ -1042,7 +1042,11 @@ impl StandardApplet for ProjectApplet {
         contents.label = Some(self.name.clone());
         contents.directory.clone_from(&self.holder.directory);
         contents.icon.clone_from(&self.icon);
-        Some(session::saved_with_inner(Self::SPAWNER, Vec::new(), contents))
+        Some(session::saved_with_inner(
+            Self::SPAWNER,
+            Vec::new(),
+            contents,
+        ))
     }
 
     fn awaiting_wl(&self) -> Vec<AwaitedWl> {

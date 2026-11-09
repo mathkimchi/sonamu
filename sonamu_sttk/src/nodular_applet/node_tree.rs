@@ -1306,7 +1306,8 @@ impl NodeTree {
         };
         let published = main.get_treeview();
         let label = published.tree.get_root_value();
-        icon(published.saved.as_ref()).map_or_else(|| label.clone(), |icon| format!("{icon} {label}"))
+        icon(published.saved.as_ref())
+            .map_or_else(|| label.clone(), |icon| format!("{icon} {label}"))
     }
 
     /// Starts the focused node's wl client if it is hibernating
@@ -2032,10 +2033,11 @@ impl NodeTree {
 
     /// How far off its center the zoom-out view still is while panning to it (like `zoom_pan`)
     fn zoom_pan_offset(&self) -> ([f32; 2], f32) {
-        self.zoom_pan.map_or(([0.0; 2], 0.0), |(started, offset, rows)| {
-            let left = 1.0 - swipe::spring_progress(started).unwrap_or(1.0);
-            (offset.map(|value| value * left), rows * left)
-        })
+        self.zoom_pan
+            .map_or(([0.0; 2], 0.0), |(started, offset, rows)| {
+                let left = 1.0 - swipe::spring_progress(started).unwrap_or(1.0);
+                (offset.map(|value| value * left), rows * left)
+            })
     }
 
     /// While the zoom-out view springs: how zoomed out it is, 0 (its center's view) to 1; holders redraw meanwhile
@@ -2077,7 +2079,9 @@ impl NodeTree {
                 let index = self.child_index(parent, center).checked_add_signed(shift)?;
                 self.nodes[parent].children.get(index).copied()
             }),
-            Traversal::Parent => self.nodes[center].parent.filter(|&parent| parent != focused),
+            Traversal::Parent => self.nodes[center]
+                .parent
+                .filter(|&parent| parent != focused),
             Traversal::Child(_) => self.remembered_child(center),
             _ => None,
         };
@@ -2168,7 +2172,10 @@ impl NodeTree {
         let view = self.latest_size?;
         let (gap, border) = settings::get().gap_and_border_px();
         let gap = gap.cast_signed();
-        let area = grow([0, 0, view.width.cast_signed(), view.height.cast_signed()], -gap);
+        let area = grow(
+            [0, 0, view.width.cast_signed(), view.height.cast_signed()],
+            -gap,
+        );
         let unclipped = [i32::MIN / 2, i32::MIN / 2, i32::MAX, i32::MAX];
         // zooming in, on the node going in
         let center = match self.zoom_anim {
@@ -2206,7 +2213,9 @@ impl NodeTree {
                 pane.border = border;
             }
             let same = |(row, _): &(Vec<Pane>, bool)| {
-                row.iter().map(|pane| pane.node).eq(panes.iter().map(|pane| pane.node))
+                row.iter()
+                    .map(|pane| pane.node)
+                    .eq(panes.iter().map(|pane| pane.node))
             };
             match rows.last_mut() {
                 Some(last) if same(last) => last.1 |= id == center,
@@ -2229,7 +2238,10 @@ impl NodeTree {
         } = self.zoom_rows()?;
         rows.iter().enumerate().find_map(|(index, panes)| {
             let pane = panes.iter().find(|pane| pane.node == id)?;
-            Some(([pane.rect[0], pane.rect[1]], index as i32 - center_row as i32))
+            Some((
+                [pane.rect[0], pane.rect[1]],
+                index as i32 - center_row as i32,
+            ))
         })
     }
 
@@ -2274,8 +2286,16 @@ impl NodeTree {
             let after = self.child_index(parent, target) > self.child_index(parent, id);
             let pane = panes.iter().find(|pane| pane.node == target)?;
             let [x, y, width, height] = pane.rect.map(|value| value as f32 * scale);
-            let x = if after { x + width + 1.0 } else { x - 1.0 - DROP_LINE };
-            Some(ui::rect(settings.palette.accent, [x, y], [DROP_LINE, height]))
+            let x = if after {
+                x + width + 1.0
+            } else {
+                x - 1.0 - DROP_LINE
+            };
+            Some(ui::rect(
+                settings.palette.accent,
+                [x, y],
+                [DROP_LINE, height],
+            ))
         });
         let size_style = Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]);
         // a box: nothing is drawn outside `size`
@@ -2332,18 +2352,26 @@ impl NodeTree {
         // the center view's middle at the middle of `size`, from its top left; off by the pan left
         let (pan, pan_rows) = self.zoom_pan_offset();
         let pan = [pan[0], pan[1] + pan_rows * step];
-        let [x, y] = [[size.width as f32, width, pan[0]], [size.height as f32, height, pan[1]]]
-            .map(|[size, length, pan]| {
-                ((size / full_scale / 2.0 - length / 2.0) * full_scale * zoomed / scale + pan).round()
-                    as i32
-            });
+        let [x, y] = [
+            [size.width as f32, width, pan[0]],
+            [size.height as f32, height, pan[1]],
+        ]
+        .map(|[size, length, pan]| {
+            ((size / full_scale / 2.0 - length / 2.0) * full_scale * zoomed / scale + pan).round()
+                as i32
+        });
         let panes = rows
             .iter()
             .enumerate()
             .flat_map(|(index, panes)| {
                 let y = y + ((index as f32 - center_row as f32) * step).round() as i32;
                 panes.iter().map(move |pane| {
-                    let rect = [pane.rect[0] + x, pane.rect[1] + y, pane.rect[2], pane.rect[3]];
+                    let rect = [
+                        pane.rect[0] + x,
+                        pane.rect[1] + y,
+                        pane.rect[2],
+                        pane.rect[3],
+                    ];
                     Pane {
                         rect,
                         clip: rect,

@@ -779,7 +779,10 @@ impl RootNodeApplet {
         let target = match traversal {
             // out of its world, to the node holding it (`[[2], [1, 2]]` to `[[2]]`), or to the root
             Traversal::Select => {
-                let world = focus.0.iter().rposition(|step| matches!(step, Step::Inner(_)));
+                let world = focus
+                    .0
+                    .iter()
+                    .rposition(|step| matches!(step, Step::Inner(_)));
                 (!focus.0.is_empty()).then(|| WorldTreePath(focus.0[..world.unwrap_or(0)].to_vec()))
             }
             // to the zoom-out view's center; nothing without one

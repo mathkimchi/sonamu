@@ -132,7 +132,6 @@ pub fn target(
 #[cfg(test)]
 mod tests {
     use super::{Traversal, target};
-    use std::collections::HashMap;
     use crate::nodular_applet::treeview::treeview_rows;
     use sonamu_common::utils::tree::{
         recursive_tree::RecursiveTreeNode,
@@ -141,6 +140,7 @@ mod tests {
             WorldTree, WorldTreePath,
         },
     };
+    use std::collections::HashMap;
 
     fn leaf(label: &str) -> RecursiveTreeNode<WorldTree<String>> {
         RecursiveTreeNode::from_value(WorldTree::Base(label.to_string()))
@@ -201,7 +201,10 @@ mod tests {
             target(&rows, i2, Traversal::Next, &HashMap::new()),
             path(&[Child(0), Child(0)])
         );
-        assert_eq!(target(&rows, c1, Traversal::Parent, &HashMap::new()), path(&[Child(0)]));
+        assert_eq!(
+            target(&rows, c1, Traversal::Parent, &HashMap::new()),
+            path(&[Child(0)])
+        );
         assert_eq!(
             target(&rows, Some(1), Traversal::Child(0), &HashMap::new()),
             path(&[Child(0), Inner(0)])
@@ -223,8 +226,14 @@ mod tests {
             target(&rows, Some(1), Traversal::LastChild, &HashMap::new()),
             path(&[Child(0), Child(1)])
         );
-        assert_eq!(target(&rows, Some(5), Traversal::Next, &HashMap::new()), path(&[]));
+        assert_eq!(
+            target(&rows, Some(5), Traversal::Next, &HashMap::new()),
+            path(&[])
+        );
         // the last sibling stays
-        assert_eq!(target(&rows, Some(5), Traversal::Sibling(1), &HashMap::new()), None);
+        assert_eq!(
+            target(&rows, Some(5), Traversal::Sibling(1), &HashMap::new()),
+            None
+        );
     }
 }
