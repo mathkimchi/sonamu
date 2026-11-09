@@ -17,7 +17,8 @@ use smithay::{
         shell::{
             wlr_layer::{
                 Anchor, ExclusiveZone, KeyboardInteractivity, Layer, LayerSurface,
-                LayerSurfaceCachedState, WlrLayerShellHandler, WlrLayerShellState,
+                LayerSurfaceCachedState, LayerSurfaceData, WlrLayerShellHandler,
+                WlrLayerShellState,
             },
             xdg::PopupSurface,
         },
@@ -36,6 +37,8 @@ pub(super) struct LayerPlacement {
     layer: Layer,
     /// In logical units, in the output
     rect: Rectangle<i32, Logical>,
+    /// Its state when placed
+    state: LayerSurfaceCachedState,
 }
 
 /// The edge that the exclusive zone is measured from, if the anchor allows one
@@ -173,6 +176,7 @@ impl SmithayState {
                     surface: surface.clone(),
                     layer,
                     rect: Rectangle::new(Point::from((x, y)), Size::from((w, h))),
+                    state,
                 });
             }
         }
@@ -318,17 +322,45 @@ impl SmithayState {
 }
 
 impl AppletRunner {
-    /// Called when a layer surface commits: the first commit makes it placed, and its state may have changed
+    /// Called when a layer surface commits: the first commit (or the first after unmapping) makes it placed,
+    /// unmapping unplaces it, and its state may have changed
     pub(super) fn layer_surface_committed(&mut self, surface: &WlSurface) {
         let state = &mut self.smithay_state;
         if !state.is_layer_surface(surface) {
             return;
         }
-        if !state
+        if let Some(index) = state
             .layer_surfaces
             .iter()
-            .any(|layer_surface| layer_surface.wl_surface() == surface)
+            .position(|layer_surface| layer_surface.wl_surface() == surface)
         {
+            // a null buffer unmaps it, so it isn't placed (or configured) until its next commit.
+            // Smithay also resets its state (size 0, no anchors), but wlroots keeps it and clients
+            // like wshowkeys rely on that, committing again without setting it.
+            let unmapped = with_states(surface, |states| {
+                let data = states.data_map.get::<LayerSurfaceData>().unwrap();
+                if data.lock().unwrap().initial_configure_sent {
+                    return false;
+                }
+                if let Some(placement) = state
+                    .layer_placements
+                    .iter()
+                    .find(|placement| placement.surface.wl_surface() == surface)
+                {
+                    *states
+                        .cached_state
+                        .get::<LayerSurfaceCachedState>()
+                        .pending() = LayerSurfaceCachedState {
+                        last_acked: None,
+                        ..placement.state
+                    };
+                }
+                true
+            });
+            if unmapped {
+                state.layer_surfaces.remove(index);
+            }
+        } else {
             let Some(layer_surface) = state
                 .layer_shell_state
                 .layer_surfaces()
