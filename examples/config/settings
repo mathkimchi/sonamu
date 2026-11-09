@@ -60,6 +60,7 @@ print(json.dumps({
         # {"key": 99, "command": "grim -g \"$(slurp)\" - | wl-copy"},  # screenshot and copy, this is the Prt Sc key
         # {"key": 99, "command": "grim - | swappy -f -"},  # screenshot and edit with swappy, this is the Prt Sc key
         {"key": 99, "command": "grim"},  # swappy is broken bro
+        {"mods": ["ctrl", "logo"], "key": "r", "command": str(Path(__file__).parent / "toggle-record")},
     ],
     # programs restored running in their terminal; for others, the restored terminal asks first
     "restore_programs": ["hx", {"program": "claude", "args": ["--continue"]}, "typst"],

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Toggles recording the screen to ~/Videos with wf-recorder (Ctrl+Super+R in settings)
+notify() {
+  busctl --user call org.freedesktop.Notifications /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify susssasa{sv}i sonamu 0 "" "$1" "" 0 0 3000 >/dev/null
+}
+if pkill -INT -x wf-recorder; then
+  notify "Recording saved"
+else
+  mkdir -p ~/Videos
+  notify "Recording"
+  exec wf-recorder -f ~/Videos/rec-$(date +%F-%H%M%S).mp4
+fi
