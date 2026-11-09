@@ -1,7 +1,7 @@
 use crate::{
     creatable_applet::CreatableNodularApplet,
     nodular_applet::{
-        NodeRequest, NodularAppletInitializer, swipe, traversal::Traversal, treeview::{BTN_LEFT, DROP_TARGET},
+        NodeRequest, NodularAppletInitializer, swipe, traversal::Traversal, treeview::BTN_LEFT,
     },
     session,
     standard_keybinds::standard_keybind_request,
@@ -2275,7 +2275,7 @@ impl NodeTree {
             let pane = panes.iter().find(|pane| pane.node == target)?;
             let [x, y, width, height] = pane.rect.map(|value| value as f32 * scale);
             let x = if after { x + width + 1.0 } else { x - 1.0 - DROP_LINE };
-            Some(ui::rect(DROP_TARGET, [x, y], [DROP_LINE, height]))
+            Some(ui::rect(settings.palette.accent, [x, y], [DROP_LINE, height]))
         });
         let size_style = Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]);
         // a box: nothing is drawn outside `size`
