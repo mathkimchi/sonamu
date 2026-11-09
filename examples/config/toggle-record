@@ -1,13 +1,15 @@
 #!/bin/sh
-# Toggles recording the screen to ~/Videos with wf-recorder (Ctrl+Super+R in settings)
+# Toggles recording the screen to ~/Videos/Recordings (Ctrl+Super+R in settings).
+# gpu-screen-recorder captures via KMS: on NixOS, `programs.gpu-screen-recorder.enable = true;`
 notify() {
   busctl --user call org.freedesktop.Notifications /org/freedesktop/Notifications \
     org.freedesktop.Notifications Notify susssasa{sv}i sonamu 0 "" "$1" "" 0 0 3000 >/dev/null
 }
-if pkill -INT -x wf-recorder; then
+# its process name, cut to 15 chars
+if pkill -INT -x gpu-screen-reco; then
   notify "Recording saved"
 else
-  mkdir -p ~/Videos
+  mkdir -p ~/Videos/Recordings
   notify "Recording"
-  exec wf-recorder -f ~/Videos/Recordings/$(date +%F-%H%M%S).mp4
+  exec gpu-screen-recorder -w screen -f 60 -fallback-cpu-encoding yes -o ~/Videos/Recordings/$(date +%F-%H%M%S).mp4
 fi
