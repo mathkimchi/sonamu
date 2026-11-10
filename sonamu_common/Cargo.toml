@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 sonamu_ui = { workspace = true }
 sonamu_sync = { workspace = true }
+sonamu_command = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

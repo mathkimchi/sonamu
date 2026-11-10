@@ -1,0 +1,14 @@
+[package]
+name = "sonamu_script"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+sonamu_command = { workspace = true }
+mlua = { version = "^0.12", features = ["luau", "vendored"] }
+
+[dev-dependencies]
+calloop = { workspace = true }

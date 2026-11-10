@@ -3,14 +3,15 @@
 use crate::{
     nodular_applet::{
         AppletContext, AppletSpawner, AppletSpawnerTrait, NodeRequest, NodularAppletInitializer,
-        StandardApplet, project_applet::ProjectApplet, treeview::with_opacity,
+        StandardApplet, treeview::with_opacity,
     },
     standard_keybinds::handle_standard_keybinds,
 };
 use sonamu_common::{
+    command::{self, CommandResult, Value},
     sap::{packets::StandardEvent, session::SavedWl},
-    settings,
 };
+use sonamu_script::EvalHandle;
 use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
@@ -18,36 +19,6 @@ use sonamu_ui::{
     ui_event::{KeyModifiers, KeySymbol, MouseEventKind, UIEvent},
 };
 use std::{fmt::Write as _, path::PathBuf, sync::mpsc};
-
-const VERBS: [&str; 11] = [
-    "add_child",
-    "open",
-    "run",
-    "$",
-    "set_title",
-    "test",
-    "addition",
-    "clear",
-    "help",
-    "project",
-    "reload_settings",
-];
-const TESTS: [&str; 5] = ["image", "wl", "editor", "text_editor", "char"];
-const HELP: &str = "\
-add_child [applet] [args]  open an applet as a child (default: command_hub)
-open <applet> [args]       replace this hub with an applet
-open wl <program> [args]   replace this hub with a program's window
-run <program> [args]       start a program without waiting (eg a Wayland client)
-$ <program> [args]         run a program and show its output
-set_title <title>          rename this hub
-project                    put this hub's node (and under it) in a project; Ctrl+W on the project undoes it
-reload_settings            load the settings again
-test <name>                image, wl, editor, text_editor or char
-addition <numbers>         add up numbers
-clear                      clear the history
-help                       this list
-Tab completes, Up/Down recalls commands, PageUp/PageDown scrolls, Esc clears.
-Super+? lists every keybind.";
 
 /// Kept per hub; older ones are dropped
 const MAX_ENTRIES: usize = 200;
@@ -71,13 +42,22 @@ const COMMAND: Color = Color::WHITE;
 enum Output {
     Text(String),
     Error(String),
-    /// A `$` command still running on a worker thread
+    /// Still running on the script thread
     Running(u64),
 }
 
 struct Entry {
     command: String,
+    /// Its `print`s so far
+    printed: String,
     output: Output,
+}
+
+/// An entry's code running on the script thread
+struct Eval {
+    job: u64,
+    handle: EvalHandle,
+    outputs: mpsc::Receiver<sonamu_script::Output>,
 }
 
 /// A line of the scrollback
@@ -112,12 +92,10 @@ pub struct CommandHubApplet {
     /// Into `recall` while recalling, with the prompt from before
     recalling: Option<(usize, String)>,
 
-    /// `$` results from worker threads, by job
-    job_sender: mpsc::Sender<(u64, Output)>,
-    job_receiver: mpsc::Receiver<(u64, Output)>,
+    evals: Vec<Eval>,
     next_job: u64,
 
-    /// Where `run` and `$` start programs: the directory of the tree it is in (eg a project's); the runner's if `None`
+    /// Where `run_output` starts programs: the directory of the tree it is in (eg a project's); the runner's if `None`
     directory: Option<PathBuf>,
 
     size: DisplayContainerSize,
@@ -126,7 +104,6 @@ pub struct CommandHubApplet {
 impl CommandHubApplet {
     #[must_use]
     pub fn new(hook: AppletContext) -> Self {
-        let (job_sender, job_receiver) = mpsc::channel();
         hook.get_directory();
         Self {
             title: "Command Hub".to_string(),
@@ -137,8 +114,7 @@ impl CommandHubApplet {
             hint: None,
             recall: Vec::new(),
             recalling: None,
-            job_sender,
-            job_receiver,
+            evals: Vec::new(),
             next_job: 0,
             directory: None,
             size: DisplayContainerSize::new(800, 600),
@@ -171,127 +147,20 @@ impl CommandHubApplet {
         Box::new(CommandHubSpawner)
     }
 
-    fn execute_command(&mut self, command: &str) -> Output {
-        let tokens: Vec<_> = command.split_whitespace().collect();
-        // runs on a worker thread, so the hub keeps working until it exits
-        if let ["$", program, args @ ..] = tokens.as_slice() {
-            let mut process = self.program_command(program, args);
-            let job = self.next_job;
-            self.next_job += 1;
-            let sender = self.job_sender.clone();
-            let waker = self.hook.waker();
-            std::thread::spawn(move || {
-                let _ = sender.send((job, run_captured(&mut process)));
-                waker.wake();
-            });
-            return Output::Running(job);
-        }
-        match self.execute(command, &tokens) {
-            Ok(text) => Output::Text(text),
-            Err(err) => Output::Error(err),
-        }
-    }
-
-    fn execute(&mut self, command: &str, tokens: &[&str]) -> Result<String, String> {
-        let (verb, args) = tokens
-            .split_first()
-            .ok_or_else(|| "Couldn't split commands.".to_string())?;
-
-        match *verb {
-            "addition" => Ok(args
-                .iter()
-                .filter_map(|a| a.parse::<f32>().ok())
-                .sum::<f32>()
-                .to_string()),
-            "add_child" => match args.first() {
-                None => {
-                    self.hook.add_child(Self::get_boxed_initiator());
-                    Ok("Unspecified child defaulting to command_hub.".to_string())
-                }
-                Some(app_name) => match self.hook.find_applet_spawner(app_name) {
-                    Some(applet_spawner) => match applet_spawner.create_initializer(&args[1..]) {
-                        Some(applet_initializer) => {
-                            self.hook.add_child(applet_initializer);
-                            Ok("Great success!".to_string())
-                        }
-                        None => Err(format!(
-                            "Couldn't create initializer from args {:?}.",
-                            &args[1..]
-                        )),
-                    },
-                    None => Err(format!(
-                        "Couldn't find app {app_name}. Known applets: {}.",
-                        self.applet_names().join(", ")
-                    )),
-                },
-            },
-            // Replaces the hub in its node (#116)
-            "open" => self.open(args),
-
-            "set_title" => {
-                self.title = command
-                    .trim()
-                    .split_once(' ')
-                    .ok_or_else(|| format!("Couldn't get title from \"{command}\"."))?
-                    .1
-                    .trim()
-                    .to_string();
-                self.hook.damage_treeview();
-                Ok("Done!".to_string())
-            }
-
-            "test" => {
-                let test = args
-                    .first()
-                    .ok_or_else(|| format!("Must specify a test: {}.", TESTS.join(", ")))?;
-                let tokens = test_command(test).ok_or_else(|| {
-                    format!("`{test}` is an unknown test. Tests: {}.", TESTS.join(", "))
-                })?;
-                self.execute(command, tokens)
-            }
-
-            "help" => Ok(format!(
-                "{HELP}\nApplets: {}.",
-                self.applet_names().join(", ")
-            )),
-
-            "project" => {
-                if let Some(arg) = args.first() {
-                    return Err(format!(
-                        "Unknown argument `{arg}`; Ctrl+W on the project's node undoes it."
-                    ));
-                }
-                self.hook
-                    .request(NodeRequest::Wrap(ProjectApplet::wrapper()));
-                Ok("This node and everything under it are a project now.".to_string())
-            }
-
-            // the program may take a while
-            "reload_settings" => {
-                std::thread::spawn(settings::reload);
-                Ok("Reloading.".to_string())
-            }
-
-            "clear" => {
-                self.history.clear();
-                Ok(String::new())
-            }
-
-            // Starts a program without waiting for it (eg a wl client), connected to Sonamu
-            "run" => {
-                let program = args.first().ok_or("Must specify a program.")?;
-                self.program_command(program, &args[1..])
-                    .spawn()
-                    .map_err(|err| err.to_string())?;
-                Ok(format!("Started {program}"))
-            }
-
-            "$" => Err("Must specify a program.".to_string()),
-            verb => Err(format!(
-                "`{verb}` is an unknown command. Commands: {}. Try `help`.",
-                VERBS.join(", ")
-            )),
-        }
+    /// Runs the entered code on the script thread
+    fn start_eval(&mut self, code: &str) -> Output {
+        let job = self.next_job;
+        self.next_job += 1;
+        let waker = self.hook.waker();
+        let (handle, outputs) = sonamu_script::eval(code.to_string(), move || {
+            waker.wake();
+        });
+        self.evals.push(Eval {
+            job,
+            handle,
+            outputs,
+        });
+        Output::Running(job)
     }
 
     /// `open`: replaces the hub with an applet, or with a program's window (`wl`)
@@ -353,14 +222,11 @@ impl CommandHubApplet {
             }
         }
 
-        let output = self.execute_command(&command);
-        // `clear` shows nothing
-        if command.trim() == "clear" {
-            return;
-        }
+        let output = self.start_eval(&command);
         self.history.push(Entry {
             command,
-            output: trimmed(output),
+            printed: String::new(),
+            output,
         });
         if self.history.len() > MAX_ENTRIES {
             self.history.remove(0);
@@ -393,63 +259,6 @@ impl CommandHubApplet {
         self.cursor = self.current_prompt.chars().count();
     }
 
-    /// Completes the last word of the prompt (verbs, then applet names or tests), when the cursor is at the end
-    fn complete(&mut self) {
-        if self.cursor != self.current_prompt.chars().count() {
-            return;
-        }
-        let (before, word) = match self.current_prompt.rsplit_once(' ') {
-            Some((before, word)) => (Some(before), word),
-            None => (None, self.current_prompt.as_str()),
-        };
-        let candidates: Vec<String> = match before
-            .map(str::split_whitespace)
-            .map(Iterator::collect::<Vec<_>>)
-        {
-            None => VERBS.iter().map(ToString::to_string).collect(),
-            Some(words) => match words.as_slice() {
-                ["add_child"] => self.applet_names(),
-                ["open"] => std::iter::once("wl".to_string())
-                    .chain(self.applet_names())
-                    .collect(),
-                ["test"] => TESTS.iter().map(ToString::to_string).collect(),
-                ["help"] => VERBS.iter().map(ToString::to_string).collect(),
-                _ => Vec::new(),
-            },
-        };
-        let matches: Vec<&String> = candidates
-            .iter()
-            .filter(|candidate| candidate.starts_with(word))
-            .collect();
-
-        let completed = match matches.as_slice() {
-            [] => return,
-            [only] => format!("{only} "),
-            [first, rest @ ..] => {
-                self.hint = Some(
-                    matches
-                        .iter()
-                        .map(|candidate| candidate.as_str())
-                        .collect::<Vec<_>>()
-                        .join("  "),
-                );
-                let common = rest.iter().fold(first.as_str(), |common, candidate| {
-                    let len = common
-                        .chars()
-                        .zip(candidate.chars())
-                        .take_while(|(a, b)| a == b)
-                        .map(|(a, _)| a.len_utf8())
-                        .sum();
-                    &common[..len]
-                });
-                common.to_string()
-            }
-        };
-        let start = self.current_prompt.len() - word.len();
-        self.current_prompt.replace_range(start.., &completed);
-        self.cursor = self.current_prompt.chars().count();
-    }
-
     fn handle_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) {
         self.hint = None;
         match key {
@@ -473,7 +282,12 @@ impl CommandHubApplet {
                 self.cursor = 0;
                 self.recalling = None;
             }
-            KeySymbol::Char('\t') if modifiers == KeyModifiers::NONE => self.complete(),
+            // cancels the running evals
+            KeySymbol::Char('c' | 'C') if modifiers == KeyModifiers::CTRL => {
+                for eval in &self.evals {
+                    eval.handle.cancel();
+                }
+            }
             // Ctrl/Alt/Super combinations aren't text
             KeySymbol::Char(key_char)
                 if !(modifiers.ctrl
@@ -521,6 +335,12 @@ impl CommandHubApplet {
                     accent: if index == 0 { PROMPT.len() } else { 0 },
                 });
             }
+            lines.extend(wrap(&entry.printed, width).map(|text| Line {
+                text,
+                fg: OUTPUT,
+                bg: BG,
+                accent: 0,
+            }));
             let (text, fg) = match &entry.output {
                 Output::Text(text) => (text.as_str(), OUTPUT),
                 Output::Error(err) => (err.as_str(), ERROR),
@@ -588,7 +408,8 @@ impl StandardApplet for CommandHubApplet {
             | StandardEvent::Place(..)
             | StandardEvent::NodeAction(..)
             | StandardEvent::Focus(_)
-            | StandardEvent::ToggleCollapsed(_) => {}
+            | StandardEvent::ToggleCollapsed(_)
+            | StandardEvent::Command { .. } => {}
             // doesn't show wl surfaces (only the root gets these)
             StandardEvent::WlSurfaceRegistered(_)
             | StandardEvent::Capturing(_)
@@ -600,19 +421,62 @@ impl StandardApplet for CommandHubApplet {
         }
     }
 
-    /// A `$` command finished
+    /// An eval printed or finished
     fn wake(&mut self) {
-        while let Ok((job, output)) = self.job_receiver.try_recv() {
+        let mut finished = Vec::new();
+        for eval in &self.evals {
             // gone if cleared meanwhile
-            if let Some(entry) = self
-                .history
-                .iter_mut()
-                .find(|entry| matches!(entry.output, Output::Running(running) if running == job))
-            {
-                entry.output = trimmed(output);
+            let mut entry = self.history.iter_mut().find(
+                |entry| matches!(entry.output, Output::Running(running) if running == eval.job),
+            );
+            while let Ok(output) = eval.outputs.try_recv() {
+                let Some(entry) = entry.as_deref_mut() else {
+                    continue;
+                };
+                match output {
+                    sonamu_script::Output::Print(line) => {
+                        entry.printed.push_str(&line);
+                        entry.printed.push('\n');
+                    }
+                    sonamu_script::Output::Done(result) => entry.output = trimmed(shown(result)),
+                }
+            }
+            if !matches!(entry.map(|entry| &entry.output), Some(Output::Running(_))) {
+                finished.push(eval.job);
             }
         }
+        self.evals.retain(|eval| !finished.contains(&eval.job));
         self.hook.damage_window();
+    }
+
+    fn command(&mut self, name: &str, args: Vec<Value>) -> CommandResult {
+        match name {
+            "clear" => self.history.clear(),
+            "set_title" => {
+                self.title = command::string_arg(&args, 0)?.to_string();
+                self.hook.damage_treeview();
+            }
+            // replaces the hub in its node (#116)
+            "open" => {
+                let mut words = vec![command::string_arg(&args, 0)?.to_string()];
+                words.extend(command::strings_arg(&args, 1)?);
+                let words: Vec<&str> = words.iter().map(String::as_str).collect();
+                self.open(&words)?;
+            }
+            // NOTE: the hub waits for the program
+            "run_output" => {
+                let program = command::string_arg(&args, 0)?;
+                let program_args = command::strings_arg(&args, 1)?;
+                let program_args: Vec<&str> = program_args.iter().map(String::as_str).collect();
+                return match run_captured(&mut self.program_command(program, &program_args)) {
+                    Output::Text(text) => Ok(Value::String(text)),
+                    Output::Error(err) => Err(err),
+                    Output::Running(_) => unreachable!("it waited"),
+                };
+            }
+            _ => return Err(command::unknown(name)),
+        }
+        Ok(Value::Nil)
     }
 
     fn get_treeview(&self) -> sonamu_common::utils::tree::world_tree::WorldTree<String> {
@@ -664,7 +528,7 @@ impl StandardApplet for CommandHubApplet {
         let note = if scroll > 0 {
             format!("{scroll} lines below (PageDown) ")
         } else {
-            "help | Tab | Up/Down ".to_string()
+            "sonamu.help() | Up/Down | Ctrl+C ".to_string()
         };
         let title_end = self.title.chars().count() + 2;
         if let Some(column) = width
@@ -690,27 +554,6 @@ impl StandardApplet for CommandHubApplet {
     }
 }
 
-/// What `test <test>` runs
-fn test_command(test: &str) -> Option<&'static [&'static str]> {
-    Some(match test {
-        "image" => &["add_child", "image_viewer", "examples/sonamu.jpg"],
-        // "wl" => &["add_child", "wl_app"],
-        "wl" => &["run", "alacritty"],
-        "editor" => &[
-            "add_child",
-            "code_editor",
-            "examples/root-project/file_to_edit.txt",
-        ],
-        "text_editor" => &[
-            "add_child",
-            "text_editor",
-            "examples/root-project/file_to_edit.txt",
-        ],
-        "char" => &["add_child", "char_render_test"],
-        _ => return None,
-    })
-}
-
 /// A process for `program`, connected to Sonamu if it's a wl client
 pub fn program_command(program: &str, args: &[&str]) -> std::process::Command {
     let mut command = std::process::Command::new(program);
@@ -733,6 +576,20 @@ fn run_captured(command: &mut std::process::Command) -> Output {
             }
         }
         Err(err) => Output::Error(err.to_string()),
+    }
+}
+
+/// An eval's return values (nothing for none), or its error
+fn shown(result: Result<Vec<Value>, String>) -> Output {
+    match result {
+        Ok(values) => Output::Text(
+            values
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        Err(err) => Output::Error(err),
     }
 }
 

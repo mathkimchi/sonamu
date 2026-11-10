@@ -2,6 +2,7 @@
 members = [
     "sonamu_common",
     "sonamu_common/sonamu_ui",
+    "sonamu_common/sonamu_command",
 
     "sonamu_sde",
     "sonamu_sttk",
@@ -9,6 +10,7 @@ members = [
     # "sonamu_standard_tabs/*", # TODO: make the asterisk work
     # "sonamu_standard_tabs/dylib_math_game",
     "sonamu_sar",
+    "sonamu_script",
 ]
 resolver = "2"
 
@@ -63,6 +65,8 @@ pollster = "^0.4.0"
 sonamu_common = { path = "./sonamu_common" }
 sonamu_ui = { path = "./sonamu_common/sonamu_ui" }
 sonamu_sync = { path = "./sonamu_common/sonamu_sync" }
+sonamu_command = { path = "./sonamu_common/sonamu_command" }
+sonamu_script = { path = "./sonamu_script" }
 
 # [[members]]
 # singularity_ui = { features = ["iced_backend"] }

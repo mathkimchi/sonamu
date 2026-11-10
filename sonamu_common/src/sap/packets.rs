@@ -1,4 +1,5 @@
 use crate::{
+    command::{CommandResult, Value},
     sap::{detached::DetachedTree, session::SavedApplet},
     settings::Settings,
     utils::tree::world_tree::{WorldTree, WorldTreePath},
@@ -211,6 +212,12 @@ pub enum StandardEvent {
     /// Show this swipe between elements of the client's treeview instead of its focus (#141), or stop (`None`).
     /// Only the holder of both elements' world draws it; others pass it in or ignore it.
     Swipe(Option<SwipeView>),
+    /// Run the applet's command (`StandardApplet::command`) and answer on `reply`
+    Command {
+        name: String,
+        args: Vec<Value>,
+        reply: std::sync::mpsc::Sender<CommandResult>,
+    },
 }
 
 /// A swipe partway between two elements (#141): `from` is drawn moved `progress` of the way toward `to`,

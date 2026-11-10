@@ -2,6 +2,7 @@
 
 use calloop::{EventLoop, LoopHandle, LoopSignal, channel::Sender};
 use sonamu_common::{
+    command::{self, CommandResult, NodeCall, Value, World},
     sap::{
         client_handle::ClientHandle,
         detached::{DetachedClient, DetachedTree},
@@ -185,6 +186,14 @@ pub trait StandardApplet {
 
     /// Called after each batch of events, before the applet's state is published
     fn update(&mut self) {}
+
+    /// Runs one of its commands (`StandardEvent::Command`, see `.claude/COMMANDS.md`)
+    fn command(&mut self, name: &str, _args: Vec<Value>) -> CommandResult {
+        Err(command::unknown(name))
+    }
+
+    /// A command for a node of the world it holds (`AppletContext::world`), eg a project's
+    fn handle_node_call(&mut self, _call: NodeCall) {}
 }
 
 /// An answer to a request, now or sent later by the applet itself
@@ -361,6 +370,19 @@ impl AppletContext {
             .unwrap();
     }
 
+    /// For a world the applet holds (eg a project's tree): its commands go to `StandardApplet::handle_node_call`
+    pub fn world(&self) -> World {
+        let (world, calls) = calloop::channel::channel();
+        self.event_loop
+            .insert_source(calls, |event, &mut (), state| {
+                if let calloop::channel::Event::Msg(call) = event {
+                    state.applet.handle_node_call(call);
+                }
+            })
+            .unwrap();
+        world
+    }
+
     fn new_embedded_id(&self) -> EmbeddedId {
         let id = self.next_embedded_id.get();
         self.next_embedded_id.set(id + 1);
@@ -472,6 +494,9 @@ impl AppletState {
                 }
             }
             StandardEvent::Deactivate => self.applet.deactivate(),
+            StandardEvent::Command { name, args, reply } => {
+                let _ = reply.send(self.applet.command(&name, args));
+            }
             StandardEvent::WlSurfaceRegistered(surface) => {
                 if let Err(surface) = self.applet.take_wl_surface(surface) {
                     let _ = self

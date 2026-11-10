@@ -10,6 +10,7 @@ use crate::{
 };
 use slotmap::SlotMap;
 use sonamu_common::{
+    command::{self, NodeUid, World},
     sap::{
         client_handle::ClientHandle,
         detached::{DetachedClient, DetachedTree, EMPTY_LABEL},
@@ -48,6 +49,8 @@ pub(crate) const INACTIVE_MARK: &str = "⏾ ";
 
 /// Shows its main applet or the focused child
 struct Node {
+    /// For commands (`command::register`); kept when it moves to another world
+    uid: NodeUid,
     /// Dropping it ends the applet. `None` for containers.
     main: Option<ClientHandle>,
     parent: Option<NodeId>,
@@ -77,8 +80,9 @@ struct Node {
     laid_scroll: Cell<i32>,
 }
 impl Node {
-    const fn new(main: Option<ClientHandle>, parent: Option<NodeId>) -> Self {
+    fn new(main: Option<ClientHandle>, parent: Option<NodeId>) -> Self {
         Self {
+            uid: NodeUid::new(),
             main,
             parent,
             children: Vec::new(),
@@ -120,6 +124,8 @@ pub struct NodeTree {
     pointer_grab: Option<NodeId>,
     spawn_client: SpawnClient,
     attach_client: AttachClient,
+    /// Where commands for its nodes go (`command::register`): the holder's thread
+    world: World,
     /// Set when the tree changed in a way that needs a redraw
     damaged: bool,
     /// A standard keybind pressed on the selected node (in the treeview selector), for the holder to do as if from it
@@ -154,6 +160,14 @@ pub struct NodeTree {
     /// The zoom-out view springing to its moved center: since when, and from how far off: px (before scaling) and
     /// rows down (rows are further apart than their views when zoomed out, by their titles)
     zoom_pan: Option<(Instant, [f32; 2], f32)>,
+}
+
+impl Drop for NodeTree {
+    fn drop(&mut self) {
+        for node in self.nodes.values() {
+            command::unregister(node.uid);
+        }
+    }
 }
 
 /// The zoom-out view springing between a node's view (its center) and the whole view (#145)
@@ -253,8 +267,9 @@ impl NodeTree {
         root: NodularAppletInitializer,
         spawn_client: SpawnClient,
         attach_client: AttachClient,
+        world: World,
     ) -> Self {
-        Self::with_root(spawn_client, attach_client, |tree| {
+        Self::with_root(spawn_client, attach_client, world, |tree| {
             tree.insert_node(None, root)
         })
     }
@@ -264,8 +279,9 @@ impl NodeTree {
         root: DetachedTree,
         spawn_client: SpawnClient,
         attach_client: AttachClient,
+        world: World,
     ) -> Self {
-        Self::with_root(spawn_client, attach_client, |tree| {
+        Self::with_root(spawn_client, attach_client, world, |tree| {
             tree.attach_subtree(None, root)
         })
     }
@@ -275,8 +291,9 @@ impl NodeTree {
         root: SavedTree,
         spawn_client: SpawnClient,
         attach_client: AttachClient,
+        world: World,
     ) -> Self {
-        Self::with_root(spawn_client, attach_client, |tree| {
+        Self::with_root(spawn_client, attach_client, world, |tree| {
             tree.restore_subtree(None, root)
         })
     }
@@ -284,6 +301,7 @@ impl NodeTree {
     fn with_root(
         spawn_client: SpawnClient,
         attach_client: AttachClient,
+        world: World,
         insert_root: impl FnOnce(&mut Self) -> NodeId,
     ) -> Self {
         let mut tree = Self {
@@ -295,6 +313,7 @@ impl NodeTree {
             pointer_grab: None,
             spawn_client,
             attach_client,
+            world,
             damaged: true,
             keybind_request: None,
             view_root: NodeId::default(),
@@ -324,6 +343,20 @@ impl NodeTree {
         self.root
     }
 
+    fn register(&self, id: NodeId) {
+        command::register(self.nodes[id].uid, self.world.clone());
+    }
+
+    pub fn uid(&self, id: NodeId) -> NodeUid {
+        self.nodes[id].uid
+    }
+
+    pub fn node_by_uid(&self, uid: NodeUid) -> Option<NodeId> {
+        self.nodes
+            .iter()
+            .find_map(|(id, node)| (node.uid == uid).then_some(id))
+    }
+
     /// Whether the tree changed since the last call
     pub const fn take_damage(&mut self) -> bool {
         std::mem::replace(&mut self.damaged, false)
@@ -347,6 +380,7 @@ impl NodeTree {
         let id = self
             .nodes
             .insert_with_key(|id| Node::new(Some(spawn_client(id, initializer)), parent));
+        self.register(id);
         self.send_initial_size(id);
         id
     }
@@ -358,8 +392,10 @@ impl NodeTree {
             inactive: tree.hibernated.is_some(),
             hibernated: tree.hibernated,
             awaiting: tree.awaiting,
+            uid: tree.uid.unwrap_or_default(),
             ..Node::new(tree.main.map(|main| attach_client(id, main)), parent)
         });
+        self.register(id);
         self.send_initial_size(id);
         if let Some(surface_id) = tree.wl_surface {
             self.wl_surfaces.insert(surface_id, id);
@@ -403,6 +439,7 @@ impl NodeTree {
                 parent,
             )
         });
+        self.register(id);
         self.send_initial_size(id);
         for child in saved.children {
             let child = self.restore_subtree(Some(id), child);
@@ -540,6 +577,7 @@ impl NodeTree {
             wl_surface,
             hibernated: node.hibernated,
             awaiting: node.awaiting,
+            uid: Some(node.uid),
             children: node
                 .children
                 .into_iter()
@@ -755,6 +793,7 @@ impl NodeTree {
             self.view_root = new;
         }
         let old = self.nodes.remove(id).unwrap();
+        command::unregister(old.uid);
         for &child in &old.children {
             self.nodes[child].parent = Some(new);
         }
@@ -772,7 +811,9 @@ impl NodeTree {
                 self.close(new);
             }
             (None, &[only]) => {
-                self.nodes.remove(new);
+                if let Some(removed) = self.nodes.remove(new) {
+                    command::unregister(removed.uid);
+                }
                 self.nodes[only].parent = None;
                 self.root = only;
                 if self.view_root == new {
@@ -1299,6 +1340,36 @@ impl NodeTree {
         treeview
     }
 
+    /// Its applet's own label (`EMPTY_LABEL` without one), for commands
+    pub fn applet_title(&self, id: NodeId) -> String {
+        self.nodes[id].main.as_ref().map_or_else(
+            || EMPTY_LABEL.to_string(),
+            |main| main.get_treeview().tree.get_root_value().clone(),
+        )
+    }
+
+    /// The registered spawner its applet is from, or `wl_surface`, `container` (no main) or `applet` (unsaved,
+    /// eg the help), for commands
+    pub fn applet_type(&self, id: NodeId) -> String {
+        let node = &self.nodes[id];
+        if self.wl_surfaces.values().any(|&node_id| node_id == id) {
+            return "wl_surface".to_string();
+        }
+        let Some(main) = &node.main else {
+            return "container".to_string();
+        };
+        let saved = node.hibernated.clone().or(main.get_treeview().saved);
+        match saved {
+            Some(SavedApplet::Spawner { name, .. }) => name,
+            Some(SavedApplet::Wl(_)) => "wl_surface".to_string(),
+            None => "applet".to_string(),
+        }
+    }
+
+    pub fn parent(&self, id: NodeId) -> Option<NodeId> {
+        self.nodes[id].parent
+    }
+
     /// Its icon and label, without the treeview's marks (eg its title in the zoom-out view)
     fn title(&self, id: NodeId) -> String {
         let Some(main) = &self.nodes[id].main else {
@@ -1420,6 +1491,7 @@ impl NodeTree {
             self.view_root = parent_id;
         }
         let closed = self.nodes.remove(id).unwrap();
+        command::unregister(closed.uid);
         for &orphan in &closed.children {
             self.nodes[orphan].parent = Some(parent_id);
         }

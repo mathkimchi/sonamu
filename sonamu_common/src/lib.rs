@@ -4,6 +4,7 @@ pub mod msg;
 pub mod notification;
 pub mod sap;
 pub mod settings;
+pub use sonamu_command as command;
 /// REVIEW: this was path of least resistance. actually organize later
 pub use sonamu_sync as sync;
 pub mod utils;

@@ -14,6 +14,7 @@ use crate::{
     ui::{self, PAD, Rows, row_height},
 };
 use sonamu_common::{
+    command::{self, CommandResult, NodeCall, Value, World},
     sap::{
         detached::{DetachedClient, DetachedTree},
         packets::{
@@ -274,8 +275,8 @@ impl ProjectApplet {
             let name = contents.label.take().unwrap_or_else(|| LABEL.to_string());
             let directory = contents.directory.take();
             let icon = contents.icon.take();
-            let mut project = Self::with_tree(hook, |spawn_client, attach_client| {
-                NodeTree::restore(contents, spawn_client, attach_client)
+            let mut project = Self::with_tree(hook, |spawn_client, attach_client, world| {
+                NodeTree::restore(contents, spawn_client, attach_client, world)
             });
             project.name = name;
             project.icon = icon;
@@ -318,10 +319,11 @@ impl ProjectApplet {
                 wl_surface: None,
                 hibernated: None,
                 awaiting: None,
+                uid: None,
                 children: Vec::new(),
             };
-            let mut project = Self::with_tree(hook, |spawn_client, attach_client| {
-                NodeTree::from_detached(contents, spawn_client, attach_client)
+            let mut project = Self::with_tree(hook, |spawn_client, attach_client, world| {
+                NodeTree::from_detached(contents, spawn_client, attach_client, world)
             });
             project.holder.directory = directory;
             Box::new(project) as Box<dyn StandardApplet>
@@ -334,17 +336,18 @@ impl ProjectApplet {
             wl_surface: None,
             hibernated: None,
             awaiting: None,
+            uid: None,
             children: vec![subtree],
         };
-        Self::with_tree(hook, |spawn_client, attach_client| {
-            NodeTree::from_detached(contents, spawn_client, attach_client)
+        Self::with_tree(hook, |spawn_client, attach_client, world| {
+            NodeTree::from_detached(contents, spawn_client, attach_client, world)
         })
     }
 
     /// Holds the tree made with clients embedded in it
     fn with_tree(
         hook: AppletContext,
-        make_tree: impl FnOnce(SpawnClient, AttachClient) -> NodeTree,
+        make_tree: impl FnOnce(SpawnClient, AttachClient, World) -> NodeTree,
     ) -> Self {
         let nodes: Rc<RefCell<HashMap<EmbeddedId, NodeId>>> = Rc::default();
         let spawn_client: SpawnClient = {
@@ -365,7 +368,7 @@ impl ProjectApplet {
                 handle
             })
         };
-        let tree = make_tree(spawn_client, attach_client);
+        let tree = make_tree(spawn_client, attach_client, hook.world());
         let send = {
             let hook = hook.clone();
             Box::new(move |request: StandardRequest| hook.request(request.into()))
@@ -866,7 +869,8 @@ impl StandardApplet for ProjectApplet {
             | StandardEvent::Place(..)
             | StandardEvent::Focus(_)
             | StandardEvent::ToggleCollapsed(_)
-            | StandardEvent::NodeAction(..) => {}
+            | StandardEvent::NodeAction(..)
+            | StandardEvent::Command { .. } => {}
             // only the root gets these
             StandardEvent::Capturing(_) | StandardEvent::Screens(_) => {}
             StandardEvent::Swipe(view) => self.holder.tree.set_swipe(view),
@@ -1057,6 +1061,27 @@ impl StandardApplet for ProjectApplet {
     }
 
     /// From a main of its contents
+    fn handle_node_call(&mut self, call: NodeCall) {
+        if let Some(request) = self.holder.handle_node_call(call) {
+            self.hook.request(request);
+        }
+    }
+
+    fn command(&mut self, name: &str, _args: Vec<Value>) -> CommandResult {
+        match name {
+            // its tree's focus, for `command::focus`
+            command::INNER_FOCUS => {
+                let tree = &self.holder.tree;
+                let id = tree.focused_node();
+                Ok(Value::List(vec![
+                    Value::Node(tree.uid(id)),
+                    Value::Bool(tree.is_inner(id)),
+                ]))
+            }
+            _ => Err(command::unknown(name)),
+        }
+    }
+
     fn handle_embedded_request(&mut self, id: EmbeddedId, request: NodeRequest) {
         let Some(&id) = self.nodes.borrow().get(&id) else {
             return;

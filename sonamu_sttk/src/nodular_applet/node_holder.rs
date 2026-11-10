@@ -13,6 +13,7 @@ use crate::{
 };
 use calloop::LoopHandle;
 use sonamu_common::{
+    command::{self, CommandResult, NodeCall, Value},
     sap::{
         client_handle::ClientHandle,
         detached::{DetachedClient, DetachedTree},
@@ -329,7 +330,11 @@ impl NodeHolder {
 
     /// Starts the program in the tree's directory without waiting for it; whether it started
     fn run(&self, program: &str) -> bool {
-        let mut command = crate::command_hub::program_command(program, &[]);
+        self.run_with(program, &[])
+    }
+
+    fn run_with(&self, program: &str, args: &[&str]) -> bool {
+        let mut command = crate::command_hub::program_command(program, args);
         if let Some(directory) = &self.directory {
             command.current_dir(directory);
         }
@@ -418,6 +423,140 @@ impl NodeHolder {
             self.focused_wl_surface = focused_wl_surface;
             self.send(StandardRequest::WlKeyboardFocus(focused_wl_surface));
         }
+    }
+
+    /// A command for the tree (`uid: None`) or one of its nodes; one that isn't a node command goes on to the
+    /// node's applet (`StandardEvent::Command`). Returns what the holder's own node should do instead, like
+    /// `handle_node_request`.
+    pub fn handle_node_call(
+        &mut self,
+        NodeCall {
+            uid,
+            name,
+            args,
+            reply,
+        }: NodeCall,
+    ) -> Option<NodeRequest> {
+        let Some(uid) = uid else {
+            let _ = reply.send(self.tree_command(&name, &args));
+            return None;
+        };
+        let Some(id) = self.tree.node_by_uid(uid) else {
+            let _ = reply.send(Err(command::gone()));
+            return None;
+        };
+        let (result, request) = match self.node_command(id, &name, &args) {
+            Some(Ok((value, request))) => (Ok(value), request),
+            Some(Err(err)) => (Err(err), None),
+            None => {
+                let event = StandardEvent::Command { name, args, reply };
+                if let Err(StandardEvent::Command { reply, .. }) =
+                    self.tree.try_send_event(id, event)
+                {
+                    let _ = reply.send(Err("the node has no applet".to_string()));
+                }
+                return None;
+            }
+        };
+        let _ = reply.send(result);
+        request
+    }
+
+    /// A command for the tree itself (see `.claude/COMMANDS.md`)
+    fn tree_command(&mut self, name: &str, args: &[Value]) -> CommandResult {
+        match name {
+            // and whether focus is inside its main (`command::focus`)
+            "focus" => {
+                let id = self.tree.focused_node();
+                Ok(Value::List(vec![
+                    Value::Node(self.tree.uid(id)),
+                    Value::Bool(self.tree.is_inner(id)),
+                ]))
+            }
+            "root" => Ok(Value::Node(self.tree.uid(self.tree.root()))),
+            "spawn" => {
+                let program = command::string_arg(args, 0)?;
+                let program_args = command::strings_arg(args, 1)?;
+                let program_args: Vec<&str> = program_args.iter().map(String::as_str).collect();
+                if self.run_with(program, &program_args) {
+                    Ok(Value::Nil)
+                } else {
+                    Err(format!("couldn't start {program}"))
+                }
+            }
+            "open" => {
+                let applet = command::string_arg(args, 0)?.to_string();
+                let args = command::strings_arg(args, 1)?;
+                self.open(OpenApplet { applet, args });
+                Ok(Value::Nil)
+            }
+            "quit" => {
+                self.quit = true;
+                Ok(Value::Nil)
+            }
+            "reload_settings" => {
+                // the program may take a while
+                std::thread::spawn(settings::reload);
+                Ok(Value::Nil)
+            }
+            _ => Err(command::unknown(name)),
+        }
+    }
+
+    /// A node command (see `.claude/COMMANDS.md`), and what the holder's own node should do;
+    /// `None` if it isn't one
+    fn node_command(
+        &mut self,
+        id: NodeId,
+        name: &str,
+        args: &[Value],
+    ) -> Option<Result<(Value, Option<NodeRequest>), String>> {
+        let request =
+            |holder: &mut Self, request| Ok((Value::Nil, holder.handle_node_request(id, request)));
+        Some(match name {
+            "close" => {
+                self.request_close(id);
+                Ok((Value::Nil, None))
+            }
+            "focus" => request(self, NodeRequest::FocusSelf),
+            "add_child" => (|| {
+                let applet = command::string_arg(args, 0)?;
+                let applet_args = command::strings_arg(args, 1)?;
+                let applet_args: Vec<&str> = applet_args.iter().map(String::as_str).collect();
+                let initializer = self
+                    .initializer(applet, &applet_args)
+                    .ok_or_else(|| format!("no applet {applet} for {applet_args:?}"))?;
+                let child = self
+                    .tree
+                    .add_child(id, initializer)
+                    .ok_or("couldn't add the child")?;
+                Ok((Value::Node(self.tree.uid(child)), None))
+            })(),
+            #[expect(clippy::cast_possible_truncation, reason = "a sibling offset")]
+            "swap_sibling" => command::number_arg(args, 0)
+                .and_then(|offset| request(self, NodeRequest::SwapSibling(offset as isize))),
+            "toggle_half" => request(self, NodeRequest::ToggleHalf),
+            "wrap_project" => request(self, NodeRequest::Wrap(ProjectApplet::wrapper())),
+            "parent" => Ok((
+                self.tree
+                    .parent(id)
+                    .map_or(Value::Nil, |parent| Value::Node(self.tree.uid(parent))),
+                None,
+            )),
+            "children" => Ok((
+                Value::List(
+                    self.tree
+                        .children(id)
+                        .iter()
+                        .map(|&child| Value::Node(self.tree.uid(child)))
+                        .collect(),
+                ),
+                None,
+            )),
+            "type" => Ok((Value::String(self.tree.applet_type(id)), None)),
+            "title" => Ok((Value::String(self.tree.applet_title(id)), None)),
+            _ => return None,
+        })
     }
 
     /// From the node's main. Returns what the holder's own node should do instead.

@@ -22,6 +22,7 @@ use calloop::{
     timer::{TimeoutAction, Timer},
 };
 use sonamu_common::{
+    command::{self, NodeCall, World},
     sap::{
         packets::{OpenApplet, SpawnPosition, StandardEvent, StandardRequest, StateKind, Treeview},
         raw_client_initializer::RawClientInitializer,
@@ -365,6 +366,7 @@ impl RootNodeApplet {
         surface: SharedState<UITree>,
         request_sender: Sender<StandardRequest>,
         event_loop: &LoopHandle<'static, Self>,
+        world: World,
     ) -> Self {
         // saved projects are made again by these
         applet_spawner_registry.insert(
@@ -384,11 +386,12 @@ impl RootNodeApplet {
         let saved_session = session_path.as_deref().and_then(session::load);
         let tree = match &saved_session {
             Some(saved) => {
-                let mut tree = NodeTree::restore(saved.tree.clone(), spawn_client, attach_client);
+                let mut tree =
+                    NodeTree::restore(saved.tree.clone(), spawn_client, attach_client, world);
                 tree.focus_path(&saved.focus);
                 tree
             }
-            None => NodeTree::new(root_initializer, spawn_client, attach_client),
+            None => NodeTree::new(root_initializer, spawn_client, attach_client, world),
         };
         let send = {
             let request_sender = request_sender.clone();
@@ -495,6 +498,18 @@ impl RootNodeApplet {
                     })
                     .unwrap();
 
+                // commands for the root's tree (`sonamu_common::command`)
+                let (world, calls) = calloop::channel::channel();
+                event_loop
+                    .handle()
+                    .insert_source(calls, |event, &mut (), root: &mut RootNodeApplet| {
+                        if let calloop::channel::Event::Msg(call) = event {
+                            root.handle_node_call(call);
+                        }
+                    })
+                    .unwrap();
+                command::set_root_world(world.clone());
+
                 let mut root = RootNodeApplet::new(
                     self.root_initializer,
                     self.applet_spawner_registry,
@@ -502,6 +517,7 @@ impl RootNodeApplet {
                     surface,
                     request_sender,
                     &event_loop.handle(),
+                    world,
                 );
 
                 // after each batch of events, since any of them may move focus or damage
@@ -615,6 +631,8 @@ impl RootNodeApplet {
             StandardEvent::Open(open) => self.holder.open(open),
             // it starts them
             StandardEvent::Swipe(_) => {}
+            // the root's node isn't in a world
+            StandardEvent::Command { .. } => {}
             StandardEvent::UIEvent(_)
             | StandardEvent::FocusChanged(..)
             | StandardEvent::Highlighted(..) => {
@@ -761,6 +779,15 @@ impl RootNodeApplet {
                 .unwrap_or_else(|| self.holder.tree.get_focus_path()),
             _ => path,
         }
+    }
+
+    /// A command for the root's tree or a node in it
+    fn handle_node_call(&mut self, call: NodeCall) {
+        match self.holder.handle_node_call(call) {
+            None | Some(NodeRequest::FocusSelf) => {}
+            Some(_) => log::warn!("The root holder has no node to pass a request to"),
+        }
+        self.damage_if_tree_changed();
     }
 
     /// From an applet in the tree

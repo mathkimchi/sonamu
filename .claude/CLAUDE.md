@@ -8,8 +8,10 @@ Organizes applets and even elements of applets into a large recursive tree hiera
 - `sonamu_common` contains things used by both the compositor and native applets
   - `sonamu_common/sonamu_ui` contains custom UI protocol
   - `sonamu_common/sonamu_sync` contains sync primitives
+  - `sonamu_common/sonamu_command` contains node commands (`NodeUid`, `Value`, registry), see `.claude/COMMANDS.md`
 - `sonamu_sar` is general server-side framework
 - `sonamu_sde` contains the main runner
+- `sonamu_script` contains the Luau script thread (`eval`)
 - `sonamu_sttk` contains tools for clients and necessary clients
 - `sonamu_standard_tabs` contains the native applets (code editor, file manager, image viewer, pdf preview)
 - Floats to px: `display_units::ToPx` (`.to_px()`, clamps to 0) instead of `as u32`; settings' gap/border: `Settings::gap_and_border_px`
@@ -32,7 +34,7 @@ DEVLOG.md is 10k+ lines, read it with tail.
 - Desktop notifications (freedesktop D-Bus, eg DMS shows them): `sonamu_common::notification::Replacing`, sent with `busctl`; used by settings reloads and low battery warnings (`sonamu_sar::battery`, 20% then a critical one at 10%, polled every 30 s). Keep tests from sending them.
 - Testing with input and screenshots without a monitor (headless sway): `.claude/TESTING.md`.
 - Native applets' hand-built UI (rows with hit-testing, text, frames, metrics): `sonamu_sttk::ui`, see `.claude/UI_KIT.md`.
-- Commands and Luau scripting (planned, not started): `.claude/COMMANDS.md`.
+- Commands and Luau scripting (in progress; the hub runs Luau): `.claude/COMMANDS.md`.
 - World tree, paths ("inside" a node), focus, selectors, and who owns what (incl. projects, which are plain applets holding a `NodeTree`): `.claude/WORLD_TREE.md`.
 
 # Rules

@@ -1,7 +1,32 @@
-# Commands and scripting (plan, not started)
+# Commands and scripting (in progress)
 
 Emacs-like model: every action is a named command; keybinds, the hub, the socket and (later) agents all call the same ones.
 Embedded language: Luau via `mlua`. Other languages: over the socket.
+
+## Status (milestones 1, 3 and most of 4 done)
+
+- `sonamu_common/sonamu_command` (re-exported as `sonamu_common::command`): `NodeUid`, `Value`, `NodeCall`, registry,
+  `call` (blocks, polls `cancelled` every 50 ms), `focus` (descends through `INNER_FOCUS`), arg helpers.
+- `NodeTree` nodes have a `uid`, registered on insert, unregistered on close/unwrap/drop, kept in `DetachedTree::uid`.
+- `NodeHolder::handle_node_call`: tree commands (`focus`, `root`, `spawn`, `open`, `quit`, `reload_settings`) and node
+  commands; others go to the applet as `StandardEvent::Command` (the `reply` sender rides in the event, no ids).
+- Worlds: root (`RootNodeApplet::handle_node_call`, also `set_root_world`) and projects (`AppletContext::world`,
+  `StandardApplet::handle_node_call`; `command(INNER_FOCUS)`).
+- `sonamu_script`: script thread, sandboxed Luau, `print`, return values (`return <code>` tried first, like a REPL),
+  `Node` userdata (node commands, `cast`, `__index` → applet command, `==`, `tostring`), cancel via interrupt.
+- Hub: Luau only, `print`s then results, Ctrl+C cancels; commands `clear`, `set_title`, `open` (replace the hub, as
+  before; `"wl", {argv}` too), `run_output` (old `$`).
+
+Deviations from the decisions below:
+- Calls block the script thread instead of `mlua` async (same effect: worlds never wait on it).
+- Type tag: derived when asked (`NodeTree::applet_type`: wl surface, else saved/hibernated spawner name, else
+  `container`/`applet`), not stored.
+- `cast` takes the type name (`n:cast("file_manager")`), returns the same `Node`; no per-type handles or spawner
+  signatures yet.
+- No `split` (splits no longer exist). `parent()` stops at its world's root (nil there, even inside a project).
+- `hub:run_output` blocks the hub's thread while the program runs.
+
+Not done: keybinds through `NodeCall`, Tab completion (removed with the old verbs), socket `eval`, spawner signatures.
 
 ## Decisions
 

@@ -1,6 +1,7 @@
 //! Clients with no holder, for moving them between holders (pluck and place)
 
 use crate::{
+    command::NodeUid,
     sap::{
         client_handle::ClientHandle,
         packets::{AwaitedWl, StandardEvent, Treeview, WlSurfaceId},
@@ -73,6 +74,8 @@ pub struct DetachedTree {
     pub hibernated: Option<SavedApplet>,
     /// `main` stands in for a restored wl client that is starting, until its toplevel comes
     pub awaiting: Option<AwaitedWl>,
+    /// Kept by the node in its new world (`None`: a new one)
+    pub uid: Option<NodeUid>,
     pub children: Vec<Self>,
 }
 impl DetachedTree {
@@ -83,6 +86,7 @@ impl DetachedTree {
             wl_surface: None,
             hibernated: None,
             awaiting: None,
+            uid: None,
             children: Vec::new(),
         }
     }
