@@ -3338,6 +3338,7 @@ name = "sonamu_command"
 version = "0.1.0"
 dependencies = [
  "calloop",
+ "log",
  "serde",
 ]
 

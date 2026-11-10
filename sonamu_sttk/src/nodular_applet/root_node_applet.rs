@@ -375,6 +375,9 @@ impl RootNodeApplet {
         );
         // Super+? opens it
         applet_spawner_registry.insert("help".to_string(), ManPageApplet::get_applet_spawner());
+        for (name, spawner) in &applet_spawner_registry {
+            command::declare(name, spawner.commands());
+        }
         let applet_spawners = Arc::new(RwLock::new(applet_spawner_registry));
         let (spawn_client, attach_client) = client_spawners(
             event_loop,

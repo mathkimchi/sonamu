@@ -9,3 +9,4 @@ workspace = true
 [dependencies]
 serde = { workspace = true }
 calloop = { workspace = true }
+log = { workspace = true }

@@ -4,7 +4,7 @@
 //! world holding the node, which runs the `NodeCall` on its own thread.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt,
     sync::{
         LazyLock, Mutex, PoisonError,
@@ -213,4 +213,72 @@ pub fn number_arg(args: &[Value], index: usize) -> Result<f64, String> {
             index + 1
         )),
     }
+}
+
+/// The node commands every node has (`Node` methods in scripts); an applet's can't use these names
+pub const NODE_COMMANDS: [&str; 10] = [
+    "close",
+    "focus",
+    "add_child",
+    "swap_sibling",
+    "toggle_half",
+    "wrap_project",
+    "parent",
+    "children",
+    "type",
+    "title",
+];
+
+/// An applet command, as declared by its spawner (`AppletSpawnerTrait::commands`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Signature {
+    pub name: &'static str,
+    /// Luau-style, eg `"title: string"`
+    pub params: &'static str,
+    /// Luau type, eg `"nil"`
+    pub returns: &'static str,
+    pub doc: &'static str,
+}
+
+static SIGNATURES: Mutex<BTreeMap<String, Vec<Signature>>> = Mutex::new(BTreeMap::new());
+
+/// The commands of applets of `applet_type` (a registered spawner's name); ones named like a node command are
+/// dropped
+pub fn declare(applet_type: &str, signatures: &[Signature]) {
+    let signatures = signatures
+        .iter()
+        .filter(|signature| {
+            let clashes = NODE_COMMANDS.contains(&signature.name);
+            if clashes {
+                log::warn!(
+                    "{applet_type}'s command `{}` is a node command; dropping it",
+                    signature.name
+                );
+            }
+            !clashes
+        })
+        .copied()
+        .collect();
+    SIGNATURES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(applet_type.to_string(), signatures);
+}
+
+/// What `declare` was given for `applet_type`
+pub fn signatures(applet_type: &str) -> Vec<Signature> {
+    SIGNATURES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(applet_type)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Every applet type's declared commands
+pub fn all_signatures() -> BTreeMap<String, Vec<Signature>> {
+    SIGNATURES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
 }

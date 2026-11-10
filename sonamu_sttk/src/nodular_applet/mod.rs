@@ -2,7 +2,7 @@
 
 use calloop::{EventLoop, LoopHandle, LoopSignal, channel::Sender};
 use sonamu_common::{
-    command::{self, CommandResult, NodeCall, Value, World},
+    command::{self, CommandResult, NodeCall, Signature, Value, World},
     sap::{
         client_handle::ClientHandle,
         detached::{DetachedClient, DetachedTree},
@@ -261,6 +261,11 @@ pub trait AppletSpawnerTrait: Send + Sync {
         self.create_initializer(args)
     }
 
+    /// Its applets' commands (`StandardApplet::command`), for completion and help
+    fn commands(&self) -> &'static [Signature] {
+        &[]
+    }
+
     /// Clone on its own is not dyn compatible because it outputs -> Self.
     /// Using the AppletSpawnerTrait, AppletSpawner workaround for that.
     fn duplicate(&self) -> AppletSpawner;
@@ -427,6 +432,7 @@ impl AppletContext {
 
     /// NOTE: look at 2026-03-08 for more detail on future things
     pub fn register_applet_spawner(&self, name: String, applet_spawner: AppletSpawner) {
+        command::declare(&name, applet_spawner.commands());
         self.applet_spawners
             .write()
             .unwrap()

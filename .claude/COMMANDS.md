@@ -16,9 +16,13 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
   `Node` userdata (node commands, `cast`, `__index` → applet command, `==`, `tostring`), cancel via interrupt.
 - Hub: Luau only, one eval at a time (like a shell: no prompt, keys ignored but Ctrl+C/PageUp/PageDown, until it ends), `print`s then results (strings unquoted), Ctrl+C cancels; commands `clear`, `set_title`, `open` (replace the hub, as
   before; `"wl", {argv}` too), `run_output` (old `$`).
+- Signatures: `AppletSpawnerTrait::commands` (`&'static [command::Signature]`: name, params, returns, doc), declared
+  into `command::declare` when spawners register (`RootNodeApplet::new`, `register_applet_spawner`); clashes with
+  `command::NODE_COMMANDS` dropped with a warning. Hub: `COMMANDS`. `sonamu.help()` lists them per type.
 - Tab: `sonamu_script::complete` (a job on the script thread, answered through the waker, dropped if the prompt
-  changed): globals (incl. builtins), table fields after `.`, `Node` methods after `:` on a `Node` value or after a
-  call in `RETURN_NODE` (`focus`, `root`, `parent`, `add_child`; nothing else is run or known yet).
+  changed): globals (incl. builtins), table fields after `.`, after `:` on a node its `Node` methods + its type's
+  signatures. To know the node, completion runs read-only getters only: `context.focus()`, `context.root()`,
+  `:parent()` (deviation: Q22 said no calls); `:add_child()` gives a node of unknown type (`Node` methods only).
 
 Try in a hub:
 
@@ -37,12 +41,11 @@ Deviations from the decisions below:
 - Calls block the script thread instead of `mlua` async (same effect: worlds never wait on it).
 - Type tag: derived when asked (`NodeTree::applet_type`: wl surface, else saved/hibernated spawner name, else
   `container`/`applet`), not stored.
-- `cast` takes the type name (`n:cast("file_manager")`), returns the same `Node`; no per-type handles or spawner
-  signatures yet.
+- `cast` takes the type name (`n:cast("file_manager")`), returns the same `Node`; no per-type handles.
 - No `split` (splits no longer exist). `parent()` stops at its world's root (nil there, even inside a project).
 - `hub:run_output` blocks the hub's thread while the program runs.
 
-Not done: keybinds through `NodeCall`, socket `eval`, spawner signatures (so no applet commands in completion).
+Not done: keybinds through `NodeCall`, socket `eval`; signatures aren't checked against calls (`command()` is).
 
 ## Decisions
 

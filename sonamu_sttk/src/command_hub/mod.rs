@@ -8,7 +8,7 @@ use crate::{
     standard_keybinds::handle_standard_keybinds,
 };
 use sonamu_common::{
-    command::{self, CommandResult, Value},
+    command::{self, CommandResult, Signature, Value},
     sap::{packets::StandardEvent, session::SavedWl},
 };
 use sonamu_script::EvalHandle;
@@ -19,6 +19,34 @@ use sonamu_ui::{
     ui_event::{KeyModifiers, KeySymbol, MouseEventKind, UIEvent},
 };
 use std::{fmt::Write as _, path::PathBuf, sync::mpsc};
+
+/// What `command` takes
+const COMMANDS: [Signature; 4] = [
+    Signature {
+        name: "clear",
+        params: "",
+        returns: "nil",
+        doc: "clear the history",
+    },
+    Signature {
+        name: "set_title",
+        params: "title: string",
+        returns: "nil",
+        doc: "rename this hub",
+    },
+    Signature {
+        name: "open",
+        params: "applet: string, args: {string}?",
+        returns: "nil",
+        doc: "replace this hub with an applet (`\"wl\", {argv}`: a program's window)",
+    },
+    Signature {
+        name: "run_output",
+        params: "program: string, args: {string}?",
+        returns: "string",
+        doc: "run a program and wait for its output",
+    },
+];
 
 /// Kept per hub; older ones are dropped
 const MAX_ENTRIES: usize = 200;
@@ -141,6 +169,10 @@ impl CommandHubApplet {
                 }
 
                 Some(CommandHubApplet::get_boxed_initiator())
+            }
+
+            fn commands(&self) -> &'static [Signature] {
+                &COMMANDS
             }
 
             fn duplicate(&self) -> AppletSpawner {

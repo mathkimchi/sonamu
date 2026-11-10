@@ -3,9 +3,10 @@
 //! Commands block the script thread until their world answers; worlds never wait on it, so this can't deadlock.
 
 use mlua::{Lua, MetaMethod, MultiValue, UserData, UserDataMethods, Value as LuaValue, VmState};
-use sonamu_command::{self as command, CommandResult, NodeUid, Value};
+use sonamu_command::{self as command, CommandResult, NODE_COMMANDS, NodeUid, Value};
 use std::{
     cell::RefCell,
+    fmt::Write as _,
     sync::{
         Arc, LazyLock, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
@@ -212,7 +213,7 @@ fn new_lua() -> mlua::Result<Lua> {
     for name in ["open", "quit", "reload_settings"] {
         sonamu.set(name, tree_function(&lua, name)?)?;
     }
-    sonamu.set("help", lua.create_function(|_, ()| Ok(HELP))?)?;
+    sonamu.set("help", lua.create_function(|_, ()| Ok(help()))?)?;
     sonamu.set(
         "reset",
         lua.create_function(|_, ()| {
@@ -243,6 +244,25 @@ Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) togg
       parent(): Node? children(): {Node} type(): string title(): string cast(type): Node?
       any other method is a command of its applet, eg hub:clear()";
 
+/// `HELP`, then each applet type's commands
+fn help() -> String {
+    let mut help = HELP.to_string();
+    for (applet_type, signatures) in command::all_signatures() {
+        if signatures.is_empty() {
+            continue;
+        }
+        let _ = write!(help, "\n{applet_type}:");
+        for signature in signatures {
+            let _ = write!(
+                help,
+                "\n  {}({}): {}  {}",
+                signature.name, signature.params, signature.returns, signature.doc
+            );
+        }
+    }
+    help
+}
+
 /// A command of the root's tree
 fn tree_function(lua: &Lua, name: &'static str) -> mlua::Result<mlua::Function> {
     lua.create_function(move |lua, args: MultiValue| call(lua, None, name, &args))
@@ -257,19 +277,6 @@ fn call(lua: &Lua, uid: Option<NodeUid>, name: &str, args: &MultiValue) -> mlua:
 /// A handle to a node in any world
 #[derive(Clone, Copy)]
 struct Node(NodeUid);
-
-const NODE_COMMANDS: [&str; 10] = [
-    "close",
-    "focus",
-    "add_child",
-    "swap_sibling",
-    "toggle_half",
-    "wrap_project",
-    "parent",
-    "children",
-    "type",
-    "title",
-];
 
 impl UserData for Node {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
@@ -307,16 +314,18 @@ impl UserData for Node {
     }
 }
 
-/// Functions returning a `Node`, so `:` after a call to them completes `Node` methods without running it
-const RETURN_NODE: [&str; 4] = ["focus", "root", "parent", "add_child"];
+/// Read-only functions completion may run to know what they give (eg `context.focus():`)
+const READ_ONLY_CALLS: [&str; 2] = ["focus", "root"];
 
-/// What a chain of fields ends in, without calling anything (except knowing what `RETURN_NODE` give)
+/// What a chain ends in. Only `READ_ONLY_CALLS` and `parent` are run; `add_child` is known to give a `Node`.
 enum Resolved {
     Value(LuaValue),
+    /// Of no known type
     Node,
 }
 
-/// Candidates for the word `text` ends in: globals, a table's fields after `.`, or `Node` methods after `:`
+/// Candidates for the word `text` ends in: globals, a table's fields after `.`, or a node's methods (its applet's
+/// commands too) after `:`
 fn completions(lua: &Lua, text: &str) -> Vec<String> {
     // the trailing chain, eg `context.focus():ti`
     let start = text
@@ -332,14 +341,20 @@ fn completions(lua: &Lua, text: &str) -> Vec<String> {
     let mut candidates: Vec<String> = if receiver.is_empty() {
         global_names(lua)
     } else {
-        match resolve(lua, receiver) {
-            Some(Resolved::Node) if separator == ":" => node_methods(),
-            Some(Resolved::Value(LuaValue::UserData(data)))
-                if separator == ":" && data.is::<Node>() =>
-            {
-                node_methods()
+        match (resolve(lua, receiver), separator) {
+            (Some(Resolved::Node), ":") => node_methods(),
+            (Some(Resolved::Value(LuaValue::UserData(node))), ":") if node.is::<Node>() => {
+                let mut methods = node_methods();
+                if let Some(Value::String(applet_type)) = node_call(&node, "type") {
+                    methods.extend(
+                        command::signatures(&applet_type)
+                            .iter()
+                            .map(|signature| signature.name.to_string()),
+                    );
+                }
+                methods
             }
-            Some(Resolved::Value(LuaValue::Table(table))) if separator == "." => keys(&table),
+            (Some(Resolved::Value(LuaValue::Table(table))), ".") => keys(&table),
             _ => Vec::new(),
         }
     };
@@ -349,29 +364,50 @@ fn completions(lua: &Lua, text: &str) -> Vec<String> {
     candidates
 }
 
+/// `chain`'s value, eg `context.focus():parent()`
 fn resolve(lua: &Lua, chain: &str) -> Option<Resolved> {
     let mut resolved: Option<Resolved> = None;
-    for segment in chain.split(['.', ':']) {
+    let mut separator = None;
+    let mut rest = chain;
+    loop {
+        let end = rest.find(['.', ':']).unwrap_or(rest.len());
+        let segment = &rest[..end];
         let (name, called) = match segment.strip_suffix("()") {
             Some(name) => (name, true),
             None => (segment, false),
         };
-        if called {
-            // only what's known to give a `Node`
-            if !RETURN_NODE.contains(&name) {
-                return None;
+        resolved = Some(match (resolved, separator, called) {
+            (None, None, false) => Resolved::Value(lua.globals().get(name).ok()?),
+            (Some(Resolved::Value(LuaValue::Table(table))), Some('.'), false) => {
+                Resolved::Value(table.get(name).ok()?)
             }
-            resolved = Some(Resolved::Node);
-            continue;
-        }
-        let value = match resolved {
-            None => lua.globals().get::<LuaValue>(name).ok()?,
-            Some(Resolved::Value(LuaValue::Table(table))) => table.get::<LuaValue>(name).ok()?,
+            (Some(Resolved::Value(LuaValue::Table(table))), Some('.'), true)
+                if READ_ONLY_CALLS.contains(&name) =>
+            {
+                // known to give a node, even if asking fails
+                let function = table.get::<mlua::Function>(name).ok()?;
+                function.call(()).map_or(Resolved::Node, Resolved::Value)
+            }
+            (Some(Resolved::Value(LuaValue::UserData(node))), Some(':'), true)
+                if node.is::<Node>() && name == "parent" =>
+            {
+                Resolved::Value(to_lua(lua, node_call(&node, name)?).ok()?)
+            }
+            (Some(_), Some(':'), true) if name == "add_child" => Resolved::Node,
             _ => return None,
-        };
-        resolved = Some(Resolved::Value(value));
+        });
+        if end == rest.len() {
+            return resolved;
+        }
+        separator = rest[end..].chars().next();
+        rest = &rest[end + 1..];
     }
-    resolved
+}
+
+/// A node command with no arguments, on a `Node` userdata
+fn node_call(node: &mlua::AnyUserData, name: &str) -> Option<Value> {
+    let uid = node.borrow::<Node>().ok()?.0;
+    command::call(Some(uid), name, Vec::new(), &cancelled).ok()
 }
 
 fn node_methods() -> Vec<String> {
@@ -492,6 +528,17 @@ mod tests {
         assert!(complete_all("context.focus():title():").is_empty());
         assert!(eval_all("my_var = 1").1.is_ok());
         assert_eq!(complete_all("my_v"), ["my_var"]);
+        // the fake root is a command hub (its `type` answer is `"type []"`, declared below)
+        command::declare(
+            "type []",
+            &[command::Signature {
+                name: "set_title",
+                params: "title: string",
+                returns: "nil",
+                doc: "",
+            }],
+        );
+        assert_eq!(complete_all("context.root():set"), ["set_title"]);
     }
 
     #[test]
@@ -551,5 +598,20 @@ mod tests {
             eval_all("context.root() == context.root()").1,
             Ok(vec![Value::Bool(true)])
         );
+
+        // the fake world answers `type` with `"type []"`
+        command::declare(
+            "type []",
+            &[command::Signature {
+                name: "set_title",
+                params: "title: string",
+                returns: "nil",
+                doc: "",
+            }],
+        );
+        let complete_all = |text: &str| complete(text.to_string(), || {}).recv().unwrap();
+        assert_eq!(complete_all("context.root():set"), ["set_title"]);
+        let help = eval_all("sonamu.help()").1.unwrap();
+        assert!(help[0].to_string().contains("set_title"));
     }
 }
