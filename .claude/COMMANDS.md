@@ -98,7 +98,8 @@ Deviations from the decisions below:
 - Language: Luau (`mlua`, vendored, `async`, `send`), sandbox mode (read-only builtins, no `io`/`os.execute`).
   - Dynamic. Optional static typing later via a generated definitions file (`luau-lsp`/`luau-analyze`).
   - Modules are tables: `context.focus()`, `file_manager.from_node(n)`. Methods: `fm:open("/tmp")`.
-- Types: `nil`, `boolean`, `number`, `string`, `{T}`, `T?`; handles are userdata named after the applet type
+- Types: `nil`, `boolean`, `number`, `string`, `{T}`, `T?`, tables with string keys (`Value::Map`: a table is a
+  `List` if all its keys are 1..n, else string keys only; JSON object; `{k = v}`); handles are userdata named after the applet type
   (`FileManager`, `CommandHub`, `WlSurface`).
   - `Node` is a trait, not a type: every handle type registers the `Node` methods. No subtyping.
   - Method lookup uses the value's actual type: `n:open(p)` works if `n` is a file manager.
@@ -175,7 +176,6 @@ Untested:
 Gaps:
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
-- Luau tables pass/return only their sequence part (`Value::List`); map keys are dropped silently.
 - Prompt: no type-ahead while running; no newline key (only pasted ones).
 - `hub:run_output` blocks the hub's thread (`process.output` doesn't).
 - `cast` returns the same `Node`: no per-type handles, no `file_manager.from_node`.

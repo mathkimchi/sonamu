@@ -38,6 +38,8 @@ pub enum Value {
     Number(f64),
     String(String),
     List(Vec<Self>),
+    /// A Luau table with string keys
+    Map(BTreeMap<String, Self>),
     Node(NodeUid),
 }
 impl fmt::Display for Value {
@@ -55,6 +57,14 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Self::Map(values) => {
+                write!(f, "{{")?;
+                for (i, (key, value)) in values.iter().enumerate() {
+                    let separator = if i == 0 { "" } else { ", " };
+                    write!(f, "{separator}{key} = {value}")?;
+                }
+                write!(f, "}}")
+            }
             Self::Node(NodeUid(uid)) => write!(f, "Node({uid})"),
         }
     }
@@ -68,7 +78,7 @@ impl Value {
             Self::Bool(_) => "boolean",
             Self::Number(_) => "number",
             Self::String(_) => "string",
-            Self::List(_) => "table",
+            Self::List(_) | Self::Map(_) => "table",
             Self::Node(_) => "Node",
         }
     }

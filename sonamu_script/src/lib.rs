@@ -904,10 +904,30 @@ fn from_lua(value: &LuaValue) -> mlua::Result<Value> {
         LuaValue::Number(value) => Value::Number(*value),
         LuaValue::String(value) => Value::String(value.to_str()?.to_string()),
         LuaValue::UserData(data) => Value::Node(data.borrow::<Node>()?.0),
-        LuaValue::Table(table) => Value::List(
+        // a sequence (or empty): a list; else string keys
+        LuaValue::Table(table)
+            if table.pairs::<LuaValue, LuaValue>().count() == table.raw_len() =>
+        {
+            Value::List(
+                table
+                    .sequence_values::<LuaValue>()
+                    .map(|value| from_lua(&value?))
+                    .collect::<mlua::Result<_>>()?,
+            )
+        }
+        LuaValue::Table(table) => Value::Map(
             table
-                .sequence_values::<LuaValue>()
-                .map(|value| from_lua(&value?))
+                .pairs::<LuaValue, LuaValue>()
+                .map(|pair| {
+                    let (key, value) = pair?;
+                    let LuaValue::String(key) = key else {
+                        return Err(mlua::Error::runtime(format!(
+                            "can't pass a table with a {} key (only a list or string keys)",
+                            key.type_name()
+                        )));
+                    };
+                    Ok((key.to_str()?.to_string(), from_lua(&value)?))
+                })
                 .collect::<mlua::Result<_>>()?,
         ),
         other => {
@@ -940,6 +960,14 @@ fn to_lua(lua: &Lua, value: Value) -> mlua::Result<LuaValue> {
                     .collect::<mlua::Result<Vec<_>>>()?,
             )?,
         ),
+        Value::Map(values) => LuaValue::Table(
+            lua.create_table_from(
+                values
+                    .into_iter()
+                    .map(|(key, value)| Ok((key, to_lua(lua, value)?)))
+                    .collect::<mlua::Result<Vec<_>>>()?,
+            )?,
+        ),
         Value::Node(uid) => LuaValue::UserData(lua.create_userdata(Node(uid))?),
     })
 }
@@ -966,6 +994,12 @@ mod tests {
         assert_eq!(eval_all("x = 5").1, Ok(vec![]));
         assert_eq!(eval_all("x * 2").1, Ok(vec![Value::Number(10.0)]));
         assert_eq!(eval_all("print('a', 1)").0, vec!["a\t1"]);
+        assert_eq!(eval_all("{1, 2}").1.unwrap()[0].to_string(), "{1, 2}");
+        assert_eq!(
+            eval_all("{a = 1, b = {true}}").1.unwrap()[0].to_string(),
+            "{a = 1, b = {true}}"
+        );
+        assert_eq!(eval_all("{}").1, Ok(vec![Value::List(vec![])]));
         assert!(
             eval_all("string.len = nil").1.is_err(),
             "builtins are read-only"
