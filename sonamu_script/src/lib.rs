@@ -464,6 +464,7 @@ sonamu.reset()                 a fresh Luau state
 sonamu.definitions(): string   luau-lsp definitions of all this, eg `sonamu-msg eval 'sonamu.definitions()'`
 Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) toggle_half() wrap_project()
       parent(): Node? children(): {Node} type(): string title(): string cast(type): Node?
+      spawn(program, {args}?) (in its tree's directory) quit()
       any other method is a command of its applet, eg hub:clear()
 Super+Esc: the buffer line (Esc leaves). There and in the hub: Tab completes, Up/Down recalls, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+C cancels.
 Super+? lists every keybind.";
@@ -481,6 +482,8 @@ const NODE_METHODS: &str = "\
     function type(self): string
     function title(self): string
     function cast(self, applet_type: string): Node?
+    function spawn(self, program: string, args: {string}?): ()
+    function quit(self): ()
 ";
 
 /// A luau-lsp definitions file: the globals, `Node`, and a class per applet type (from its declared commands)

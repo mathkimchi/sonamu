@@ -1,4 +1,8 @@
-use sonamu_common::{sap::packets::StandardRequest, settings};
+use sonamu_common::{
+    command::{self, Value},
+    sap::packets::StandardRequest,
+    settings,
+};
 use sonamu_ui::ui_event::{KeyModifiers, KeyTrait, UIEvent};
 
 use crate::nodular_applet::{AppletContext, NodeRequest, project_applet::ProjectApplet};
@@ -69,7 +73,59 @@ fn installed(program: &str) -> bool {
         .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
 }
 
-/// Handle the standard keybinds like:
+/// A standard keybind's node command (see `.claude/COMMANDS.md`), with its args
+pub struct KeybindCommand {
+    pub name: &'static str,
+    pub args: Vec<Value>,
+}
+impl KeybindCommand {
+    const fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            args: Vec::new(),
+        }
+    }
+
+    /// The same as a request to the node (eg for applets that handle some keybinds differently)
+    #[must_use]
+    pub fn request(&self) -> Option<NodeRequest> {
+        Some(match (self.name, self.args.as_slice()) {
+            ("quit", []) => StandardRequest::Quit.into(),
+            ("wrap_project", []) => NodeRequest::Wrap(ProjectApplet::wrapper()),
+            ("close", []) => NodeRequest::Close,
+            ("toggle_half", []) => NodeRequest::ToggleHalf,
+            ("spawn", [Value::String(program)]) => NodeRequest::Run(program.clone()),
+            #[expect(clippy::cast_possible_truncation, reason = "a sibling offset")]
+            ("swap_sibling", [Value::Number(offset)]) => NodeRequest::SwapSibling(*offset as isize),
+            _ => return None,
+        })
+    }
+}
+
+/// Does the standard keybinds (see `standard_keybind`) as commands on the applet's node (as requests until it
+/// knows its node). Returns whether the key was one.
+pub fn handle_standard_keybinds(ui_event: &UIEvent, hook: &AppletContext) -> bool {
+    let Some(keybind) = standard_keybind(ui_event) else {
+        return false;
+    };
+    match hook.uid() {
+        Some(uid) => command::send(uid, keybind.name, keybind.args),
+        None => {
+            if let Some(request) = keybind.request() {
+                hook.request(request);
+            }
+        }
+    }
+    true
+}
+
+/// The request a standard keybind makes to the applet's node, if `ui_event` is one.
+/// For applets that handle some keybinds differently (eg `WlSurfaceApplet`'s Super+W).
+pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
+    standard_keybind(ui_event)?.request()
+}
+
+/// The standard keybinds:
 /// - `Ctrl+Shift+Q` - Quit
 /// - `Super+W` - Close tab
 /// - `Super+T` / `Super+N` - Start the terminal / browser
@@ -78,96 +134,46 @@ fn installed(program: &str) -> bool {
 /// - `Alt+Shift+W` / `Alt+Shift+S` - swap with the previous / next sibling
 ///
 /// Traversal (`Alt+<traversal key>`, swipes) is the root's (`nodular_applet::traversal`).
-///
-/// Returns whether or not the keypress was used.
-///
-/// NOTE: I could technically just take in keypress,
-/// but this is fine.
-///
-/// TODO: have an enum or something more generic for a keybind system
-/// (could use abstraction similar to what I did with packets).
-pub fn handle_standard_keybinds(ui_event: &UIEvent, hook: &AppletContext) -> bool {
-    standard_keybind_request(ui_event)
-        .map(|request| hook.request(request))
-        .is_some()
-}
-
-/// The request a standard keybind makes to the applet's node, if `ui_event` is one.
-/// For applets that handle some keybinds differently (eg `WlSurfaceApplet`'s Super+W).
-pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
-    if let UIEvent::Key {
-        symbol: Some(key),
-        modifiers: KeyModifiers::CTRL_SHIFT,
-        pressed: true,
-        ..
-    } = &ui_event
-        && key.to_char() == Some('Q')
-    {
-        // Ctrl+Shift+Q -> Quit
-        Some(StandardRequest::Quit.into())
-    } else if let UIEvent::Key {
-        symbol: Some(key),
-        modifiers: KeyModifiers { logo: true, .. },
-        pressed: true,
-        ..
-    } = &ui_event
-        && matches!(key.to_char(), Some('p' | 'P'))
-    {
-        // Super+P -> put the node and everything under it in a project
-        Some(NodeRequest::Wrap(ProjectApplet::wrapper()))
-    } else if let UIEvent::Key {
-        symbol: Some(key),
-        modifiers: KeyModifiers { logo: true, .. },
-        pressed: true,
-        ..
-    } = &ui_event
-        && key.to_char() == Some('w')
-    {
-        // Super+W -> close this tab, its children move to the parent
-        Some(NodeRequest::Close)
-    } else if let UIEvent::Key {
-        symbol: Some(key),
-        modifiers: KeyModifiers { logo: true, .. },
-        pressed: true,
-        ..
-    } = &ui_event
-        && matches!(key.to_char(), Some('f' | 'F'))
-    {
-        // Super+F -> toggle half width (#144)
-        Some(NodeRequest::ToggleHalf)
-    } else if let UIEvent::Key {
-        symbol: Some(key),
-        modifiers: KeyModifiers { logo: true, .. },
-        pressed: true,
-        ..
-    } = &ui_event
-        && let Some(program) = match key.to_char() {
-            Some('t') => Some(terminal()),
-            Some('n') => Some(browser()),
-            _ => None,
-        }
-    {
-        // Super+T / Super+N -> start the terminal / browser
-        Some(NodeRequest::Run(program))
-    } else if let UIEvent::Key {
+pub fn standard_keybind(ui_event: &UIEvent) -> Option<KeybindCommand> {
+    let UIEvent::Key {
         symbol: Some(key),
         modifiers,
         pressed: true,
         ..
-    } = &ui_event
-        && modifiers.alt
-        && modifiers.shift
-        && !modifiers.ctrl
-        && !modifiers.logo
-        && let Some(shift) = match key.to_char() {
-            Some('W') => Some(-1),
-            Some('S') => Some(1),
-            _ => None,
-        }
-    {
-        // Alt+Shift+W / Alt+Shift+S -> swap with the previous / next sibling
-        Some(NodeRequest::SwapSibling(shift))
-    } else {
-        None
-    }
+    } = *ui_event
+    else {
+        return None;
+    };
+    let key = key.to_char()?;
+    Some(match (key, modifiers) {
+        ('Q', KeyModifiers::CTRL_SHIFT) => KeybindCommand::new("quit"),
+        // the node and everything under it in a project
+        ('p' | 'P', KeyModifiers { logo: true, .. }) => KeybindCommand::new("wrap_project"),
+        // its children move to the parent
+        ('w', KeyModifiers { logo: true, .. }) => KeybindCommand::new("close"),
+        // #144
+        ('f' | 'F', KeyModifiers { logo: true, .. }) => KeybindCommand::new("toggle_half"),
+        ('t' | 'n', KeyModifiers { logo: true, .. }) => KeybindCommand {
+            name: "spawn",
+            args: vec![Value::String(if key == 't' {
+                terminal()
+            } else {
+                browser()
+            })],
+        },
+        (
+            'W' | 'S',
+            KeyModifiers {
+                alt: true,
+                shift: true,
+                ctrl: false,
+                logo: false,
+                ..
+            },
+        ) => KeybindCommand {
+            name: "swap_sibling",
+            args: vec![Value::Number(if key == 'W' { -1.0 } else { 1.0 })],
+        },
+        _ => return None,
+    })
 }

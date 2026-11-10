@@ -77,7 +77,14 @@ Deviations from the decisions below:
   extending `Node`; the globals), eg `sonamu-msg eval 'sonamu.definitions()' > sonamu.d.luau`. Not checked against
   luau-lsp yet. `cast` still returns `Node`, so applet methods need an annotation (`local fm: file_manager = n :: any`).
 
-Not done: keybinds through `NodeCall`; signatures aren't checked against calls (`command()` is).
+- Keybinds: `standard_keybinds::standard_keybind` maps a key to a `KeybindCommand` (`quit`, `wrap_project`, `close`,
+  `toggle_half`, `spawn(program)`, `swap_sibling(±1)`); `handle_standard_keybinds` sends it to the applet's own node
+  (`command::send`, no answer; as the old `NodeRequest` via `KeybindCommand::request` until `AppletContext::uid` is
+  known). `standard_keybind_request` (wl tiles, session placeholders, file manager, the tree's own keybinds on a
+  selected node, `is_keybind`) still gives the request. So Super+W on an applet now asks it (`close_requested`) first.
+  `spawn`/`quit` are node commands too (`n:spawn` runs in its tree's directory).
+
+Not done: signatures aren't checked against calls (`command()` is).
 
 ## Decisions
 

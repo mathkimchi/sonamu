@@ -137,6 +137,25 @@ pub fn call(
     }
 }
 
+/// Runs the command in the node's world without waiting for it (eg a keybind); dropped if the node is gone
+pub fn send(uid: NodeUid, name: &str, args: Vec<Value>) {
+    let world = WORLDS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&uid)
+        .cloned();
+    if let Some(world) = world {
+        // no one reads the answer
+        let (reply, _) = mpsc::channel();
+        let _ = world.send(NodeCall {
+            uid: Some(uid),
+            name: name.to_string(),
+            args,
+            reply,
+        });
+    }
+}
+
 /// The error for a node that closed or a world that ended
 pub fn gone() -> String {
     "the node is gone".to_string()
@@ -216,7 +235,7 @@ pub fn number_arg(args: &[Value], index: usize) -> Result<f64, String> {
 }
 
 /// The node commands every node has (`Node` methods in scripts); an applet's can't use these names
-pub const NODE_COMMANDS: [&str; 10] = [
+pub const NODE_COMMANDS: [&str; 12] = [
     "close",
     "focus",
     "add_child",
@@ -227,6 +246,8 @@ pub const NODE_COMMANDS: [&str; 10] = [
     "children",
     "type",
     "title",
+    "spawn",
+    "quit",
 ];
 
 /// An applet command, as declared by its spawner (`AppletSpawnerTrait::commands`)

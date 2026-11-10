@@ -534,6 +534,18 @@ impl NodeHolder {
             "swap_sibling" => command::number_arg(args, 0)
                 .and_then(|offset| request(self, NodeRequest::SwapSibling(offset as isize))),
             "toggle_half" => request(self, NodeRequest::ToggleHalf),
+            // in this tree's directory (unlike the root tree's `spawn`, for keybinds in projects)
+            "spawn" => (|| {
+                let program = command::string_arg(args, 0)?;
+                let program_args = command::strings_arg(args, 1)?;
+                let program_args: Vec<&str> = program_args.iter().map(String::as_str).collect();
+                if self.run_with(program, &program_args) {
+                    Ok((Value::Nil, None))
+                } else {
+                    Err(format!("couldn't start {program}"))
+                }
+            })(),
+            "quit" => request(self, StandardRequest::Quit.into()),
             "wrap_project" => request(self, NodeRequest::Wrap(ProjectApplet::wrapper())),
             "parent" => Ok((
                 self.tree
