@@ -10,7 +10,7 @@ use crate::{
 };
 use slotmap::SlotMap;
 use sonamu_common::{
-    command::{self, NodeUid, World},
+    command::{self, NodeUid, Value, World},
     sap::{
         client_handle::ClientHandle,
         detached::{DetachedClient, DetachedTree, EMPTY_LABEL},
@@ -387,6 +387,7 @@ impl NodeTree {
             .insert_with_key(|id| Node::new(Some(spawn_client(id, initializer)), parent));
         self.register(id);
         self.send_initial_size(id);
+        sonamu_script::emit("open", vec![Value::Node(self.nodes[id].uid)]);
         id
     }
 
@@ -1500,6 +1501,7 @@ impl NodeTree {
         }
         let closed = self.nodes.remove(id).unwrap();
         command::unregister(closed.uid);
+        sonamu_script::emit("close", vec![Value::Node(closed.uid)]);
         for &orphan in &closed.children {
             self.nodes[orphan].parent = Some(parent_id);
         }

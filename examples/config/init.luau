@@ -10,6 +10,8 @@
 -- events.on("window", function(app_id)
 -- 	print("opened", app_id)
 -- end)
--- events.on("focus", function()
--- 	print("focus:", context.focus():title())
+-- events.on("focus", function(node)
+-- 	print("focus:", node:title())
 -- end)
+-- Also `open` (a new node), `close` (its node, gone), `settings`, `screens` (count);
+-- outside Sonamu: `sonamu-msg subscribe focus close`

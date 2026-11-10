@@ -137,9 +137,25 @@ pub fn run_binding(id: u64) {
     send_job(Job::Call(Call::Binding(id)));
 }
 
-/// Calls the `events.on` functions for `event` with `args` (eg `"focus"`)
+/// Calls the `events.on` functions for `event` with `args`, then sends it to `subscribe`rs. `focus` is emitted
+/// without args: the innermost focus is found on the script thread (worlds don't wait on each other).
 pub fn emit(event: &str, args: Vec<Value>) {
     send_job(Job::Call(Call::Emit(event.to_string(), args)));
+}
+
+/// An emitted event and its args
+pub type Event = (String, Vec<Value>);
+
+static SUBSCRIBERS: Mutex<Vec<mpsc::Sender<Event>>> = Mutex::new(Vec::new());
+
+/// Every event emitted from now on (eg for `sonamu-msg subscribe`), until the receiver is dropped
+pub fn subscribe() -> mpsc::Receiver<Event> {
+    let (events, received) = mpsc::channel();
+    SUBSCRIBERS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(events);
+    received
 }
 
 fn send_job(job: Job) {
@@ -315,7 +331,14 @@ fn run_call(lua: &Lua, call: Call) -> Result<(), String> {
             }
             .map_err(|err| err.to_string())
         }
-        Call::Emit(event, args) => {
+        Call::Emit(event, mut args) => {
+            if event == "focus" && args.is_empty() {
+                args.extend(command::focus(&cancelled).ok());
+            }
+            SUBSCRIBERS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retain(|subscriber| subscriber.send((event.clone(), args.clone())).is_ok());
             let hooks: mlua::Table = lua
                 .named_registry_value(HOOKS_KEY)
                 .map_err(|err| err.to_string())?;
@@ -568,7 +591,8 @@ process.spawn(program, {args}?)
 process.output(program, {args}?, dir?): string   waits for it (Ctrl+C kills it); stdout, then stderr
 process.output(program, {args}?, dir?, fn(out, err))   doesn't wait (other Luau runs meanwhile): fn gets either
 keymap.set({mods}, key, fn)   a global key (`ctrl`, `alt`, `shift`, `logo`; a character or evdev code)
-events.on(event, fn)           `focus` (focus moved), `window` (a wl window opened: its app id)
+events.on(event, fn)           `focus` (focus moved: the node), `open` (a new node), `close` (its gone node),
+                               `window` (a wl window opened: its app id), `settings` (reloaded), `screens` (count)
 ~/.config/sonamu/init.luau     runs at start and on sonamu.reset()
 clipboard.copy(text)           Sonamu's clipboard, for wl clients too
 clipboard.paste(): string?

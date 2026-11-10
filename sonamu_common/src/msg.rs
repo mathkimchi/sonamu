@@ -14,6 +14,8 @@ pub enum Message {
     Open { applet: String, args: Vec<String> },
     /// Runs Luau on the script thread like the buffer line; answered with `EvalReply` lines, the last one `Done`
     Eval(String),
+    /// Streams these `events.on` events (all if empty) back as `EventLine`s until the connection closes
+    Subscribe(Vec<String>),
 }
 
 /// A line the runner writes back for `Message::Eval`, as JSON
@@ -24,6 +26,14 @@ pub enum EvalReply {
     /// Its return values (`command::Value` as JSON)
     Done(Result<Vec<serde_json::Value>, String>),
 }
+/// A line the runner writes back for `Message::Subscribe`, as JSON
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EventLine {
+    pub event: String,
+    /// `command::Value`s as JSON
+    pub args: Vec<serde_json::Value>,
+}
+
 impl Message {
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
@@ -33,6 +43,9 @@ impl Message {
                 .chain(args.iter().map(String::as_str))
                 .collect(),
             Self::Eval(code) => vec!["eval", code],
+            Self::Subscribe(events) => std::iter::once("subscribe")
+                .chain(events.iter().map(String::as_str))
+                .collect(),
         };
         let mut bytes = Vec::new();
         for field in fields {
@@ -52,6 +65,7 @@ impl Message {
                 args: fields.collect(),
             }),
             "eval" => Some(Self::Eval(fields.next()?)),
+            "subscribe" => Some(Self::Subscribe(fields.collect())),
             _ => None,
         }
     }

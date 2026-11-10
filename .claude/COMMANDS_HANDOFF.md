@@ -19,8 +19,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
 
 ## Gaps (see COMMANDS.md To do for the full list)
 
-- Events: emit `close`, `open`, `settings`, `screens`; pass the focused node to `focus`; forward over the socket as
-  `EvalReply`-like lines (a `sonamu-msg subscribe`).
 - `keymap.unset`, and focus-path layering / `when` conditions (see the plan's Later).
 - `init.luau` environments: per-file environments + `require` (Roblox model) once there are several files.
 - Clipboard: a copy key in the hub/buffer line (last output) and the code editor (selection, once it has one);

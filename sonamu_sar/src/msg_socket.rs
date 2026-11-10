@@ -4,7 +4,7 @@ use crate::runner::AppletRunner;
 use calloop::{Interest, LoopHandle, Mode, PostAction, generic::Generic};
 use sonamu_common::{
     command::{self, Value},
-    msg::{EvalReply, Message},
+    msg::{EvalReply, EventLine, Message},
     sap::packets::{OpenApplet, StandardEvent},
 };
 use std::{
@@ -49,6 +49,9 @@ impl MsgSocket {
                             // answered from its own thread, so the loop doesn't wait for it
                             Ok(Message::Eval(code)) => {
                                 std::thread::spawn(move || answer_eval(stream, code));
+                            }
+                            Ok(Message::Subscribe(events)) => {
+                                std::thread::spawn(move || answer_subscribe(stream, &events));
                             }
                             Err(err) => eprintln!("Bad message on the socket: {err}"),
                         }
@@ -102,6 +105,32 @@ fn answer_eval(mut stream: UnixStream, code: String) {
     }
 }
 
+/// Writes each emitted event in `events` (all if empty) as an `EventLine` until the sender is gone
+fn answer_subscribe(mut stream: UnixStream, events: &[String]) {
+    const POLL: Duration = Duration::from_millis(100);
+    let emitted = sonamu_script::subscribe();
+    loop {
+        let line = match emitted.recv_timeout(POLL) {
+            Ok((event, _)) if !events.is_empty() && !events.contains(&event) => continue,
+            Ok((event, args)) => {
+                let line = EventLine {
+                    event,
+                    args: args.iter().map(to_json).collect(),
+                };
+                let mut line = serde_json::to_string(&line).unwrap_or_default();
+                line.push('\n');
+                line
+            }
+            // a keepalive, failing once the sender is gone (see `answer_eval`)
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => "\n".to_string(),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+        };
+        if stream.write_all(line.as_bytes()).is_err() {
+            return;
+        }
+    }
+}
+
 /// `value` as JSON, a node as `{"type": .., "node": uid}` (its type asked now; null if it's gone)
 fn to_json(value: &Value) -> serde_json::Value {
     match value {
@@ -149,6 +178,28 @@ mod tests {
                 EvalReply::Print("a".to_string()),
                 EvalReply::Done(Ok(vec![serde_json::json!(2.0)])),
             ]
+        );
+    }
+
+    #[test]
+    fn subscribe_streams_events() {
+        let (client, server) = UnixStream::pair().unwrap();
+        std::thread::spawn(move || answer_subscribe(server, &["wanted".to_string()]));
+        // once it subscribed
+        std::thread::sleep(Duration::from_millis(100));
+        sonamu_script::emit("unwanted", Vec::new());
+        sonamu_script::emit("wanted", vec![Value::Number(1.0)]);
+        let line = BufReader::new(client)
+            .lines()
+            .map(Result::unwrap)
+            .find(|line| !line.is_empty())
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<EventLine>(&line).unwrap(),
+            EventLine {
+                event: "wanted".to_string(),
+                args: vec![serde_json::json!(1.0)]
+            }
         );
     }
 }

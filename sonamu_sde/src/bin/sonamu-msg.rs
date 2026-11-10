@@ -2,6 +2,8 @@
 //! - `sonamu-msg open file_manager ~/Documents` opens an applet (see `assets/sonamu-file-manager.desktop`)
 //! - `sonamu-msg eval '<luau>'` (`-`: from stdin) runs Luau like the buffer line: `print`s to stderr, the result as
 //!   JSON on stdout (one value as is, several as an array), an error to stderr with exit code 1
+//! - `sonamu-msg subscribe [event...]` prints `events.on` events (all if none named) as JSON lines,
+//!   `{"event": .., "args": [..]}`, until killed
 
 use sonamu_common::msg::{EvalReply, Message, SOCKET_ENV};
 use std::{
@@ -11,7 +13,8 @@ use std::{
     process::ExitCode,
 };
 
-const USAGE: &str = "usage: sonamu-msg open <applet> [args...] | sonamu-msg eval <luau | ->";
+const USAGE: &str = "usage: sonamu-msg open <applet> [args...] | sonamu-msg eval <luau | -> | \
+                     sonamu-msg subscribe [event...]";
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -20,6 +23,7 @@ fn main() -> ExitCode {
             applet,
             args: args.map(absolute_if_path).collect(),
         },
+        (Some("subscribe"), first) => Message::Subscribe(first.into_iter().chain(args).collect()),
         (Some("eval"), Some(code)) if args.next().is_none() => {
             let code = if code == "-" {
                 let mut code = String::new();
@@ -40,6 +44,7 @@ fn main() -> ExitCode {
     };
     let result = send(&message).and_then(|stream| match message {
         Message::Eval(_) => print_replies(stream),
+        Message::Subscribe(_) => print_events(stream),
         Message::Open { .. } => Ok(true),
     });
     match result {
@@ -88,6 +93,21 @@ fn print_replies(stream: UnixStream) -> std::io::Result<bool> {
         }
     }
     Err(std::io::Error::other("Sonamu hung up"))
+}
+
+/// `Message::Subscribe`'s lines, as they come; returns when Sonamu hangs up
+fn print_events(stream: UnixStream) -> std::io::Result<bool> {
+    let mut stdout = std::io::stdout();
+    for line in BufReader::new(stream).lines() {
+        let line = line?;
+        // keepalives
+        if line.is_empty() {
+            continue;
+        }
+        writeln!(stdout, "{line}")?;
+        stdout.flush()?;
+    }
+    Ok(true)
 }
 
 /// Sonamu runs in another directory, so relative paths that exist here are made absolute

@@ -79,8 +79,12 @@ Deviations from the decisions below:
   `sonamu.reset()`, which also drops bindings). `keymap.set({mods}, key, fn)`: keys in the static `BINDINGS`
   (matched like settings `Keybind`s; same key replaces), fns in the state's registry; the runner checks
   `binding(..)` after the settings keybinds (before the root, so any focus) and queues `run_binding`.
-  `events.on(event, fn)`; the root `emit`s `focus` (no args, `remember_focus` sees the path change) and `window`
-  (app id, on `WlSurfaceRegistered`). These run as `Job::Call`: no one waits; their `print`s and errors are messages (below).
+  `events.on(event, fn)`, positional args: `focus(node)` (root emits it without args when `remember_focus` sees the
+  path change; the script thread fills in `command::focus`, since worlds don't wait), `window(app_id)`
+  (`WlSurfaceRegistered`), `open(node)` (`NodeTree::insert_node`, any world; not restores/moves), `close(node)`
+  (`NodeTree::close`; the handle is gone, compare with `==`), `settings()`, `screens(count)` (count changed).
+  `sonamu_script::subscribe` gets every emitted event: `sonamu-msg subscribe [event...]` (`Message::Subscribe`,
+  `msg_socket::answer_subscribe`) prints them as `msg::EventLine` JSON lines. These run as `Job::Call`: no one waits; their `print`s and errors are messages (below).
 - Messages (Emacs' `*Messages*` + echo area): `sonamu_script::message` keeps the last 200 (`sonamu.messages()`), logs
   them to stderr, and calls `on_message` (the root's waker); the root (`echo_message`) shows the last one over the
   active screen's buffer line row for 5 s (errors in red; `Bar::None` when the row isn't reserved). Decided over: errors
@@ -182,7 +186,6 @@ Untested:
 Gaps:
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
-- Events: only `focus` (no args) and `window` (app id); none for close, open, settings, screens; not over the socket.
 - `keymap`: no unset; global only (no layering along the focus path, no `when` conditions).
 - `init.luau` shares the one environment (no per-script environments, no `require`).
 - Clipboard: applets can't copy from their own UI (only Luau's `clipboard.copy`); no primary selection.

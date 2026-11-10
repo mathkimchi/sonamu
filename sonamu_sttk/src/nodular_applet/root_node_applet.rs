@@ -340,6 +340,10 @@ impl RootNodeApplet {
         let active = self.holder.tree.active_screen().min(rects.len() - 1);
         self.activate_screen(active);
         self.holder.tree.set_screen_count(rects.len());
+        if self.screens.len() != rects.len() {
+            #[expect(clippy::cast_precision_loss, reason = "a few screens")]
+            sonamu_script::emit("screens", vec![Value::Number(rects.len() as f64)]);
+        }
         self.screens.resize_with(rects.len(), Screen::default);
         for (screen, rect) in self.screens.iter_mut().zip(rects) {
             screen.rect = rect;
@@ -798,7 +802,10 @@ impl RootNodeApplet {
             // it has the screens itself
             StandardEvent::ScreenViews { .. } => {}
             // it reads the settings when it draws
-            StandardEvent::SettingsChanged(_) => self.surface.damage(),
+            StandardEvent::SettingsChanged(_) => {
+                self.surface.damage();
+                sonamu_script::emit("settings", Vec::new());
+            }
             // its tree is in the runner's directory
             StandardEvent::Directory(_) => {}
             StandardEvent::Open(open) => self.holder.open(open),
