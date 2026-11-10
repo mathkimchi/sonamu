@@ -327,6 +327,15 @@ fn new_lua() -> mlua::Result<Lua> {
 
     let process = lua.create_table()?;
     process.set("spawn", tree_function(&lua, "spawn")?)?;
+    process.set(
+        "output",
+        lua.create_function(
+            |_, (program, args, dir): (String, Option<Vec<String>>, Option<String>)| {
+                output(&program, &args.unwrap_or_default(), dir.as_deref())
+                    .map_err(mlua::Error::runtime)
+            },
+        )?,
+    )?;
     globals.set("process", process)?;
 
     let sonamu = lua.create_table()?;
@@ -442,6 +451,7 @@ help() / sonamu.help()         this
 context.focus(): Node          the innermost focused node
 context.root(): Node           the root node
 process.spawn(program, {args}?)
+process.output(program, {args}?, dir?): string   waits for it (Ctrl+C kills it); stdout, then stderr
 keymap.set({mods}, key, fn)   a global key (`ctrl`, `alt`, `shift`, `logo`; a character or evdev code)
 events.on(event, fn)           `focus` (focus moved), `window` (a wl window opened: its app id)
 ~/.config/sonamu/init.luau     runs at start and on sonamu.reset()
@@ -497,7 +507,10 @@ fn definitions() -> String {
     out.push_str(
         "
 declare context: { focus: () -> Node, root: () -> Node }
-declare process: { spawn: (program: string, args: {string}?) -> () }
+declare process: {
+    spawn: (program: string, args: {string}?) -> (),
+    output: (program: string, args: {string}?, dir: string?) -> string,
+}
 declare clipboard: { copy: (text: string) -> boolean, paste: () -> string? }
 declare keymap: { set: (mods: {string}, key: string | number, fn: () -> ()) -> () }
 declare events: { on: (event: string, fn: (...any) -> ()) -> () }
@@ -532,6 +545,53 @@ fn help() -> String {
         }
     }
     help
+}
+
+/// Runs the program (in `dir`, else Sonamu's) and waits for it, polling so a cancelled eval kills it;
+/// its stdout then stderr, an error if it failed
+fn output(program: &str, args: &[String], dir: Option<&str>) -> Result<String, String> {
+    use std::io::Read as _;
+    let mut command = std::process::Command::new(program);
+    command
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    sonamu_common::connect_wl_client(&mut command);
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    let mut child = command.spawn().map_err(|err| format!("{program}: {err}"))?;
+    // read on threads, so a full pipe can't stall it
+    let read = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_string(&mut text);
+            }
+            text
+        })
+    };
+    let stdout = read(child.stdout.take().map(|pipe| Box::new(pipe) as _));
+    let stderr = read(child.stderr.take().map(|pipe| Box::new(pipe) as _));
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
+            break status;
+        }
+        if cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("cancelled".to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let mut text = stdout.join().unwrap_or_default();
+    text.push_str(&stderr.join().unwrap_or_default());
+    if status.success() {
+        Ok(text)
+    } else {
+        Err(format!("{text}{status}"))
+    }
 }
 
 /// A command of the root's tree
@@ -839,6 +899,15 @@ mod tests {
         );
         emit("focus", vec![Value::Number(3.0)]);
         assert_eq!(eval_all("got").1, Ok(vec![Value::Number(3.0)]));
+    }
+
+    #[test]
+    fn process_output() {
+        assert_eq!(
+            eval_all("process.output('sh', {'-c', 'echo hi; echo err >&2'})").1,
+            Ok(vec![Value::String("hi\nerr\n".to_string())])
+        );
+        assert!(eval_all("process.output('false')").1.is_err());
     }
 
     #[test]

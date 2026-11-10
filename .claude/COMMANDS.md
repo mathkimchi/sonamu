@@ -54,7 +54,7 @@ Deviations from the decisions below:
   `container`/`applet`), not stored.
 - `cast` takes the type name (`n:cast("file_manager")`), returns the same `Node`; no per-type handles.
 - No `split` (splits no longer exist). `parent()` stops at its world's root (nil there, even inside a project).
-- `hub:run_output` blocks the hub's thread while the program runs.
+- `hub:run_output` blocks the hub's thread while the program runs; `process.output` (script thread, Ctrl+C kills it) doesn't.
 
 - Socket: `Message::Eval(code)`; the runner answers from a thread (`msg_socket::answer_eval`) with JSON lines
   (`msg::EvalReply`: `print`, then `done` `Ok(values)`/`Err`), plus empty keepalive lines every 100 ms, which fail once
@@ -126,7 +126,7 @@ Not done: keybinds through `NodeCall`; signatures aren't checked against calls (
   `swap_sibling(offset)`, `toggle_half()`, `wrap_project()`, `parent(): Node?`, `children(): {Node}`,
   `type(): string`, `title(): string`, `cast(T): T?`.
 - `context.focus(): Node` (innermost, across worlds), `context.root(): Node`.
-- `process.spawn(program, args?)`; `clipboard.copy(text)`, `clipboard.paste(): string?`.
+- `process.spawn(program, args?)`, `process.output(program, args?, dir?): string`; `clipboard.copy(text)`, `clipboard.paste(): string?`.
 - `sonamu.open(applet, args?)`, `sonamu.reload_settings()`, `sonamu.quit()`, `sonamu.help(): string`, `sonamu.reset()`.
 - `CommandHub`: `clear()`, `set_title(t)`, `run_output(program, args?): string`.
 - `file_manager`: `root(): string`, `selected(): string?`, `open(path)` (shows its document).
