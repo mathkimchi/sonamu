@@ -1,0 +1,79 @@
+# Commands and scripting (plan, not started)
+
+Emacs-like model: every action is a named command; keybinds, the hub, the socket and (later) agents all call the same ones.
+Embedded language: Luau via `mlua`. Other languages: over the socket.
+
+## Decisions
+
+- Language: Luau (`mlua`, vendored, `async`, `send`), sandbox mode (read-only builtins, no `io`/`os.execute`).
+  - Dynamic. Optional static typing later via a generated definitions file (`luau-lsp`/`luau-analyze`).
+  - Modules are tables: `context.focus()`, `file_manager.from_node(n)`. Methods: `fm:open("/tmp")`.
+- Types: `nil`, `boolean`, `number`, `string`, `{T}`, `T?`; handles are userdata named after the applet type
+  (`FileManager`, `CommandHub`, `WlSurface`).
+  - `Node` is a trait, not a type: every handle type registers the `Node` methods. No subtyping.
+  - Method lookup uses the value's actual type: `n:open(p)` works if `n` is a file manager.
+  - `n:cast(FileManager)` / `file_manager.from_node(n)`: `FileManager?`, nil on mismatch.
+  - An applet command that clashes with a `Node` method is rejected at registration.
+- Node identity: `NodeUid(u64)` from a global `AtomicU64`, globally unique across worlds (root + projects).
+  - Registry (`sonamu_common`, `Mutex<HashMap>`): uid → (owning world's sender, local `NodeId`, type tag).
+  - Worlds insert on add, remove on drop, re-point on moves between worlds.
+  - Type tag: registered spawner name, or `wl_surface`; set at creation.
+  - Not saved in sessions.
+  - A handle to a removed node errors, never hits another node.
+- Calls: `NodeCall { uid, name, args, reply }` (reply: oneshot) on the owning world's calloop channel; one handler in
+  `NodeHolder` (root and projects alike).
+  - Node commands: run on its `NodeTree`.
+  - Applet commands: forwarded as `StandardEvent::Command { id, name, args }`; the applet answers with
+    `StandardRequest::CommandResult { id, result }` (plumbing in `AppletClient`).
+- Applets: the spawner declares commands statically (name, params with Luau types, return type, doc).
+  `StandardApplet::command(&mut self, name, args: Vec<Value>) -> Result<Value, String>`
+  (default: unknown command). Sync, on the applet's thread.
+  `Value` is a plain serde enum, so applets don't depend on `mlua`.
+- Script thread (`sonamu_script`, depends only on `sonamu_common`): one Luau VM, one persistent environment shared
+  by hub and socket evals (like nvim's `:lua`). One eval at a time; the others queue.
+  - Applet calls are `mlua` async functions waiting on `reply` (they yield, no deadlock: worlds never wait on the
+    script thread).
+  - `script::eval(code) -> (EvalHandle, Receiver<Output>)`; `EvalHandle::cancel()` sets a flag checked by the
+    interrupt callback.
+  - No timeouts in v0: Ctrl+C in the hub cancels its eval; a closed `sonamu-msg` connection cancels its eval.
+  - `sonamu.reset()`: a fresh environment.
+- Keybinds stay hardcoded but issue `NodeCall`s (Rust handlers, not Lua), so a stuck script can't block them.
+- Hub: Luau only, calls `script::eval` directly.
+  - Output: `print` as it comes, then return values formatted Lua-style (nothing for nil), errors in red.
+  - Tab completion against the live environment: globals, fields of field chains (no calls), methods of a chain's
+    actual handle type; after a call, the declared return type.
+  - Old verbs: `add_child` → `n:add_child`, `run` → `process.spawn`, `$` → `hub:run_output`,
+    `project` → `n:wrap_project()`, `help` → `sonamu.help()`; `test`, `addition` dropped.
+- Socket: `Message::Eval(String)` with a reply (the socket is one-way today); `sonamu-msg eval '<code>'`:
+  `print` to stderr, result as JSON on stdout, error → exit 1. `open` unchanged.
+
+## v0 API
+
+- `Node`: `close()`, `focus()`, `add_child(applet, args?): Node`, `split("horizontal" | "vertical")`,
+  `swap_sibling(offset)`, `toggle_half()`, `wrap_project()`, `parent(): Node?`, `children(): {Node}`,
+  `type(): string`, `title(): string`, `cast(T): T?`.
+- `context.focus(): Node` (innermost, across worlds), `context.root(): Node`.
+- `process.spawn(program, args?)`.
+- `sonamu.open(applet, args?)`, `sonamu.reload_settings()`, `sonamu.quit()`, `sonamu.help(): string`, `sonamu.reset()`.
+- `CommandHub`: `clear()`, `set_title(t)`, `run_output(program, args?): string`.
+- Not exposed: `Unwrap`, `Replace`, `StartWl`, `AddWlSurface` (sessions/plucking internals).
+
+## Milestones
+
+1. Identity: `NodeUid`, registry, type tag; worlds keep it updated.
+2. Commands without Lua: `Value`, `NodeCall`, `NodeHolder` handler, applet `command()` + events; keybinds issue calls.
+3. `sonamu_script`: thread, sandboxed env, bindings (incl. applet methods from spawner signatures, `cast`),
+   `script::eval`, cancel.
+4. Hub on Luau: input, `CommandHub` methods, output, completion.
+5. Socket: `Message::Eval`, `sonamu-msg eval`, JSON output.
+
+## Later
+
+- User-rebindable keymaps (layered along the focus path; VS Code-style `when` conditions).
+- Hooks/events (over the socket too).
+- Script files, each with its own environment, sharing through `require` (Roblox model).
+- Generated Luau definitions file → optional static typing, editor completion.
+- Hub sugar: `context.focus` as a property narrowed by its live type; a "previous focus" (in the hub, focus is the
+  hub itself).
+- MCP bridge (tool schemas from the signatures), socket client libraries (Python, Go).
+- Indirect views (one applet in two nodes), node properties, subtree-scoped settings.

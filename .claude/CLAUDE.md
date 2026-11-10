@@ -32,6 +32,7 @@ DEVLOG.md is 10k+ lines, read it with tail.
 - Desktop notifications (freedesktop D-Bus, eg DMS shows them): `sonamu_common::notification::Replacing`, sent with `busctl`; used by settings reloads and low battery warnings (`sonamu_sar::battery`, 20% then a critical one at 10%, polled every 30 s). Keep tests from sending them.
 - Testing with input and screenshots without a monitor (headless sway): `.claude/TESTING.md`.
 - Native applets' hand-built UI (rows with hit-testing, text, frames, metrics): `sonamu_sttk::ui`, see `.claude/UI_KIT.md`.
+- Commands and Luau scripting (planned, not started): `.claude/COMMANDS.md`.
 - World tree, paths ("inside" a node), focus, selectors, and who owns what (incl. projects, which are plain applets holding a `NodeTree`): `.claude/WORLD_TREE.md`.
 
 # Rules
