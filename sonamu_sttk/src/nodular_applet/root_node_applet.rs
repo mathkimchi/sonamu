@@ -442,6 +442,7 @@ impl RootNodeApplet {
         for (name, spawner) in &applet_spawner_registry {
             command::declare(name, spawner.commands());
         }
+        command::declare("wl_surface", &crate::wl_surface_applet::COMMANDS);
         let applet_spawners = Arc::new(RwLock::new(applet_spawner_registry));
         let (spawn_client, attach_client) = client_spawners(
             event_loop,

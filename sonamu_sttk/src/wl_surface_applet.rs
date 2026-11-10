@@ -5,6 +5,7 @@ use crate::{
     standard_keybinds::standard_keybind_request,
 };
 use sonamu_common::{
+    command::{self, CommandResult, Signature, Value},
     sap::{
         packets::{NewWlSurface, StandardEvent, WlSurfaceEvent, WlSurfaceId, WlSurfaceRequest},
         session::{SavedApplet, title_without_url},
@@ -22,6 +23,22 @@ use std::time::Duration;
 ///
 /// The tree's holder tracks which node shows which surface,
 /// and closes the node once the surface is destroyed.
+/// What `command` takes; declared by the root, since wl tiles have no spawner
+pub const COMMANDS: [Signature; 2] = [
+    Signature {
+        name: "app_id",
+        params: "",
+        returns: "string?",
+        doc: "its client's app id",
+    },
+    Signature {
+        name: "pid",
+        params: "",
+        returns: "number?",
+        doc: "its client's process",
+    },
+];
+
 pub struct WlSurfaceApplet {
     surface_id: WlSurfaceId,
     wl_request_queue: calloop::channel::Sender<(WlSurfaceId, WlSurfaceRequest)>,
@@ -69,6 +86,14 @@ impl WlSurfaceApplet {
     }
 }
 impl StandardApplet for WlSurfaceApplet {
+    fn command(&mut self, name: &str, _args: Vec<Value>) -> CommandResult {
+        Ok(match name {
+            "app_id" => self.app_id.clone().map_or(Value::Nil, Value::String),
+            "pid" => self.pid.map_or(Value::Nil, |pid| Value::Number(pid.into())),
+            _ => return Err(command::unknown(name)),
+        })
+    }
+
     fn handle_standard_event(&mut self, standard_event: StandardEvent) {
         let StandardEvent::UIEvent(ui_event) = standard_event else {
             return;

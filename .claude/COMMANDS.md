@@ -117,6 +117,9 @@ Not done: keybinds through `NodeCall`; signatures aren't checked against calls (
 - `process.spawn(program, args?)`.
 - `sonamu.open(applet, args?)`, `sonamu.reload_settings()`, `sonamu.quit()`, `sonamu.help(): string`, `sonamu.reset()`.
 - `CommandHub`: `clear()`, `set_title(t)`, `run_output(program, args?): string`.
+- `file_manager`: `root(): string`, `selected(): string?`, `open(path)` (shows its document).
+- `code_editor`: `path(): string`, `text(): string`, `save()`.
+- `wl_surface` (declared by the root, no spawner): `app_id(): string?`, `pid(): number?`.
 - Not exposed: `Unwrap`, `Replace`, `StartWl`, `AddWlSurface` (sessions/plucking internals).
 
 ## Milestones

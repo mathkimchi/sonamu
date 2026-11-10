@@ -3,6 +3,7 @@
 
 use crate::{code_editor::CodeEditorApplet, pdf_preview::PdfPreviewApplet};
 use sonamu_common::{
+    command::{self, CommandResult, Signature, Value},
     sap::{
         client_handle::ClientHandle,
         detached::DetachedTree,
@@ -74,6 +75,28 @@ enum Selected {
 }
 
 /// A visible row of the file tree
+/// What `command` takes
+const COMMANDS: [Signature; 3] = [
+    Signature {
+        name: "root",
+        params: "",
+        returns: "string",
+        doc: "its directory",
+    },
+    Signature {
+        name: "selected",
+        params: "",
+        returns: "string?",
+        doc: "the selected file or directory",
+    },
+    Signature {
+        name: "open",
+        params: "path: string",
+        returns: "nil",
+        doc: "show a file's document (opening it)",
+    },
+];
+
 struct Entry {
     path: PathBuf,
     depth: usize,
@@ -201,6 +224,10 @@ impl FileManagerApplet {
                     file_manager.restore_documents(inner.children);
                     Box::new(file_manager)
                 }))
+            }
+
+            fn commands(&self) -> &'static [Signature] {
+                &COMMANDS
             }
 
             fn duplicate(&self) -> AppletSpawner {
@@ -926,6 +953,23 @@ impl FileManagerApplet {
     }
 }
 impl StandardApplet for FileManagerApplet {
+    fn command(&mut self, name: &str, args: Vec<Value>) -> CommandResult {
+        let path = |path: &Path| Value::String(path.to_string_lossy().into_owned());
+        Ok(match name {
+            "root" => path(&self.root),
+            "selected" => self
+                .entries
+                .get(self.selected)
+                .map_or(Value::Nil, |entry| path(&entry.path)),
+            "open" => {
+                self.open(PathBuf::from(command::string_arg(&args, 0)?));
+                self.hook.damage_window();
+                Value::Nil
+            }
+            _ => return Err(command::unknown(name)),
+        })
+    }
+
     fn handle_standard_event(&mut self, standard_event: StandardEvent) {
         match standard_event {
             StandardEvent::UIEvent(UIEvent::WindowResized(size)) => {

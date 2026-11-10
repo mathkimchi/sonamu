@@ -1,5 +1,6 @@
 use ropey::Rope;
 use sonamu_common::{
+    command::{self, CommandResult, Signature, Value},
     sap::packets::StandardEvent,
     settings::{Palette, Settings},
 };
@@ -64,6 +65,28 @@ enum EditorMode {
     Normal,
     Insert,
 }
+
+/// What `command` takes
+const COMMANDS: [Signature; 3] = [
+    Signature {
+        name: "path",
+        params: "",
+        returns: "string",
+        doc: "the file it edits",
+    },
+    Signature {
+        name: "text",
+        params: "",
+        returns: "string",
+        doc: "what is in it now",
+    },
+    Signature {
+        name: "save",
+        params: "",
+        returns: "nil",
+        doc: "write it to its file",
+    },
+];
 
 pub struct CodeEditorApplet {
     file_path: PathBuf,
@@ -130,6 +153,10 @@ impl CodeEditorApplet {
                 let file_path = args.first()?;
 
                 Some(CodeEditorApplet::get_boxed_initiator(file_path.to_string()))
+            }
+
+            fn commands(&self) -> &'static [Signature] {
+                &COMMANDS
             }
 
             fn duplicate(&self) -> AppletSpawner {
@@ -272,6 +299,21 @@ impl CodeEditorApplet {
     }
 }
 impl StandardApplet for CodeEditorApplet {
+    fn command(&mut self, name: &str, _args: Vec<Value>) -> CommandResult {
+        Ok(match name {
+            "path" => Value::String(self.file_path.to_string_lossy().into_owned()),
+            "text" => Value::String(self.buffer.to_string()),
+            "save" => {
+                if let Some(err) = &self.load_error {
+                    return Err(format!("not saving: it couldn't be read ({err})"));
+                }
+                self.save_buffer();
+                Value::Nil
+            }
+            _ => return Err(command::unknown(name)),
+        })
+    }
+
     fn handle_standard_event(&mut self, standard_event: StandardEvent) {
         match standard_event {
             StandardEvent::UIEvent(ui_event) => {
