@@ -72,7 +72,11 @@ Deviations from the decisions below:
   (matched like settings `Keybind`s; same key replaces), fns in the state's registry; the runner checks
   `binding(..)` after the settings keybinds (before the root, so any focus) and queues `run_binding`.
   `events.on(event, fn)`; the root `emit`s `focus` (no args, `remember_focus` sees the path change) and `window`
-  (app id, on `WlSurfaceRegistered`). These run as `Job::Call`: no one waits, `print`s and errors go to stderr.
+  (app id, on `WlSurfaceRegistered`). These run as `Job::Call`: no one waits; their `print`s and errors are messages (below).
+- Messages (Emacs' `*Messages*` + echo area): `sonamu_script::message` keeps the last 200 (`sonamu.messages()`), logs
+  them to stderr, and calls `on_message` (the root's waker); the root (`echo_message`) shows the last one over the
+  active screen's buffer line row for 5 s (errors in red; `Bar::None` when the row isn't reserved). Decided over: errors
+  as desktop notifications (prints only in the list), or the last shown only when buffer mode next opens.
   Example: `examples/config/init.luau` (all commented).
 
 - `sonamu.definitions()`: luau-lsp definitions (`declare class Node`, a class per declared applet type named like it,
@@ -167,7 +171,6 @@ Untested:
 Gaps:
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or
   `process.output` delays the buffer line and Luau keybinds.
-- Errors and `print`s of `init.luau`, bindings and hooks only go to stderr (nothing in the UI).
 - Luau tables pass/return only their sequence part (`Value::List`); map keys are dropped silently.
 - Prompt: no type-ahead while running; no newline key (only pasted ones).
 - Signatures aren't checked against calls (each `command()` validates its own args).

@@ -19,9 +19,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
 
 ## Fix first (by risk)
 
-3. **Errors only on stderr** for init/bindings/hooks. Route them to the buffer line: keep a small "messages" list
-   in `Repl` (or a channel the root drains) and show the last one above the prompt / as a notification
-   (`sonamu_common::notification`).
 4. **One queue.** A slow `sonamu-msg eval` / `process.output` delays everything. Options: run `process.output` off
    the script thread (Luau can't yield without `mlua` async; would need coroutines + `async` feature), or accept and
    document. Measure first.

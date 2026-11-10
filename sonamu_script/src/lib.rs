@@ -32,6 +32,46 @@ impl EvalHandle {
     }
 }
 
+/// A `print` or error of Luau no one waits on (`init.luau`, bindings, hooks), like Emacs' `*Messages*`
+#[derive(Clone, Debug)]
+pub struct Message {
+    pub text: String,
+    pub error: bool,
+}
+
+/// Kept; older ones are dropped
+const MAX_MESSAGES: usize = 200;
+/// The messages, and how many there were ever (so the root can tell a new last one)
+static MESSAGES: Mutex<(Vec<Message>, u64)> = Mutex::new((Vec::new(), 0));
+/// Called after each message
+static ON_MESSAGE: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+/// Calls `notify` after each new message (eg wakes the root to show it); once
+pub fn on_message(notify: impl Fn() + Send + Sync + 'static) {
+    let _ = ON_MESSAGE.set(Box::new(notify));
+}
+
+/// The last message, and how many there were ever
+pub fn last_message() -> (Option<Message>, u64) {
+    let messages = MESSAGES.lock().unwrap_or_else(PoisonError::into_inner);
+    (messages.0.last().cloned(), messages.1)
+}
+
+fn message(text: String, error: bool) {
+    eprintln!("Luau: {text}");
+    {
+        let mut messages = MESSAGES.lock().unwrap_or_else(PoisonError::into_inner);
+        messages.0.push(Message { text, error });
+        if messages.0.len() > MAX_MESSAGES {
+            messages.0.remove(0);
+        }
+        messages.1 += 1;
+    }
+    if let Some(notify) = ON_MESSAGE.get() {
+        notify();
+    }
+}
+
 /// Set by `interrupt`, cleared when the next job starts
 static QUIT: AtomicBool = AtomicBool::new(false);
 
@@ -170,7 +210,7 @@ fn send(output: Output) {
             (current.notify)();
         }
         // a binding or hook (`Job::Call`)
-        (None, Output::Print(line)) => eprintln!("{line}"),
+        (None, Output::Print(line)) => message(line, false),
         (None, Output::Done(_)) => {}
     });
 }
@@ -182,7 +222,7 @@ fn run(jobs: &mpsc::Receiver<Job>) {
         let (code, output, notify, cancelled) = match job {
             Job::Call(call) => {
                 if let Err(err) = run_call(&lua, call) {
-                    eprintln!("Luau: {err}");
+                    message(err, true);
                 }
                 continue;
             }
@@ -218,7 +258,7 @@ fn run(jobs: &mpsc::Receiver<Job>) {
                 .clear();
             lua = new_lua().expect("the script state");
             if let Err(err) = run_call(&lua, Call::Init) {
-                eprintln!("Luau: {err}");
+                message(err, true);
             }
         }
     }
@@ -266,7 +306,7 @@ fn run_call(lua: &Lua, call: Call) -> Result<(), String> {
                     .map_err(|err| err.to_string())?;
                 // one failing doesn't stop the others
                 if let Err(err) = function.map_err(|err| err.to_string())?.call::<()>(args) {
-                    eprintln!("Luau: {err}");
+                    message(err.to_string(), true);
                 }
             }
             Ok(())
@@ -355,6 +395,18 @@ fn new_lua() -> mlua::Result<Lua> {
     sonamu.set(
         "definitions",
         lua.create_function(|_, ()| Ok(definitions()))?,
+    )?;
+    sonamu.set(
+        "messages",
+        lua.create_function(|_, ()| {
+            let messages = MESSAGES.lock().unwrap_or_else(PoisonError::into_inner);
+            Ok(messages
+                .0
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"))
+        })?,
     )?;
     let help_function = lua.create_function(|_, ()| Ok(help()))?;
     sonamu.set("help", help_function.clone())?;
@@ -471,6 +523,7 @@ sonamu.open(applet, {args}?)   like `sonamu-msg open`
 sonamu.reload_settings()
 sonamu.quit()
 sonamu.reset()                 a fresh Luau state
+sonamu.messages(): string      prints and errors of init.luau, bindings and hooks (the last shows at the bottom)
 sonamu.definitions(): string   luau-lsp definitions of all this, eg `sonamu-msg eval 'sonamu.definitions()'`
 Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) toggle_half() wrap_project()
       parent(): Node? children(): {Node} type(): string title(): string cast(type): Node?
@@ -532,6 +585,7 @@ declare sonamu: {
     quit: () -> (),
     reload_settings: () -> (),
     reset: () -> (),
+    messages: () -> string,
     help: () -> string,
     definitions: () -> string,
 }
@@ -912,6 +966,20 @@ mod tests {
         );
         emit("focus", vec![Value::Number(3.0)]);
         assert_eq!(eval_all("got").1, Ok(vec![Value::Number(3.0)]));
+
+        // no one waits on them: messages
+        assert!(
+            eval_all("events.on('hook_test', function() error('boom') end)")
+                .1
+                .is_ok()
+        );
+        emit("hook_test", vec![]);
+        assert!(eval_all("1").1.is_ok());
+        assert!(
+            eval_all("sonamu.messages()").1.unwrap()[0]
+                .to_string()
+                .contains("boom")
+        );
     }
 
     #[test]

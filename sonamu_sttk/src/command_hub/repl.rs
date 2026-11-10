@@ -450,6 +450,18 @@ fn wrap(text: &str, width: usize) -> impl Iterator<Item = String> {
     })
 }
 
+/// `text` wrapped at `width`, in `fg` on the palette's background (eg an echoed message)
+pub(crate) fn text_lines(text: &str, fg: Color, width: usize, palette: &Palette) -> Vec<Line> {
+    wrap(text, width)
+        .map(|text| Line {
+            text,
+            fg,
+            bg: bg(palette),
+            accent: 0,
+        })
+        .collect()
+}
+
 /// Draws `lines` on the grid's rows from `top`, each with its background and prompt in `accent`
 pub(crate) fn draw_lines<'a>(
     grid: &mut CharGrid,

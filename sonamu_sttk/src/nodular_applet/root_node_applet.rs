@@ -33,7 +33,7 @@ use sonamu_common::{
         session::Session,
         shared_state::{SharedState, StatePublisher},
     },
-    settings::{self, BufferLine, Palette, Settings, TreeviewFloating, TreeviewSide},
+    settings::{self, BufferLine, ERROR, Palette, Settings, TreeviewFloating, TreeviewSide},
     utils::tree::{
         tree_node_path::TreeNodePath,
         world_tree::{Step, WorldTree, WorldTreePath},
@@ -47,10 +47,7 @@ use sonamu_ui::{
 use std::{
     collections::{BTreeMap, HashMap},
     path::PathBuf,
-    sync::{
-        Arc, RwLock,
-        atomic::Ordering,
-    },
+    sync::{Arc, RwLock, atomic::Ordering},
     time::{Duration, Instant},
 };
 
@@ -115,6 +112,10 @@ pub struct RootNodeApplet {
     repl: Repl,
     /// Keys go to the buffer line (Super+Esc), like vim's normal mode; else `INSERT`
     buffer_mode: bool,
+    /// The last `sonamu_script` message, shown over the buffer line for `ECHO_TIME` (Emacs' echo area)
+    echo: Option<(sonamu_script::Message, Instant)>,
+    /// `sonamu_script::last_message`'s count when last echoed
+    echoed: u64,
     loop_handle: LoopHandle<'static, Self>,
 }
 
@@ -231,6 +232,7 @@ impl RootNodeApplet {
         let pinned = self.treeview_pinned;
         let quit_asked = self.quit_asked.is_some();
         let buffer_mode = self.buffer_mode;
+        let echo = self.echo.as_ref().map(|(message, _)| message);
         let Self {
             holder,
             treeview_pointer,
@@ -273,10 +275,25 @@ impl RootNodeApplet {
                         window.push(notice(&settings, Self::QUIT_NOTICE, size));
                     }
                     let full = DisplayContainerSize::new(size.width, height);
+                    let echo = echo.filter(|_| index == active);
                     if index == active && buffer_mode {
-                        window.push(buffer_line(repl, full, true, &settings.palette));
+                        window.push(buffer_line(
+                            repl,
+                            echo,
+                            full,
+                            Bar::Prompt,
+                            &settings.palette,
+                        ));
                     } else if settings.buffer_line == BufferLine::Always {
-                        window.push(buffer_line(repl, full, false, &settings.palette));
+                        window.push(buffer_line(
+                            repl,
+                            echo,
+                            full,
+                            Bar::Insert,
+                            &settings.palette,
+                        ));
+                    } else if echo.is_some() {
+                        window.push(buffer_line(repl, echo, full, Bar::None, &settings.palette));
                     }
                     UITree::new_container_styled(
                         Style::absolute([x as f32, y as f32], [size.width as f32, height as f32]),
@@ -373,6 +390,36 @@ impl RootNodeApplet {
         }
     }
 
+    /// Shows `sonamu_script`'s last message if it's new, until `ECHO_TIME` passes
+    fn echo_message(&mut self) {
+        const ECHO_TIME: Duration = Duration::from_secs(5);
+        let (Some(message), count) = sonamu_script::last_message() else {
+            return;
+        };
+        if count == self.echoed {
+            return;
+        }
+        self.echoed = count;
+        self.echo = Some((message, Instant::now()));
+        self.loop_handle
+            .insert_source(
+                Timer::from_duration(ECHO_TIME),
+                |_, &mut (), root: &mut Self| {
+                    // not a newer one meanwhile
+                    if root
+                        .echo
+                        .as_ref()
+                        .is_some_and(|(_, shown)| shown.elapsed() >= ECHO_TIME)
+                    {
+                        root.echo = None;
+                        root.surface.damage();
+                    }
+                    TimeoutAction::Drop
+                },
+            )
+            .unwrap();
+    }
+
     /// Ctrl+Shift+Q: quits if pressed again within `QUIT_CONFIRM`, else shows a notice asking for that (#139)
     fn ask_quit(&mut self) {
         if self
@@ -425,6 +472,7 @@ impl RootNodeApplet {
             .insert_source(repl_woken, |event, &mut (), root: &mut Self| {
                 if let calloop::channel::Event::Msg(()) = event {
                     root.repl.wake();
+                    root.echo_message();
                     root.surface.damage();
                 }
             })
@@ -432,6 +480,8 @@ impl RootNodeApplet {
         let repl_waker: repl::Waker = Arc::new(move || {
             let _ = repl_wake.send(());
         });
+        let echo_waker = Arc::clone(&repl_waker);
+        sonamu_script::on_message(move || echo_waker());
         // saved projects are made again by these
         applet_spawner_registry.insert(
             ProjectApplet::SPAWNER.to_string(),
@@ -502,6 +552,8 @@ impl RootNodeApplet {
             last_focus: None,
             repl: Repl::new(repl_waker),
             buffer_mode: false,
+            echo: None,
+            echoed: 0,
             loop_handle: event_loop.clone(),
         };
         // a clean session starts with the help shown
@@ -1374,29 +1426,50 @@ fn content_size(settings: &Settings, [_, _, width, height]: [u32; 4]) -> Display
     DisplayContainerSize::new(width, height.saturating_sub(buffer_line_height(settings)))
 }
 
-/// The buffer line at the bottom of a screen of `size`: in buffer mode (`focused`) the prompt, under the last
-/// entry's output and Tab's candidates; else `INSERT`
+/// The buffer line's bottom row
+#[derive(Clone, Copy, PartialEq)]
+enum Bar {
+    /// In buffer mode: the prompt, under the last entry's output and Tab's candidates
+    Prompt,
+    /// `-- INSERT --` (setting `buffer_line: always`)
+    Insert,
+    /// Only the echoed message
+    None,
+}
+
+/// The buffer line at the bottom of a screen of `size`: `bar`, under the echoed message
 fn buffer_line(
     repl: &Repl,
+    echo: Option<&sonamu_script::Message>,
     size: DisplayContainerSize,
-    focused: bool,
+    bar: Bar,
     palette: &Palette,
 ) -> UITree {
     let (columns, _) = CharGrid::largest_fittable_size(size);
-    let lines = if focused {
+    let mut lines = if bar == Bar::Prompt {
         repl.lines(columns, repl.history.len().saturating_sub(1), palette)
     } else {
         Vec::new()
     };
+    if let Some(message) = echo {
+        let fg = if message.error { ERROR } else { palette.fg };
+        lines.extend(repl::text_lines(&message.text, fg, columns, palette));
+    }
     let shown = &lines[lines.len().saturating_sub(BUFFER_OUTPUT_ROWS)..];
-    let mut grid = CharGrid::new_empty(columns, shown.len() + 1);
+    let bar_rows = usize::from(bar != Bar::None);
+    let mut grid = CharGrid::new_empty(columns, shown.len() + bar_rows);
     repl::draw_lines(&mut grid, 0, shown, palette.accent);
     let prompt_row = shown.len();
-    fill_row(&mut grid, prompt_row, bar_bg(palette));
-    if focused {
-        repl.draw_prompt(&mut grid, prompt_row, palette);
-    } else {
-        put(&mut grid, prompt_row, 1, "-- INSERT --", palette.accent);
+    match bar {
+        Bar::Prompt => {
+            fill_row(&mut grid, prompt_row, bar_bg(palette));
+            repl.draw_prompt(&mut grid, prompt_row, palette);
+        }
+        Bar::Insert => {
+            fill_row(&mut grid, prompt_row, bar_bg(palette));
+            put(&mut grid, prompt_row, 1, "-- INSERT --", palette.accent);
+        }
+        Bar::None => {}
     }
     let height = grid.display_size().height as f32;
     let top = size.height as f32 - height;
