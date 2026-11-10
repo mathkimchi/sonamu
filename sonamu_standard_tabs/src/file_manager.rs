@@ -51,14 +51,24 @@ const LEFT_PAD: f32 = 12.0;
 const LIST_SPLIT: f32 = 0.3;
 const BTN_LEFT: u32 = 0x110;
 
-// Translucent like the treeview; text is from the settings' palette
-const LIST_BG: Color = with_opacity(Color([0x16, 0x16, 0x1C, 0]));
-const SELECTED_BG: Color = with_opacity(Color([0x1C, 0x3D, 0x2E, 0]));
-const SELECTED_UNFOCUSED_BG: Color = with_opacity(Color([0x26, 0x2A, 0x32, 0]));
-const HEADER_BG: Color = with_opacity(Color([0x0D, 0x0D, 0x16, 0]));
-/// Behind the documents when none is shown; an editor's background
-const DOCUMENT_BG: Color = HEADER_BG;
-const DIR_TEXT: Color = Color([0x7A, 0xB8, 0xFF, 0xFF]);
+// Translucent shades of the palette's `bg`, like the treeview's; text is from the palette
+fn list_bg() -> Color {
+    with_opacity(settings::get().palette.raised(5))
+}
+fn selected_bg() -> Color {
+    with_opacity(settings::get().palette.tinted(25))
+}
+fn selected_unfocused_bg() -> Color {
+    with_opacity(settings::get().palette.raised(15))
+}
+/// Also behind the documents when none is shown (an editor's background)
+fn header_bg() -> Color {
+    with_opacity(settings::get().palette.bg)
+}
+/// Directory names: the focused border's color, so they differ from files (`fg`) and the open one (`accent`)
+fn dir_text() -> Color {
+    settings::get().border.focused
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pane {
@@ -834,7 +844,7 @@ impl FileManagerApplet {
             LEFT_PAD + INDENT,
             width,
         );
-        let header = header_row.row(0, width, Some(HEADER_BG), vec![toggle, title]);
+        let header = header_row.row(0, width, Some(header_bg()), vec![toggle, title]);
         if self.list_collapsed {
             return UITree::new_styled(UIElement::Nothing, Style::full_size(), vec![header]);
         }
@@ -850,9 +860,9 @@ impl FileManagerApplet {
             let background = if index != self.selected {
                 None
             } else if self.pane == Pane::Files {
-                Some(SELECTED_BG)
+                Some(selected_bg())
             } else {
-                Some(SELECTED_UNFOCUSED_BG)
+                Some(selected_unfocused_bg())
             };
             let name = entry
                 .path
@@ -865,7 +875,7 @@ impl FileManagerApplet {
                 } else {
                     '▸'
                 };
-                (format!("{arrow} {name}"), DIR_TEXT)
+                (format!("{arrow} {name}"), dir_text())
             } else {
                 let is_open = self
                     .documents
@@ -887,13 +897,13 @@ impl FileManagerApplet {
             );
             rows.push(list_rows.row(index, width, background, vec![label]));
         }
-        UITree::new_styled(UIElement::Backgrounded(LIST_BG), Style::full_size(), rows)
+        UITree::new_styled(UIElement::Backgrounded(list_bg()), Style::full_size(), rows)
     }
 
     /// The open documents' names (right of `header_left`), then the active document
     fn render_documents(&self, width: f32, header_left: f32) -> UITree {
         let header = match &self.status {
-            Some(status) => vec![(status.clone(), Color::RED)],
+            Some(status) => vec![(status.clone(), settings::ERROR)],
             None if self.documents.is_empty() => vec![(
                 "Open a file (Enter or click)".to_string(),
                 self.palette.inactive,
@@ -915,7 +925,7 @@ impl FileManagerApplet {
         };
         let header_row = Rows::with_height(0.0, row_height());
         let header = UITree::new_styled(
-            UIElement::Backgrounded(HEADER_BG),
+            UIElement::Backgrounded(header_bg()),
             header_row.style(0, header_left, width - header_left),
             vec![header_row.text(ui::spans(header), LEFT_PAD, width - header_left)],
         );
@@ -934,7 +944,7 @@ impl FileManagerApplet {
             match self.shown_document() {
                 Ok(document) => document.handle.get_surface(),
                 Err(note) => UITree::new_styled(
-                    UIElement::Backgrounded(DOCUMENT_BG),
+                    UIElement::Backgrounded(header_bg()),
                     Style::full_size(),
                     vec![header_row.text(
                         ui::text(note, self.palette.inactive),

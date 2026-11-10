@@ -18,7 +18,6 @@ use sonamu_common::{
     utils::tree::world_tree::WorldTree,
 };
 use sonamu_ui::{
-    color::Color,
     display_units::DisplayContainerSize,
     ui_element::UITree,
     ui_event::{KeySymbol, UIEvent},
@@ -439,7 +438,11 @@ impl StandardApplet for RestorePrompt {
             wl_label(&self.wl),
             self.command()
         );
-        ui::inset(ui::text(text, Color::LIGHT_GRAY), container_size, ui::PAD)
+        ui::inset(
+            ui::text(text, settings::get().palette.inactive),
+            container_size,
+            ui::PAD,
+        )
     }
 
     fn get_treeview(&self) -> WorldTree<String> {
@@ -478,7 +481,7 @@ impl StandardApplet for RestoringApplet {
 
     fn get_window_standard_applet(&self, container_size: DisplayContainerSize) -> UITree {
         ui::inset(
-            ui::text(self.label.clone(), Color::LIGHT_GRAY),
+            ui::text(self.label.clone(), settings::get().palette.inactive),
             container_size,
             ui::PAD,
         )

@@ -23,9 +23,6 @@ use std::{
     path::PathBuf,
 };
 
-/// Translucent like the treeview; text is from the settings' palette
-const BG: Color = with_opacity(Color([0x0D, 0x0D, 0x16, 0]));
-
 /// Handles scroll offset
 /// TODO: fold, lines that span multiple rows, in-line embeds like comments or document embeds (for custom note-taking language), horizontal scroll
 struct ViewOffset {
@@ -429,7 +426,7 @@ impl StandardApplet for CodeEditorApplet {
             content.contained_element()
         };
         UITree::new_styled(
-            UIElement::Backgrounded(BG),
+            UIElement::Backgrounded(with_opacity(self.palette.bg)),
             Style::full_size(),
             vec![content],
         )

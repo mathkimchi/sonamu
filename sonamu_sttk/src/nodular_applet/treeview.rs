@@ -47,16 +47,27 @@ pub const fn with_opacity(Color([r, g, b, _]): Color) -> Color {
     Color([r, g, b, OPACITY])
 }
 
-// Text and markers are from the settings' palette
-const PANEL_BG: Color = with_opacity(Color([0x16, 0x16, 0x1C, 0]));
-const HOVER_BG: Color = with_opacity(Color([0x26, 0x2A, 0x32, 0]));
-const FOCUS_BG: Color = with_opacity(Color([0x1C, 0x3D, 0x2E, 0]));
-const GUIDE: Color = with_opacity(Color([0x3B, 0x40, 0x49, 0]));
-const DRAGGED_TEXT: Color = Color([0x55, 0x5A, 0x64, 0]);
+// Text and markers are the settings' palette; backgrounds are shades of its `bg`
+fn panel_bg() -> Color {
+    with_opacity(settings::get().palette.raised(5))
+}
+fn hover_bg() -> Color {
+    with_opacity(settings::get().palette.raised(15))
+}
+fn focus_bg() -> Color {
+    with_opacity(settings::get().palette.tinted(25))
+}
+fn guide() -> Color {
+    with_opacity(settings::get().palette.raised(25))
+}
 /// The share of a row's height at its top and at its bottom that drops between siblings
 const EDGE_ZONE: f32 = 0.25;
 const INSERT_LINE_HEIGHT: f32 = 3.0;
-const MENU_BG: Color = Color([0x20, 0x22, 0x2A, 0xF0]);
+/// Nearly opaque, over the treeview
+fn menu_bg() -> Color {
+    let Color([r, g, b, _]) = settings::get().palette.raised(10);
+    Color([r, g, b, 0xF0])
+}
 const MENU_PAD: f32 = 12.0;
 /// Two clicks on a row within this are a double click (sets the view root)
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -239,16 +250,16 @@ impl Menu {
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                let background = (self.hovered == Some(index)).then_some(HOVER_BG);
+                let background = (self.hovered == Some(index)).then_some(hover_bg());
                 let label = rows.text(ui::text(item.label(), text), MENU_PAD, width);
                 rows.row(index, width, background, vec![label])
                     .with_pointer()
             })
             .collect();
         UITree::new_styled(
-            UIElement::Backgrounded(MENU_BG),
+            UIElement::Backgrounded(menu_bg()),
             Style::absolute([x, y], [width, height]),
-            vec![ui::frame(GUIDE, 0.0, 1.0, Style::full_size(), items)],
+            vec![ui::frame(guide(), 0.0, 1.0, Style::full_size(), items)],
         )
     }
 }
@@ -614,7 +625,7 @@ impl TreeviewPointer {
         let mut parts = Vec::new();
         for level in 0..row.depth {
             parts.push(rect(
-                GUIDE,
+                guide(),
                 [LEFT_PAD + level as f32 * INDENT + INDENT / 2.0 - 1.0, 0.0],
                 [2.0, row_height()],
             ));
@@ -636,9 +647,7 @@ impl TreeviewPointer {
         let rows = self.rows();
         // like a browser tab's, only on the hovered row
         let shows_close = row.closable && is_hovered && dragging.is_none();
-        let text_color = with_opacity(if is_dragged {
-            DRAGGED_TEXT
-        } else if is_inactive(row) {
+        let text_color = with_opacity(if is_dragged || is_inactive(row) {
             settings.palette.inactive
         } else {
             settings.palette.fg
@@ -671,9 +680,9 @@ impl TreeviewPointer {
         }
 
         let background = if is_focused {
-            Some(FOCUS_BG)
+            Some(focus_bg())
         } else if is_hovered && dragging.is_none() {
-            Some(HOVER_BG)
+            Some(hover_bg())
         } else {
             None
         };
@@ -717,7 +726,7 @@ impl TreeviewPointer {
             children.push(menu.render([width, height]));
         }
         UITree::new_styled(
-            UIElement::Backgrounded(PANEL_BG),
+            UIElement::Backgrounded(panel_bg()),
             Style::full_size(),
             children,
         )

@@ -120,15 +120,17 @@ impl AppletRunner {
             label.chars().count() as f32 * font_size * 0.6 + GHOST_PADDING * 2.0,
             font_size + GHOST_PADDING * 2.0,
         ];
+        let settings = sonamu_common::settings::get();
+        let Color([red, green, blue, _]) = settings.palette.raised(10);
         let text = UITree::leaf_styled(
-            UIElement::Text(vec![(label, UIElement::glyphon_attr(Color::WHITE))]),
+            UIElement::Text(vec![(label, UIElement::glyphon_attr(settings.palette.fg))]),
             Style::absolute([GHOST_PADDING, GHOST_PADDING], [size[0], font_size]),
         );
         Some(UITree::new_styled(
-            UIElement::Backgrounded(Color([0x1C, 0x22, 0x2E, 0xE0])),
+            UIElement::Backgrounded(Color([red, green, blue, 0xE0])),
             Style::absolute([x + GHOST_OFFSET, y + GHOST_OFFSET], size),
             vec![UITree::new_styled(
-                UIElement::border(Color::CYAN),
+                UIElement::border(settings.border.focused),
                 Style {
                     border: Length::uniform_rect(Length::Px(2.0)),
                     ..Style::full_size()

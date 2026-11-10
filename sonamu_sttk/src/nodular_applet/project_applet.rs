@@ -2,12 +2,12 @@
 //! Its node doesn't know it is a project; it only sees an applet with an inner tree.
 
 use crate::{
-    command_hub::BG,
     nodular_applet::{
         Answer, AppletContext, AppletSpawner, AppletSpawnerTrait, EmbeddedId, NodeRequest,
         NodularAppletInitializer, StandardApplet, WrapInitializer,
         node_holder::NodeHolder,
         node_tree::{AttachClient, NodeId, NodeTree, PROJECT_ICON, SpawnClient, root_label_mut},
+        with_opacity,
     },
     session,
     standard_keybinds::{browser, terminal},
@@ -87,9 +87,10 @@ const NEW_ROWS: [(&str, char, New); 3] = [
     ("+ terminal  (t)", 't', New::Program(terminal)),
     ("+ browser  (b)", 'b', New::Program(browser)),
 ];
-// Other text is the settings' `palette.fg`
-const HINT: Color = Color([0x8A, 0x93, 0xA6, 0xFF]);
-const ERROR: Color = Color([0xE0, 0x6C, 0x75, 0xFF]);
+// Text is the settings' palette: `fg`, hints `inactive`
+fn hint() -> Color {
+    settings::get().palette.inactive
+}
 const BTN_LEFT: u32 = 0x110;
 
 /// The home directory, which paths show as `~`
@@ -735,17 +736,17 @@ impl ProjectApplet {
                     ""
                 }
             ),
-            HINT,
+            hint(),
         );
         let (directory, hint) = match (&self.renaming, &self.setting_directory) {
             (_, Some(input)) => (
                 (format!("directory: {}▏", input.path), text),
                 if input.invalid {
-                    ("Not a directory", ERROR)
+                    ("Not a directory", settings::ERROR)
                 } else {
                     (
                         "Up/Down + Tab or click: complete, Enter: save (empty clears), Esc: cancel",
-                        HINT,
+                        hint(),
                     )
                 },
             ),
@@ -758,19 +759,19 @@ impl ProjectApplet {
                             |directory| tilde(directory),
                         )
                     ),
-                    HINT,
+                    hint(),
                 ),
                 if renaming.is_some() {
-                    ("Enter: save, Esc: cancel", HINT)
+                    ("Enter: save, Esc: cancel", hint())
                 } else if self.picking_icon.is_some() {
                     (
                         "Up/Down + Enter or click: pick, type: that character, Backspace: default, Esc: cancel",
-                        HINT,
+                        hint(),
                     )
                 } else {
                     (
                         "r: rename, d: set directory, i: set icon, 1-9: select",
-                        HINT,
+                        hint(),
                     )
                 },
             ),
@@ -800,7 +801,11 @@ impl ProjectApplet {
             })
             .chain(self.zoom_view(size))
             .collect();
-        UITree::new_styled(UIElement::Backgrounded(BG), Style::full_size(), rows)
+        UITree::new_styled(
+            UIElement::Backgrounded(with_opacity(settings::get().palette.bg)),
+            Style::full_size(),
+            rows,
+        )
     }
 
     /// Its tree's zoom-out view below the overview's rows; while it springs, from or to all of `size`

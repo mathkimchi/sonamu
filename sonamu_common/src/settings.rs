@@ -238,6 +238,34 @@ impl Default for Palette {
         Settings::default().palette
     }
 }
+impl Palette {
+    /// `bg` moved `percent` toward `fg`: shades of the background (eg panels 5, menus 10, bars and hovered rows 15,
+    /// guides 25); `bg`'s alpha
+    #[must_use]
+    pub fn raised(&self, percent: u8) -> Color {
+        mix(self.bg, self.fg, percent)
+    }
+
+    /// `bg` moved `percent` toward `accent` (eg a selected row)
+    #[must_use]
+    pub fn tinted(&self, percent: u8) -> Color {
+        mix(self.bg, self.accent, percent)
+    }
+}
+
+/// `from` moved `percent` toward `to`, keeping `from`'s alpha
+fn mix(Color(from): Color, Color(to): Color, percent: u8) -> Color {
+    let percent = u16::from(percent.min(100));
+    let channel = |index: usize| {
+        let mixed =
+            (u16::from(from[index]) * (100 - percent) + u16::from(to[index]) * percent) / 100;
+        u8::try_from(mixed).unwrap_or(u8::MAX)
+    };
+    Color([channel(0), channel(1), channel(2), from[3]])
+}
+
+/// Text for errors: the palette has no color for them
+pub const ERROR: Color = Color([0xFF, 0x6A, 0x6A, 0xFF]);
 
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[schemars(transform = optional_fields)]

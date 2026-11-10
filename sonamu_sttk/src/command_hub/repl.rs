@@ -1,7 +1,8 @@
 //! A Luau prompt with its history (`sonamu_script`), shared by the command hub and the root's buffer line
 
-use super::{ERROR, PROMPT, bar_bg, bg, fill_row, put};
+use super::{PROMPT, bar_bg, bg, fill_row, put};
 use sonamu_common::command::Value;
+use sonamu_common::settings::ERROR;
 use sonamu_common::settings::Palette;
 use sonamu_script::EvalHandle;
 use sonamu_ui::color::Color;
