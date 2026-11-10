@@ -1,6 +1,6 @@
 use crate::{
     command_hub::{
-        ACCENT, BAR_BG, fill_row, put,
+        bar_bg, fill_row, put,
         repl::{self, Repl},
     },
     man_page::ManPageApplet,
@@ -33,7 +33,7 @@ use sonamu_common::{
         session::Session,
         shared_state::{SharedState, StatePublisher},
     },
-    settings::{self, BufferLine, Settings, TreeviewFloating, TreeviewSide},
+    settings::{self, BufferLine, Palette, Settings, TreeviewFloating, TreeviewSide},
     utils::tree::{
         tree_node_path::TreeNodePath,
         world_tree::{Step, WorldTree, WorldTreePath},
@@ -276,9 +276,9 @@ impl RootNodeApplet {
                     }
                     let full = DisplayContainerSize::new(size.width, height);
                     if index == active && buffer_mode {
-                        window.push(buffer_line(repl, full, true));
+                        window.push(buffer_line(repl, full, true, &settings.palette));
                     } else if settings.buffer_line == BufferLine::Always {
-                        window.push(buffer_line(repl, full, false));
+                        window.push(buffer_line(repl, full, false, &settings.palette));
                     }
                     UITree::new_container_styled(
                         Style::absolute([x as f32, y as f32], [size.width as f32, height as f32]),
@@ -1378,22 +1378,27 @@ fn content_size(settings: &Settings, [_, _, width, height]: [u32; 4]) -> Display
 
 /// The buffer line at the bottom of a screen of `size`: in buffer mode (`focused`) the prompt, under the last
 /// entry's output and Tab's candidates; else `INSERT`
-fn buffer_line(repl: &Repl, size: DisplayContainerSize, focused: bool) -> UITree {
+fn buffer_line(
+    repl: &Repl,
+    size: DisplayContainerSize,
+    focused: bool,
+    palette: &Palette,
+) -> UITree {
     let (columns, _) = CharGrid::largest_fittable_size(size);
     let lines = if focused {
-        repl.lines(columns, repl.history.len().saturating_sub(1))
+        repl.lines(columns, repl.history.len().saturating_sub(1), palette)
     } else {
         Vec::new()
     };
     let shown = &lines[lines.len().saturating_sub(BUFFER_OUTPUT_ROWS)..];
     let mut grid = CharGrid::new_empty(columns, shown.len() + 1);
-    repl::draw_lines(&mut grid, 0, shown);
+    repl::draw_lines(&mut grid, 0, shown, palette.accent);
     let prompt_row = shown.len();
-    fill_row(&mut grid, prompt_row, BAR_BG);
+    fill_row(&mut grid, prompt_row, bar_bg(palette));
     if focused {
-        repl.draw_prompt(&mut grid, prompt_row);
+        repl.draw_prompt(&mut grid, prompt_row, palette);
     } else {
-        put(&mut grid, prompt_row, 1, "-- INSERT --", ACCENT);
+        put(&mut grid, prompt_row, 1, "-- INSERT --", palette.accent);
     }
     let height = grid.display_size().height as f32;
     let top = size.height as f32 - height;
@@ -1401,7 +1406,7 @@ fn buffer_line(repl: &Repl, size: DisplayContainerSize, focused: bool) -> UITree
         Style::absolute([0.0, top], [size.width as f32, height]),
         vec![
             // the grid is whole cells; the bar spans the screen
-            ui::rect(BAR_BG, [0.0, 0.0], [size.width as f32, height]),
+            ui::rect(bar_bg(palette), [0.0, 0.0], [size.width as f32, height]),
             grid.element().into(),
         ],
     )

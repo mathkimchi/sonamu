@@ -13,6 +13,7 @@ use repl::{Output, Repl};
 use sonamu_common::{
     command::{self, CommandResult, Signature, Value},
     sap::{packets::StandardEvent, session::SavedWl},
+    settings::{self, Palette, Settings},
 };
 use sonamu_ui::{
     color::Color,
@@ -57,13 +58,28 @@ pub(crate) const PROMPT: &str = "> ";
 // The help applet uses these too
 pub(crate) const BG: Color = with_opacity(Color([0x0D, 0x0D, 0x16, 0]));
 pub(crate) const BAR_BG: Color = with_opacity(Color([0x26, 0x2A, 0x32, 0]));
+
+/// The hub's and buffer line's background: the palette's, translucent like the treeview
+pub(crate) const fn bg(palette: &Palette) -> Color {
+    with_opacity(palette.bg)
+}
+
+/// Their bars' (prompt, header, commands): the background a bit toward the text
+pub(crate) fn bar_bg(palette: &Palette) -> Color {
+    let (Color(bg), Color(fg)) = (palette.bg, palette.fg);
+    let mix = |index: usize| {
+        let (bg, fg) = (u16::from(bg[index]), u16::from(fg[index]));
+        // 15% of the way, in u8 range
+        u8::try_from((bg * 85 + fg * 15) / 100).unwrap_or(u8::MAX)
+    };
+    with_opacity(Color([mix(0), mix(1), mix(2), 0]))
+}
 pub(crate) const ACCENT: Color = Color([0x5F, 0xD7, 0x87, 0xFF]);
 pub(crate) const OUTPUT: Color = Color([0xC8, 0xCC, 0xD4, 0xFF]);
 pub(crate) const DIM: Color = Color([0x8A, 0x93, 0xA6, 0xFF]);
 pub(crate) const ERROR: Color = Color([0xFF, 0x6A, 0x6A, 0xFF]);
 pub(crate) const RUNNING: Color = Color([0xE5, 0xC0, 0x7A, 0xFF]);
 pub(crate) const CURSOR: Color = Color([0xDB, 0xDB, 0xDB, 0xFF]);
-pub(crate) const COMMAND: Color = Color::WHITE;
 
 /// Technically, this is a standard app, but it is so essential
 /// that I am considering it a tool for sttk.
@@ -73,6 +89,8 @@ pub(crate) const COMMAND: Color = Color::WHITE;
 pub struct CommandHubApplet {
     title: String,
     repl: Repl,
+    /// Its text's colors (`settings_changed`)
+    palette: Palette,
     /// Lines scrolled up from the bottom
     scroll: usize,
 
@@ -93,6 +111,7 @@ impl CommandHubApplet {
                 waker.wake();
             })),
             scroll: 0,
+            palette: settings::get().palette,
             directory: None,
             size: DisplayContainerSize::new(800, 600),
             hook,
@@ -177,7 +196,7 @@ impl CommandHubApplet {
         let (width, _) = CharGrid::largest_fittable_size(self.size);
         let max = self
             .repl
-            .lines(width, 0)
+            .lines(width, 0, &self.palette)
             .len()
             .saturating_sub(self.body_rows());
         self.scroll = self.scroll.saturating_add_signed(lines).min(max);
@@ -258,6 +277,10 @@ impl StandardApplet for CommandHubApplet {
         }
     }
 
+    fn settings_changed(&mut self, settings: &Settings) {
+        self.palette = settings.palette.clone();
+    }
+
     /// An eval printed or finished, or Tab's candidates came
     fn wake(&mut self) {
         self.repl.wake();
@@ -313,21 +336,21 @@ impl StandardApplet for CommandHubApplet {
             return grid.element().into();
         }
         for row in 0..height {
-            fill_row(&mut grid, row, BG);
+            fill_row(&mut grid, row, bg(&self.palette));
         }
 
-        self.repl.draw_prompt(&mut grid, height - 1);
+        self.repl.draw_prompt(&mut grid, height - 1, &self.palette);
 
         if height < 2 {
             return grid.element().into();
         }
-        let lines = self.repl.lines(width, 0);
+        let lines = self.repl.lines(width, 0, &self.palette);
         let body_rows = height - 2;
         let scroll = self.scroll.min(lines.len().saturating_sub(body_rows));
 
         // header: title, and a hint or how far it's scrolled
-        fill_row(&mut grid, 0, BAR_BG);
-        put(&mut grid, 0, 1, &self.title, CURSOR);
+        fill_row(&mut grid, 0, bar_bg(&self.palette));
+        put(&mut grid, 0, 1, &self.title, self.palette.fg);
         let note = if scroll > 0 {
             format!("{scroll} lines below (PageDown) ")
         } else {
@@ -338,14 +361,14 @@ impl StandardApplet for CommandHubApplet {
             .checked_sub(note.len())
             .filter(|&column| column > title_end)
         {
-            put(&mut grid, 0, column, &note, DIM);
+            put(&mut grid, 0, column, &note, self.palette.inactive);
         }
 
         // the newest lines, at the bottom of the body
         let end = lines.len() - scroll;
         let shown = &lines[end.saturating_sub(body_rows)..end];
         let top = 1 + body_rows - shown.len();
-        repl::draw_lines(&mut grid, top, shown);
+        repl::draw_lines(&mut grid, top, shown, self.palette.accent);
 
         grid.element().into()
     }

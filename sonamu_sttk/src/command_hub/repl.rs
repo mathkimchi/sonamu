@@ -1,7 +1,8 @@
 //! A Luau prompt with its history (`sonamu_script`), shared by the command hub and the root's buffer line
 
-use super::{ACCENT, BAR_BG, BG, COMMAND, CURSOR, DIM, ERROR, OUTPUT, PROMPT, fill_row, put};
+use super::{ERROR, PROMPT, bar_bg, bg, fill_row, put};
 use sonamu_common::command::Value;
+use sonamu_common::settings::Palette;
 use sonamu_script::EvalHandle;
 use sonamu_ui::color::Color;
 use sonamu_ui::{
@@ -44,7 +45,7 @@ pub(crate) struct Line {
     pub text: String,
     pub fg: Color,
     pub bg: Color,
-    /// Leading chars drawn in `ACCENT` (the prompt of a command)
+    /// Leading chars drawn in the palette's accent (the prompt of a command)
     pub accent: usize,
 }
 
@@ -316,34 +317,34 @@ impl Repl {
         self.evals.retain(|eval| !finished.contains(&eval.job));
     }
 
-    /// The scrollback from entry `from` on, wrapped at `width`, then the hint
-    pub fn lines(&self, width: usize, from: usize) -> Vec<Line> {
+    /// The scrollback from entry `from` on, wrapped at `width`, then the hint; text in the palette's colors
+    pub fn lines(&self, width: usize, from: usize, palette: &Palette) -> Vec<Line> {
         let mut lines = Vec::new();
         for entry in self.history.iter().skip(from) {
             for (index, text) in wrap(&format!("{PROMPT}{}", entry.command), width).enumerate() {
                 lines.push(Line {
                     text,
-                    fg: COMMAND,
-                    bg: BAR_BG,
+                    fg: palette.fg,
+                    bg: bar_bg(palette),
                     accent: if index == 0 { PROMPT.len() } else { 0 },
                 });
             }
             lines.extend(wrap(&entry.printed, width).map(|text| Line {
                 text,
-                fg: OUTPUT,
-                bg: BG,
+                fg: palette.fg,
+                bg: bg(palette),
                 accent: 0,
             }));
             let (text, fg) = match &entry.output {
-                Output::Text(text) => (text.as_str(), OUTPUT),
+                Output::Text(text) => (text.as_str(), palette.fg),
                 Output::Error(err) => (err.as_str(), ERROR),
-                Output::Running(_) => ("", OUTPUT),
+                Output::Running(_) => ("", palette.fg),
             };
             if !text.is_empty() {
                 lines.extend(wrap(text, width).map(|text| Line {
                     text,
                     fg,
-                    bg: BG,
+                    bg: bg(palette),
                     accent: 0,
                 }));
             }
@@ -351,8 +352,8 @@ impl Repl {
         if let Some(hint) = &self.hint {
             lines.extend(wrap(hint, width).map(|text| Line {
                 text,
-                fg: DIM,
-                bg: BG,
+                fg: palette.inactive,
+                bg: bg(palette),
                 accent: 0,
             }));
         }
@@ -361,13 +362,13 @@ impl Repl {
 
     /// The prompt on `row` of `grid` (bar background, `PROMPT`, the cursor), scrolled sideways to keep the cursor in
     /// view; nothing while running, like a shell
-    pub fn draw_prompt(&self, grid: &mut CharGrid, row: usize) {
+    pub fn draw_prompt(&self, grid: &mut CharGrid, row: usize, palette: &Palette) {
         if self.running() {
             return;
         }
         let width = grid.width();
-        fill_row(grid, row, BAR_BG);
-        let start = put(grid, row, 0, PROMPT, ACCENT);
+        fill_row(grid, row, bar_bg(palette));
+        let start = put(grid, row, 0, PROMPT, palette.accent);
         let room = width.saturating_sub(start).max(1);
         let skip = self.cursor.saturating_sub(room - 1);
         // a pasted newline shows as `↵`
@@ -377,11 +378,11 @@ impl Repl {
             .skip(skip)
             .map(|c| if c == '\n' { '↵' } else { c })
             .collect();
-        put(grid, row, start, &visible, COMMAND);
+        put(grid, row, start, &visible, palette.fg);
         if let Some(cell) = (start + self.cursor - skip < width)
             .then(|| grid.get_char_mut(row, start + self.cursor - skip))
         {
-            cell.set_fg(BAR_BG).set_bg(CURSOR);
+            cell.set_fg(bar_bg(palette)).set_bg(palette.fg);
         }
     }
 }
@@ -446,17 +447,18 @@ fn wrap(text: &str, width: usize) -> impl Iterator<Item = String> {
     })
 }
 
-/// Draws `lines` on the grid's rows from `top`, each with its background and accented prompt
+/// Draws `lines` on the grid's rows from `top`, each with its background and prompt in `accent`
 pub(crate) fn draw_lines<'a>(
     grid: &mut CharGrid,
     top: usize,
     lines: impl IntoIterator<Item = &'a Line>,
+    accent_color: Color,
 ) {
     for (row, line) in (top..).zip(lines) {
         fill_row(grid, row, line.bg);
         // the prompt is ASCII, so this is a char boundary
         let (accent, rest) = line.text.split_at(line.accent.min(line.text.len()));
-        let column = put(grid, row, 0, accent, ACCENT);
+        let column = put(grid, row, 0, accent, accent_color);
         put(grid, row, column, rest, line.fg);
     }
 }

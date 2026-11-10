@@ -189,7 +189,7 @@
           "$ref": "#/$defs/Color"
         },
         "bg": {
-          "description": "Unused for now: behind the panes is the background layer (eg a wallpaper)",
+          "description": "The command hub's and buffer line's background (translucent; their bars a bit toward `fg`). Not behind the\npanes: the background layer (eg a wallpaper) is there",
           "$ref": "#/$defs/Color"
         },
         "fg": {
