@@ -26,7 +26,7 @@ use calloop::{
     timer::{TimeoutAction, Timer},
 };
 use sonamu_common::{
-    command::{self, NodeCall, World},
+    command::{self, NodeCall, Value, World},
     sap::{
         packets::{OpenApplet, SpawnPosition, StandardEvent, StandardRequest, StateKind, Treeview},
         raw_client_initializer::RawClientInitializer,
@@ -111,6 +111,8 @@ pub struct RootNodeApplet {
     remembered: HashMap<WorldTreePath, WorldTreePath>,
     /// When Ctrl+Shift+Q was pressed, while it asks to press it again (#139)
     quit_asked: Option<Instant>,
+    /// The focus path `remember_focus` last saw, to emit `focus` events when it moves
+    last_focus: Option<WorldTreePath>,
     /// The buffer line's prompt (a Luau REPL like the command hub's), at the bottom of the active screen
     repl: Repl,
     /// Keys go to the buffer line (Super+Esc), like vim's normal mode; else `INSERT`
@@ -499,6 +501,7 @@ impl RootNodeApplet {
             select_swipe: None,
             remembered: HashMap::new(),
             quit_asked: None,
+            last_focus: None,
             repl: Repl::new(repl_waker),
             buffer_mode: false,
             loop_handle: event_loop.clone(),
@@ -589,6 +592,9 @@ impl RootNodeApplet {
                     &event_loop.handle(),
                     world,
                 );
+
+                // the user's `init.luau`, now that the tree's commands work
+                sonamu_script::start();
 
                 // after each batch of events, since any of them may move focus or damage
                 event_loop
@@ -699,7 +705,9 @@ impl RootNodeApplet {
             StandardEvent::Deactivate => {}
             StandardEvent::WlSurfaceRegistered(surface) => {
                 // a restored tile, else where the user is working (eg under the command hub that ran it)
+                let app_id = surface.app_id.clone().map_or(Value::Nil, Value::String);
                 self.holder.add_wl_surface(surface);
+                sonamu_script::emit("window", vec![app_id]);
             }
             StandardEvent::Pluck(path) => self.holder.start_pluck(path.as_ref()),
             StandardEvent::Place(path, position, tree) => {
@@ -1042,6 +1050,11 @@ impl RootNodeApplet {
     /// Remembers the child each row on the focus path has focus under (#142)
     fn remember_focus(&mut self) {
         let focus = self.holder.tree.get_focus_path();
+        // `events.on("focus", ..)`
+        if self.last_focus.as_ref() != Some(&focus) {
+            self.last_focus = Some(focus.clone());
+            sonamu_script::emit("focus", Vec::new());
+        }
         for end in 1..=focus.0.len() {
             self.remembered.insert(
                 WorldTreePath(focus.0[..end - 1].to_vec()),

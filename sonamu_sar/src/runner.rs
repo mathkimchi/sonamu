@@ -374,6 +374,11 @@ impl AppletRunner {
                 keybind.run();
                 return;
             }
+            // from Luau (`keymap.set`)
+            if let Some(id) = sonamu_script::binding(symbol, raw_keycode, mods) {
+                sonamu_script::run_binding(id);
+                return;
+            }
         }
 
         // like other compositors, keys for a focused wl client go straight to it, so its

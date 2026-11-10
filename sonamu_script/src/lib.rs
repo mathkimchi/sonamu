@@ -4,6 +4,7 @@
 
 use mlua::{Lua, MetaMethod, MultiValue, UserData, UserDataMethods, Value as LuaValue, VmState};
 use sonamu_command::{self as command, CommandResult, NODE_COMMANDS, NodeUid, Value};
+use sonamu_common::settings::{Key, Keybind};
 use std::{
     cell::RefCell,
     fmt::Write as _,
@@ -44,6 +45,48 @@ enum Job {
         reply: mpsc::Sender<Vec<String>>,
         notify: Box<dyn Fn() + Send>,
     },
+    /// Runs Luau no one waits on; its `print`s and errors go to stderr
+    Call(Call),
+}
+
+enum Call {
+    /// `init.luau` in the config dir
+    Init,
+    /// A `keymap.set` function
+    Binding(u64),
+    /// `events.on` functions for this event
+    Emit(String, Vec<Value>),
+}
+
+/// `keymap.set`'s keys, by binding id (the function is in the state's `BINDINGS_KEY` table)
+static BINDINGS: Mutex<Vec<(Keybind, u64)>> = Mutex::new(Vec::new());
+/// Named registry values of the state: `keymap.set`'s functions by id, `events.on`'s by event
+const BINDINGS_KEY: &str = "sonamu_bindings";
+const HOOKS_KEY: &str = "sonamu_hooks";
+
+/// Runs `init.luau` from the config dir, once Sonamu has started (again after `sonamu.reset()`)
+pub fn start() {
+    send_job(Job::Call(Call::Init));
+}
+
+/// The `keymap.set` binding for this key with exactly these mods (`[ctrl, alt, shift, logo]`), if any
+pub fn binding(symbol: Option<char>, raw_keycode: u32, mods: [bool; 4]) -> Option<u64> {
+    BINDINGS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|(keybind, _)| keybind.matches(symbol, raw_keycode, mods))
+        .map(|&(_, id)| id)
+}
+
+/// Runs a `binding`'s function
+pub fn run_binding(id: u64) {
+    send_job(Job::Call(Call::Binding(id)));
+}
+
+/// Calls the `events.on` functions for `event` with `args` (eg `"focus"`)
+pub fn emit(event: &str, args: Vec<Value>) {
+    send_job(Job::Call(Call::Emit(event.to_string(), args)));
 }
 
 fn send_job(job: Job) {
@@ -112,11 +155,14 @@ fn cancelled() -> bool {
 }
 
 fn send(output: Output) {
-    CURRENT.with_borrow(|current| {
-        if let Some(current) = current {
+    CURRENT.with_borrow(|current| match (current, output) {
+        (Some(current), output) => {
             let _ = current.output.send(output);
             (current.notify)();
         }
+        // a binding or hook (`Job::Call`)
+        (None, Output::Print(line)) => eprintln!("{line}"),
+        (None, Output::Done(_)) => {}
     });
 }
 
@@ -124,6 +170,12 @@ fn run(jobs: &mpsc::Receiver<Job>) {
     let mut lua = new_lua().expect("the script state");
     for job in jobs {
         let (code, output, notify, cancelled) = match job {
+            Job::Call(call) => {
+                if let Err(err) = run_call(&lua, call) {
+                    eprintln!("Luau: {err}");
+                }
+                continue;
+            }
             Job::Eval {
                 code,
                 output,
@@ -150,7 +202,64 @@ fn run(jobs: &mpsc::Receiver<Job>) {
         send(Output::Done(result));
         let reset = CURRENT.take().is_some_and(|current| current.reset);
         if reset {
+            BINDINGS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clear();
             lua = new_lua().expect("the script state");
+            if let Err(err) = run_call(&lua, Call::Init) {
+                eprintln!("Luau: {err}");
+            }
+        }
+    }
+}
+
+fn run_call(lua: &Lua, call: Call) -> Result<(), String> {
+    match call {
+        Call::Init => {
+            let Some(path) = sonamu_common::settings::config_dir().map(|dir| dir.join("init.luau"))
+            else {
+                return Ok(());
+            };
+            let Ok(code) = std::fs::read_to_string(&path) else {
+                return Ok(());
+            };
+            run_code(lua, &code)
+                .map(drop)
+                .map_err(|err| format!("{}: {err}", path.display()))
+        }
+        Call::Binding(id) => {
+            let bindings: mlua::Table = lua
+                .named_registry_value(BINDINGS_KEY)
+                .map_err(|err| err.to_string())?;
+            let function: Option<mlua::Function> =
+                bindings.get(id).map_err(|err| err.to_string())?;
+            function.map_or(Ok(()), |function| {
+                function.call::<()>(()).map_err(|err| err.to_string())
+            })
+        }
+        Call::Emit(event, args) => {
+            let hooks: mlua::Table = lua
+                .named_registry_value(HOOKS_KEY)
+                .map_err(|err| err.to_string())?;
+            let Some(functions) = hooks
+                .get::<Option<mlua::Table>>(event)
+                .map_err(|err| err.to_string())?
+            else {
+                return Ok(());
+            };
+            for function in functions.sequence_values::<mlua::Function>() {
+                let args = args
+                    .iter()
+                    .map(|arg| to_lua(lua, arg.clone()))
+                    .collect::<mlua::Result<MultiValue>>()
+                    .map_err(|err| err.to_string())?;
+                // one failing doesn't stop the others
+                if let Err(err) = function.map_err(|err| err.to_string())?.call::<()>(args) {
+                    eprintln!("Luau: {err}");
+                }
+            }
+            Ok(())
         }
     }
 }
@@ -240,9 +349,88 @@ fn new_lua() -> mlua::Result<Lua> {
     )?;
     globals.set("sonamu", sonamu)?;
 
+    add_keymap_and_events(&lua, &globals)?;
+
     // builtins read-only; what evals define goes in a table of its own
     lua.sandbox(true)?;
     Ok(lua)
+}
+
+/// `keymap.set` and `events.on`, whose functions are kept in the state's registry
+fn add_keymap_and_events(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
+    lua.set_named_registry_value(BINDINGS_KEY, lua.create_table()?)?;
+    lua.set_named_registry_value(HOOKS_KEY, lua.create_table()?)?;
+    let keymap = lua.create_table()?;
+    keymap.set(
+        "set",
+        lua.create_function(
+            |lua, (mods, key, function): (Vec<String>, LuaValue, mlua::Function)| {
+                let key = match key {
+                    LuaValue::Integer(code) => {
+                        Key::Code(u32::try_from(code).map_err(mlua::Error::runtime)?)
+                    }
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        clippy::cast_sign_loss,
+                        reason = "a key code"
+                    )]
+                    LuaValue::Number(code) => Key::Code(code as u32),
+                    LuaValue::String(text) => {
+                        let text = text.to_str()?;
+                        let mut chars = text.chars();
+                        match (chars.next(), chars.next()) {
+                            (Some(c), None) => Key::Char(c),
+                            _ => {
+                                return Err(mlua::Error::runtime(
+                                    "the key is one character or a key code",
+                                ));
+                            }
+                        }
+                    }
+                    other => {
+                        return Err(mlua::Error::runtime(format!(
+                            "can't bind a {}",
+                            other.type_name()
+                        )));
+                    }
+                };
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let id = NEXT.fetch_add(1, Ordering::Relaxed);
+                lua.named_registry_value::<mlua::Table>(BINDINGS_KEY)?
+                    .set(id, function)?;
+                let keybind = Keybind {
+                    mods,
+                    key,
+                    command: String::new(),
+                };
+                let mut bindings = BINDINGS.lock().unwrap_or_else(PoisonError::into_inner);
+                // the same key bound again replaces it
+                bindings
+                    .retain(|(bound, _)| bound.mods != keybind.mods || bound.key != keybind.key);
+                bindings.push((keybind, id));
+                Ok(())
+            },
+        )?,
+    )?;
+    globals.set("keymap", keymap)?;
+    let events = lua.create_table()?;
+    events.set(
+        "on",
+        lua.create_function(|lua, (event, function): (String, mlua::Function)| {
+            let hooks: mlua::Table = lua.named_registry_value(HOOKS_KEY)?;
+            let functions =
+                if let Some(functions) = hooks.get::<Option<mlua::Table>>(event.as_str())? {
+                    functions
+                } else {
+                    let functions = lua.create_table()?;
+                    hooks.set(event, &functions)?;
+                    functions
+                };
+            functions.push(function)
+        })?,
+    )?;
+    globals.set("events", events)?;
+    Ok(())
 }
 
 const HELP: &str = "\
@@ -250,6 +438,9 @@ help() / sonamu.help()         this
 context.focus(): Node          the innermost focused node
 context.root(): Node           the root node
 process.spawn(program, {args}?)
+keymap.set({mods}, key, fn)   a global key (`ctrl`, `alt`, `shift`, `logo`; a character or evdev code)
+events.on(event, fn)           `focus` (focus moved), `window` (a wl window opened: its app id)
+~/.config/sonamu/init.luau     runs at start and on sonamu.reset()
 clipboard.copy(text)           Sonamu's clipboard, for wl clients too
 clipboard.paste(): string?
 sonamu.open(applet, {args}?)   like `sonamu-msg open`
@@ -564,6 +755,28 @@ mod tests {
             }],
         );
         assert_eq!(complete_all("context.root():set"), ["set_title"]);
+    }
+
+    #[test]
+    fn bindings_and_hooks() {
+        let logo = [false, false, false, true];
+        assert!(
+            eval_all("keymap.set({'logo'}, 'q', function() bound = true end)")
+                .1
+                .is_ok()
+        );
+        assert_eq!(binding(Some('Q'), 0, [false; 4]), None, "mods must match");
+        let id = binding(Some('Q'), 0, logo).expect("bound, case-insensitive");
+        run_binding(id);
+        assert_eq!(eval_all("bound").1, Ok(vec![Value::Bool(true)]));
+
+        assert!(
+            eval_all("events.on('focus', function(x) got = x end)")
+                .1
+                .is_ok()
+        );
+        emit("focus", vec![Value::Number(3.0)]);
+        assert_eq!(eval_all("got").1, Ok(vec![Value::Number(3.0)]));
     }
 
     #[test]

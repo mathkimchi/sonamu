@@ -62,6 +62,14 @@ Deviations from the decisions below:
   '<code>'` (`-`: stdin): prints to stderr, one value as JSON (several as an array) on stdout, error → exit 1. A node
   is its uid number in JSON (not `{"type", "node"}`).
 
+- Startup / keys / hooks (`sonamu_script`): `start()` (the root, at init) runs `<config dir>/init.luau` (again after
+  `sonamu.reset()`, which also drops bindings). `keymap.set({mods}, key, fn)`: keys in the static `BINDINGS`
+  (matched like settings `Keybind`s; same key replaces), fns in the state's registry; the runner checks
+  `binding(..)` after the settings keybinds (before the root, so any focus) and queues `run_binding`.
+  `events.on(event, fn)`; the root `emit`s `focus` (no args, `remember_focus` sees the path change) and `window`
+  (app id, on `WlSurfaceRegistered`). These run as `Job::Call`: no one waits, `print`s and errors go to stderr.
+  Example: `examples/config/init.luau` (all commented).
+
 Not done: keybinds through `NodeCall`; signatures aren't checked against calls (`command()` is).
 
 ## Decisions
