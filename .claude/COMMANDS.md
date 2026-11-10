@@ -202,6 +202,8 @@ Gaps:
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
 - Clipboard: the code editor can't copy (it has no selection yet).
+- Limited evals share the one env: one can redefine a global a binding/hook calls, which then runs unlimited (fix:
+  run limited evals in their own env reading through to the shared one, like `require`d modules).
 - `docs/usage.md` doesn't mention Super+Esc or the buffer line (docs aren't edited from here).
 
 Later:
