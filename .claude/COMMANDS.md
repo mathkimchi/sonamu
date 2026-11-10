@@ -70,7 +70,7 @@ Deviations from the decisions below:
   (`msg::EvalReply`: `print`, then `done` `Ok(values)`/`Err`), plus empty keepalive lines every 100 ms, which fail once
   the sender is gone and cancel the eval (reading can't tell: it already shut its writing half). `sonamu-msg eval
   '<code>'` (`-`: stdin): prints to stderr, one value as JSON (several as an array) on stdout, error → exit 1. A node
-  is its uid number in JSON (not `{"type", "node"}`).
+  is `{"type": .., "node": uid}` (`msg_socket::to_json` asks its type when answering; null if gone).
 
 - Startup / keys / hooks (`sonamu_script`): `start()` (the root, at init) runs `<config dir>/init.luau` (again after
   `sonamu.reset()`, which also drops bindings). `keymap.set({mods}, key, fn)`: keys in the static `BINDINGS`
@@ -180,7 +180,6 @@ Gaps:
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
 - Prompt: no type-ahead while running; no newline key (only pasted ones).
 - `hub:run_output` blocks the hub's thread (`process.output` doesn't).
-- A node in JSON (socket) is its bare uid, not `{"type", "node"}`.
 - A project node's `children()` are its outer children; no `Node` method reaches its inner tree (eg `n:inner()`).
 - Buffer line: active screen only; output ≤ `BUFFER_OUTPUT_ROWS`, no scroll; shown only in buffer mode; history
   separate from each hub's.

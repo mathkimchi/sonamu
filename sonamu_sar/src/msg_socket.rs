@@ -3,6 +3,7 @@
 use crate::runner::AppletRunner;
 use calloop::{Interest, LoopHandle, Mode, PostAction, generic::Generic};
 use sonamu_common::{
+    command::{self, Value},
     msg::{EvalReply, Message},
     sap::packets::{OpenApplet, StandardEvent},
 };
@@ -76,12 +77,9 @@ fn answer_eval(mut stream: UnixStream, code: String) {
     loop {
         let reply = match outputs.recv_timeout(POLL) {
             Ok(sonamu_script::Output::Print(line)) => EvalReply::Print(line),
-            Ok(sonamu_script::Output::Done(result)) => EvalReply::Done(result.map(|values| {
-                values
-                    .iter()
-                    .map(|value| serde_json::to_value(value).unwrap_or_default())
-                    .collect()
-            })),
+            Ok(sonamu_script::Output::Done(result)) => {
+                EvalReply::Done(result.map(|values| values.iter().map(to_json).collect()))
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 // an empty line (ignored by the reader) fails once the sender is gone; reading can't tell, since
                 // it already shut its writing half
@@ -101,6 +99,24 @@ fn answer_eval(mut stream: UnixStream, code: String) {
         if done {
             return;
         }
+    }
+}
+
+/// `value` as JSON, a node as `{"type": .., "node": uid}` (its type asked now; null if it's gone)
+fn to_json(value: &Value) -> serde_json::Value {
+    match value {
+        &Value::Node(uid) => {
+            let applet_type = command::call(Some(uid), "type", Vec::new(), &|| false)
+                .ok()
+                .and_then(|applet_type| serde_json::to_value(applet_type).ok());
+            serde_json::json!({ "type": applet_type, "node": uid })
+        }
+        Value::List(values) => values.iter().map(to_json).collect(),
+        Value::Map(values) => values
+            .iter()
+            .map(|(key, value)| (key.clone(), to_json(value)))
+            .collect(),
+        value => serde_json::to_value(value).unwrap_or_default(),
     }
 }
 

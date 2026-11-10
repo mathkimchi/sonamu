@@ -19,8 +19,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
 
 ## Gaps (see COMMANDS.md To do for the full list)
 
-- Socket node JSON: serialize `Value::Node` as `{"type": .., "node": uid}` (needs the type: ask the world, or store
-  the tag in the registry, which also closes "type tag derived on demand").
 - Project contents: add a node command `inner(): Node?` answered by applets holding a world (like `INNER_FOCUS`,
   returning their inner root's uid); `children()` of a project node could then stay outer.
 - `hub:run_output`: reimplement on `process.output` semantics (worker thread + reply later). `StandardApplet::command`
