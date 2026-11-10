@@ -49,13 +49,11 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, RwLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::Ordering,
     },
     time::{Duration, Instant},
 };
 
-/// In buffer mode (Super+Esc): every key goes to the root's buffer line (`is_keybind`), not to a wl client
-static BUFFER_MODE: AtomicBool = AtomicBool::new(false);
 /// Output rows the buffer line shows above its prompt at most (the last entry's)
 const BUFFER_OUTPUT_ROWS: usize = 10;
 
@@ -152,7 +150,7 @@ impl RootNodeApplet {
     /// Toggles buffer mode (Super+Esc), where every key goes to the buffer line
     fn set_buffer_mode(&mut self, on: bool) {
         self.buffer_mode = on;
-        BUFFER_MODE.store(on, Ordering::Relaxed);
+        sonamu_common::BUFFER_MODE.store(on, Ordering::Relaxed);
         self.surface.damage();
     }
 
@@ -1349,7 +1347,7 @@ impl RootKeybind {
 /// Whether the root or a node acts on this key, rather than a focused wl client.
 /// The runner sends other keys straight to the client (#56).
 pub fn is_keybind(ui_event: &UIEvent) -> bool {
-    BUFFER_MODE.load(Ordering::Relaxed)
+    sonamu_common::BUFFER_MODE.load(Ordering::Relaxed)
         || matches!(
             ui_event,
             UIEvent::Key {

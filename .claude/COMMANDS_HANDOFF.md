@@ -19,10 +19,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
 
 ## Fix first (by risk)
 
-2. **Unmodified bindings steal buffer-line typing.** `AppletRunner::handle_ui_event` matches settings keybinds and
-   `sonamu_script::binding` before the root sees the key. Skip bindings without mods (or all but media keys) while
-   `root_node_applet::BUFFER_MODE` is set. That static is in sttk, which sar doesn't depend on: move it to
-   `sonamu_common` (or `sonamu_command`) so the runner can read it.
 3. **Errors only on stderr** for init/bindings/hooks. Route them to the buffer line: keep a small "messages" list
    in `Repl` (or a channel the root drains) and show the last one above the prompt / as a notification
    (`sonamu_common::notification`).

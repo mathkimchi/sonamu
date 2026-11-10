@@ -26,7 +26,9 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
 - Paste: Ctrl+V / Ctrl+Shift+V (`sonamu_common::clipboard::paste`) inserts at the cursor; newlines kept (shown `↵`).
 
 - Buffer line (root, `RootNodeApplet::{buffer_mode, repl}`): Super+Esc toggles buffer mode (like vim's normal
-  mode); `BUFFER_MODE` makes `is_keybind` send every key to the root then. Esc clears the prompt, or leaves if empty.
+  mode); `sonamu_common::BUFFER_MODE` makes `is_keybind` send every key to the root then, and the runner
+  (`runner::run_binding`) skip settings/`keymap.set` bindings on keys with a symbol unless Super is held (minibuffer-like
+  shadowing; media/F-keys and Super combos still work). Esc clears the prompt, or leaves if empty.
   Bottom of the active screen: the last entry's output and Tab's candidates (≤ `BUFFER_OUTPUT_ROWS`) over the prompt.
   Setting `buffer_line` (`.claude/SETTINGS.md`): `always` reserves the row and shows `-- INSERT --` outside buffer mode.
   `context.focus()` there is the real focus (no "previous focus" problem). Not a node: no applet commands of its own.
@@ -169,7 +171,6 @@ Gaps:
 - Luau tables pass/return only their sequence part (`Value::List`); map keys are dropped silently.
 - Prompt: no type-ahead while running; no newline key (only pasted ones).
 - Signatures aren't checked against calls (each `command()` validates its own args).
-- Settings keybinds and `keymap.set` are matched before buffer mode, so an unmodified binding can't be typed there.
 - `hub:run_output` blocks the hub's thread (`process.output` doesn't).
 - `cast` returns the same `Node`: no per-type handles, no `file_manager.from_node`.
 - A node in JSON (socket) is its bare uid, not `{"type", "node"}`.

@@ -347,38 +347,8 @@ impl AppletRunner {
             return;
         }
 
-        // keybinds from the settings
-        if let UIEvent::Key {
-            symbol,
-            modifiers,
-            raw_keycode,
-            pressed: true,
-        } = event
-        {
-            let symbol = match symbol {
-                Some(KeySymbol::Char(c)) => Some(c),
-                _ => None,
-            };
-            let mods = [
-                modifiers.ctrl,
-                modifiers.alt,
-                modifiers.shift,
-                modifiers.logo,
-            ];
-            let settings = sonamu_common::settings::get();
-            if let Some(keybind) = settings
-                .keybinds
-                .iter()
-                .find(|keybind| keybind.matches(symbol, raw_keycode, mods))
-            {
-                keybind.run();
-                return;
-            }
-            // from Luau (`keymap.set`)
-            if let Some(id) = sonamu_script::binding(symbol, raw_keycode, mods) {
-                sonamu_script::run_binding(id);
-                return;
-            }
+        if run_binding(&event) {
+            return;
         }
 
         // like other compositors, keys for a focused wl client go straight to it, so its
@@ -486,4 +456,49 @@ impl AppletRunner {
             self.ui_handle.capture();
         }
     }
+}
+
+/// Runs the settings keybind or `keymap.set` binding for this key press, if any
+fn run_binding(event: &UIEvent) -> bool {
+    let &UIEvent::Key {
+        symbol,
+        modifiers,
+        raw_keycode,
+        pressed: true,
+    } = event
+    else {
+        return false;
+    };
+    // the buffer line's keys shadow them, like a minibuffer's keymap
+    if sonamu_common::BUFFER_MODE.load(std::sync::atomic::Ordering::Relaxed)
+        && symbol.is_some()
+        && !modifiers.logo
+    {
+        return false;
+    }
+    let symbol = match symbol {
+        Some(KeySymbol::Char(c)) => Some(c),
+        _ => None,
+    };
+    let mods = [
+        modifiers.ctrl,
+        modifiers.alt,
+        modifiers.shift,
+        modifiers.logo,
+    ];
+    let settings = sonamu_common::settings::get();
+    if let Some(keybind) = settings
+        .keybinds
+        .iter()
+        .find(|keybind| keybind.matches(symbol, raw_keycode, mods))
+    {
+        keybind.run();
+        return true;
+    }
+    // from Luau (`keymap.set`)
+    if let Some(id) = sonamu_script::binding(symbol, raw_keycode, mods) {
+        sonamu_script::run_binding(id);
+        return true;
+    }
+    false
 }
