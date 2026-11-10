@@ -18,7 +18,7 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
   before; `"wl", {argv}` too), `run_output` (old `$`).
 - Signatures: `AppletSpawnerTrait::commands` (`&'static [command::Signature]`: name, params, returns, doc), declared
   into `command::declare` when spawners register (`RootNodeApplet::new`, `register_applet_spawner`); clashes with
-  `command::NODE_COMMANDS` dropped with a warning. Hub: `COMMANDS`. `sonamu.help()` lists them per type.
+  `command::NODE_COMMANDS` dropped with a warning. Hub: `COMMANDS`. `sonamu.help()` (also global `help()`; a bare `help` in the hub runs it) lists them per type, and the hub keys.
 - Tab: `sonamu_script::complete` (a job on the script thread, answered through the waker, dropped if the prompt
   changed): globals (incl. builtins), table fields after `.`, after `:` on a node its `Node` methods + its type's
   signatures. To know the node, completion runs read-only getters only: `context.focus()`, `context.root()`,

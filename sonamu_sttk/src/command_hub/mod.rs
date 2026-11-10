@@ -257,7 +257,13 @@ impl CommandHubApplet {
             }
         }
 
-        let output = self.start_eval(&command);
+        // like the old verb
+        let code = if command.trim() == "help" {
+            "help()"
+        } else {
+            &command
+        };
+        let output = self.start_eval(code);
         self.history.push(Entry {
             command,
             printed: String::new(),
@@ -633,7 +639,7 @@ impl StandardApplet for CommandHubApplet {
         let note = if scroll > 0 {
             format!("{scroll} lines below (PageDown) ")
         } else {
-            "sonamu.help() | Tab | Up/Down | Ctrl+C ".to_string()
+            "help | Tab | Up/Down | Ctrl+C ".to_string()
         };
         let title_end = self.title.chars().count() + 2;
         if let Some(column) = width

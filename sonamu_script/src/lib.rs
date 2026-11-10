@@ -213,7 +213,9 @@ fn new_lua() -> mlua::Result<Lua> {
     for name in ["open", "quit", "reload_settings"] {
         sonamu.set(name, tree_function(&lua, name)?)?;
     }
-    sonamu.set("help", lua.create_function(|_, ()| Ok(help()))?)?;
+    let help_function = lua.create_function(|_, ()| Ok(help()))?;
+    sonamu.set("help", help_function.clone())?;
+    globals.set("help", help_function)?;
     sonamu.set(
         "reset",
         lua.create_function(|_, ()| {
@@ -233,6 +235,7 @@ fn new_lua() -> mlua::Result<Lua> {
 }
 
 const HELP: &str = "\
+help() / sonamu.help()         this
 context.focus(): Node          the innermost focused node
 context.root(): Node           the root node
 process.spawn(program, {args}?)
@@ -242,7 +245,9 @@ sonamu.quit()
 sonamu.reset()                 a fresh Luau state
 Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) toggle_half() wrap_project()
       parent(): Node? children(): {Node} type(): string title(): string cast(type): Node?
-      any other method is a command of its applet, eg hub:clear()";
+      any other method is a command of its applet, eg hub:clear()
+In the hub: Tab completes, Up/Down recalls, PageUp/PageDown scrolls, Esc clears, Ctrl+C cancels.
+Super+? lists every keybind.";
 
 /// `HELP`, then each applet type's commands
 fn help() -> String {
@@ -515,6 +520,10 @@ mod tests {
         assert!(
             eval_all("string.len = nil").1.is_err(),
             "builtins are read-only"
+        );
+        assert_eq!(
+            eval_all("help() == sonamu.help()").1,
+            Ok(vec![Value::Bool(true)])
         );
     }
 
