@@ -6,7 +6,7 @@
   on the project itself rather than on something in it. That is also the state right after Super+P, so a freshly
   focus path ending at the project node shows it too (#145: no separate selected state).
 - It replaces the panes there (they were the last child's pane before). Rows, from the top: name, directory, key hint,
-  `1  <label>` per child of the inner root, then `NEW_ROWS` (command hub `n`, project `p`, terminal `t`, browser `b`). Rows are a fixed height so the project hit-tests clicks itself.
+  `1  <label>` per child of the inner root, then `NEW_ROWS` (project `p`, terminal `t`, browser `b`; no command hub since the buffer line). Rows are a fixed height so the project hit-tests clicks itself.
 - `p` (#81) adds an empty project (`ProjectApplet::empty`, no contents, this project's directory) to the inner
   root and focuses inside it, so its own overview shows, ready to rename and fill.
 - Icon: a row after the directory (so the hint is row 3, contents from `CONTENTS_ROW` 4). `i` or a click on it opens a
@@ -20,8 +20,7 @@
 - `UIElement::Scaled(f)` (sonamu_ui): its children are laid out at full size, then drawn `f` times as big from its
   top-left (rects incl. border and radius, text via glyphon's `TextArea::scale`, char grids, textures and wl
   subsurfaces). Text is clipped only to a rectangle (glyphon bounds), so scaled content should fit its box rather than be cut to it.
-- Keys there, taken before the project's selector: `r` (no modifiers) starts renaming; `n` adds a command hub to the
-  inner root and focuses inside it (unlike Ctrl+Shift++, which doesn't focus it); `t`/`b` start `TERMINAL`/`BROWSER`
+- Keys there, taken before the project's selector: `r` (no modifiers) starts renaming; `p` adds an empty project; `t`/`b` start `TERMINAL`/`BROWSER`
   (`standard_keybinds`, shared with Super+T/N) with `NodeRequest::Run`, and since focus is at the inner root, the
   window lands there. Traversal keys stay the root's.
   While renaming: text, Backspace, Enter (saves; empty keeps the old name), Esc (cancels); Ctrl/Alt/Super keys still
@@ -61,5 +60,5 @@
 ## Verified (headless)
 
 Super+P shows the overview; click on the name / `r`, type, Enter renames (treeview and overview); Esc cancels;
-click `+ command hub` / `n` adds a focused hub; a wl window arriving at the overview lands in the project; back to the overview lists both children; clicking one shows its pane;
+a wl window arriving at the overview lands in the project; back to the overview lists both children; clicking one shows its pane;
 the name survives a save and restore (`"label"` in the session JSON). Not checked live.

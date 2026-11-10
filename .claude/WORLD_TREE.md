@@ -120,7 +120,7 @@ published treeviews.
   (no main, labeled with the project's name, `Project` until renamed), and the project node still has its own children
   in the outer world.
   - While focus is at its inner root, it shows an overview instead of its panes (`.claude/PROJECT_UI.md`): its name
-    (`r` or click renames it), its contents (click selects one; its zoom-out view below) and rows adding a command hub (`n`), empty project (`p`), terminal (`t`) or browser (`b`) to it.
+    (`r` or click renames it), its contents (click selects one; its zoom-out view below) and rows adding an empty project (`p`), terminal (`t`) or browser (`b`) to it.
   - Made by `NodeRequest::Wrap(ProjectApplet::wrapper())` (Super+P, hub `project`): the holder replaces the node's
     subtree with a node whose applet is made from it.
   - Undone by closing it: on `CloseRequest` (Ctrl+W on its node, or on its inner root) it detaches its contents and
@@ -258,7 +258,7 @@ The holder converts them:
   New sibling below ›, Make project (Wrap, like Super+P), Set as view root, Deactivate, Close, Close with children (asks every node
   in the subtree, parents first). On the root's row only the first, Make project and Set as view root; on empty space or a `‹` row,
   the applet list for the shown world's root (the view root, or the inner root of the applet whose inner world is
-  shown). New › lists command hub, terminal, browser, file manager (in the holder's directory) and an empty
+  shown). New › lists terminal, browser, file manager (in the holder's directory) and an empty
   project, all as `NodeAction::Spawn`. Native ones are added there and focused inside; for a program, the holder
   keeps `wl_target` and the next new wl surface it gets goes there. A spawn passed into an applet focuses inside
   it, so that surface is passed in too. A click elsewhere closes the menu.

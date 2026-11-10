@@ -58,6 +58,8 @@ pub struct Settings {
     /// Text height in px (Sonamu's own UI isn't scaled)
     pub font_size: f32,
     pub treeview: TreeviewSettings,
+    /// When the buffer line (a Luau prompt at the bottom, like vim's command line) shows
+    pub buffer_line: BufferLine,
     pub swipe: SwipeSettings,
     /// The zoom-out view (#145): how many views fit across and down (the smaller scale of the two); the center view is
     /// in the middle, so an even count shows halves at the edges
@@ -184,6 +186,16 @@ pub struct SwipeSettings {
     pub stiffness: f32,
     /// Of that spring: 1 is critically damped (no bounce), below 1 overshoots and bounces, above 1 is sluggish
     pub damping_ratio: f32,
+}
+
+/// When the buffer line shows
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BufferLine {
+    /// Only in buffer mode (Super+Esc), over the panes
+    BufferMode,
+    /// Always, below the panes; `INSERT` while not in buffer mode
+    Always,
 }
 
 /// A column beside the panes, which get the rest of the width

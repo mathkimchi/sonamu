@@ -2,7 +2,7 @@
 //! Its node doesn't know it is a project; it only sees an applet with an inner tree.
 
 use crate::{
-    command_hub::{BG, CommandHubApplet},
+    command_hub::BG,
     nodular_applet::{
         Answer, AppletContext, AppletSpawner, AppletSpawnerTrait, EmbeddedId, NodeRequest,
         NodularAppletInitializer, StandardApplet, WrapInitializer,
@@ -77,14 +77,12 @@ const MAX_OPTIONS: usize = 20;
 /// What a `NEW_ROWS` row adds
 #[derive(Clone, Copy)]
 enum New {
-    CommandHub,
     /// An empty project, in this one's directory
     Project,
     Program(fn() -> String),
 }
 /// Rows after its contents that add to it: label, key, and what it adds
-const NEW_ROWS: [(&str, char, New); 4] = [
-    ("+ command hub  (n)", 'n', New::CommandHub),
+const NEW_ROWS: [(&str, char, New); 3] = [
     ("+ project  (p)", 'p', New::Project),
     ("+ terminal  (t)", 't', New::Program(terminal)),
     ("+ browser  (b)", 'b', New::Program(browser)),
@@ -237,7 +235,7 @@ impl DirectoryInput {
 /// Closing it (`CloseRequest`, eg Ctrl+W on its node) gives its contents back to its node, which they replace.
 ///
 /// While focus is at its inner root, it shows an overview instead of its panes: its name (`r` renames it), its directory (`d` sets it),
-/// its contents (click to select) and rows that add to it (`NEW_ROWS`: a command hub, project, terminal or browser).
+/// its contents (click to select) and rows that add to it (`NEW_ROWS`: a project, terminal or browser).
 pub struct ProjectApplet {
     holder: NodeHolder,
     hook: AppletContext,
@@ -471,7 +469,7 @@ impl ProjectApplet {
         !self.dissolved && self.holder.tree.screen_focused_node(screen) == self.holder.tree.root()
     }
 
-    /// What `NEW_ROWS[index]` adds: a command hub or project in it, focused inside,
+    /// What `NEW_ROWS[index]` adds: a project in it, focused inside,
     /// or a program, whose window lands in it (focus is at its root)
     fn add_new(&mut self, index: usize) {
         let root = self.holder.tree.root();
@@ -481,7 +479,6 @@ impl ProjectApplet {
                     .handle_node_request(root, NodeRequest::Run(program()));
                 return;
             }
-            New::CommandHub => CommandHubApplet::get_boxed_initiator(),
             New::Project => Self::empty(self.holder.directory.clone()),
         };
         if let Some(id) = self.holder.tree.add_child(root, initializer) {

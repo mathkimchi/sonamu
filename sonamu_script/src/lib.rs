@@ -246,7 +246,7 @@ sonamu.reset()                 a fresh Luau state
 Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) toggle_half() wrap_project()
       parent(): Node? children(): {Node} type(): string title(): string cast(type): Node?
       any other method is a command of its applet, eg hub:clear()
-In the hub: Tab completes, Up/Down recalls, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+C cancels.
+Super+Esc: the buffer line (Esc leaves). There and in the hub: Tab completes, Up/Down recalls, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+C cancels.
 Super+? lists every keybind.";
 
 /// `HELP`, then each applet type's commands

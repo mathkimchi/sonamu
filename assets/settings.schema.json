@@ -18,6 +18,10 @@
         "null"
       ]
     },
+    "buffer_line": {
+      "description": "When the buffer line (a Luau prompt at the bottom, like vim's command line) shows",
+      "$ref": "#/$defs/BufferLine"
+    },
     "font_size": {
       "description": "Text height in px (Sonamu's own UI isn't scaled)",
       "type": "number",
@@ -118,6 +122,21 @@
           "format": "float"
         }
       }
+    },
+    "BufferLine": {
+      "description": "When the buffer line shows",
+      "oneOf": [
+        {
+          "description": "Only in buffer mode (Super+Esc), over the panes",
+          "type": "string",
+          "const": "buffer_mode"
+        },
+        {
+          "description": "Always, below the panes; `INSERT` while not in buffer mode",
+          "type": "string",
+          "const": "always"
+        }
+      ]
     },
     "Color": {
       "type": "string",

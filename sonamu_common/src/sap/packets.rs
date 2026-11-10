@@ -49,7 +49,6 @@ pub enum NodeAction {
 /// What `NodeAction::Spawn` can add
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NewApplet {
-    CommandHub,
     FileManager,
     /// An empty one
     Project,

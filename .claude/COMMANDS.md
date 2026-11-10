@@ -25,15 +25,25 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
   `:parent()` (deviation: Q22 said no calls); `:add_child()` gives a node of unknown type (`Node` methods only).
 - Paste: Ctrl+V / Ctrl+Shift+V (`sonamu_common::clipboard::paste`) inserts at the cursor; newlines kept (shown `↵`).
 
-Try in a hub:
+- Buffer line (root, `RootNodeApplet::{buffer_mode, repl}`): Super+Esc toggles buffer mode (like vim's normal
+  mode); `BUFFER_MODE` makes `is_keybind` send every key to the root then. Esc clears the prompt, or leaves if empty.
+  Bottom of the active screen: the last entry's output and Tab's candidates (≤ `BUFFER_OUTPUT_ROWS`) over the prompt.
+  Setting `buffer_line` (`.claude/SETTINGS.md`): `always` reserves the row and shows `-- INSERT --` outside buffer mode.
+  `context.focus()` there is the real focus (no "previous focus" problem). Not a node: no applet commands of its own.
+- `command_hub/repl.rs`: `Repl` (prompt, history, recall, evals, completion, paste, `lines`, `draw_prompt`), shared by
+  the hub and the buffer line; owners pass a `Waker` and call `wake`. Hub keeps scrolling, its commands and its window.
+- The hub is no longer in the treeview's New menu or the project overview (`NewApplet::CommandHub`, `n` row gone);
+  still `command_hub` (`sonamu.open`, `n:add_child`) and Ctrl+Shift++.
+
+Try in the buffer line (Super+Esc) or a hub:
 
 ```lua
 sonamu.help()
-context.focus():title()                     -- "Command Hub": in the hub, focus is the hub
+context.focus():title()                     -- in a hub, focus is the hub; in the buffer line, the real focus
 for _, n in context.root():children() do print(n:type(), n:title()) end
 context.focus():parent():add_child("file_manager", {"/tmp"})
-context.focus():set_title("Lua hub")        -- applet command, via __index
-context.focus():run_output("ls", {"-a"})
+context.focus():set_title("Lua hub")        -- in a hub: applet command, via __index
+context.focus():run_output("ls", {"-a"})    -- in a hub
 x = 5                                       -- then `x * 2` gives 10
 while true do end                           -- Ctrl+C cancels
 ```

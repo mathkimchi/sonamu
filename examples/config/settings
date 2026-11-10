@@ -42,6 +42,8 @@ print(json.dumps({
         "width": 15,  # the pinned column's, in percent of the window's width
         "floating_size": [50, 70],  # a center floating one's width and height, in percent of the window's
     },
+    # the buffer line (Luau prompt, Super+Esc) always at the bottom, `INSERT` while not in it
+    "buffer_line": "always",
     "swipe": {
         "distance_x": 600.0,
         "distance_y": 1200.0,

@@ -1,4 +1,8 @@
 use crate::{
+    command_hub::{
+        ACCENT, BAR_BG, fill_row, put,
+        repl::{self, Repl},
+    },
     man_page::ManPageApplet,
     nodular_applet::{
         AppletSpawner, NodeRequest, NodularAppletInitializer,
@@ -29,7 +33,7 @@ use sonamu_common::{
         session::Session,
         shared_state::{SharedState, StatePublisher},
     },
-    settings::{self, Settings, TreeviewFloating, TreeviewSide},
+    settings::{self, BufferLine, Settings, TreeviewFloating, TreeviewSide},
     utils::tree::{
         tree_node_path::TreeNodePath,
         world_tree::{Step, WorldTree, WorldTreePath},
@@ -37,15 +41,23 @@ use sonamu_common::{
 };
 use sonamu_ui::{
     display_units::DisplayContainerSize,
-    ui_element::{Style, UIElement, UITree, font_size},
+    ui_element::{CharGrid, Style, UIElement, UITree, font_size},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, SwipePhase, UIEvent},
 };
 use std::{
     collections::{BTreeMap, HashMap},
     path::PathBuf,
-    sync::{Arc, RwLock},
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
+
+/// In buffer mode (Super+Esc): every key goes to the root's buffer line (`is_keybind`), not to a wl client
+static BUFFER_MODE: AtomicBool = AtomicBool::new(false);
+/// Output rows the buffer line shows above its prompt at most (the last entry's)
+const BUFFER_OUTPUT_ROWS: usize = 10;
 
 /// evdev keycodes (`UIEvent::Key::raw_keycode`)
 const KEY_LEFTALT: u32 = 56;
@@ -99,6 +111,10 @@ pub struct RootNodeApplet {
     remembered: HashMap<WorldTreePath, WorldTreePath>,
     /// When Ctrl+Shift+Q was pressed, while it asks to press it again (#139)
     quit_asked: Option<Instant>,
+    /// The buffer line's prompt (a Luau REPL like the command hub's), at the bottom of the active screen
+    repl: Repl,
+    /// Keys go to the buffer line (Super+Esc), like vim's normal mode; else `INSERT`
+    buffer_mode: bool,
     loop_handle: LoopHandle<'static, Self>,
 }
 
@@ -130,6 +146,26 @@ impl RootNodeApplet {
     /// How long Ctrl+Shift+Q waits to be pressed again
     const QUIT_CONFIRM: Duration = Duration::from_secs(3);
     const QUIT_NOTICE: &str = "Press Ctrl+Shift+Q again to quit";
+
+    /// Toggles buffer mode (Super+Esc), where every key goes to the buffer line
+    fn set_buffer_mode(&mut self, on: bool) {
+        self.buffer_mode = on;
+        BUFFER_MODE.store(on, Ordering::Relaxed);
+        self.surface.damage();
+    }
+
+    /// A key in buffer mode: Esc clears the prompt, or leaves buffer mode if it's empty; others go to the prompt
+    fn handle_buffer_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) {
+        if matches!(key, KeySymbol::Escape)
+            && modifiers == KeyModifiers::NONE
+            && self.repl.prompt_is_empty()
+        {
+            self.set_buffer_mode(false);
+            return;
+        }
+        self.repl.handle_key(key, modifiers);
+        self.surface.damage();
+    }
 
     /// Where the treeview is drawn (`[x, y, width, height]`, frame included), and how;
     /// `None` while hidden
@@ -166,8 +202,17 @@ impl RootNodeApplet {
             self.treeview_shown = shown;
             self.surface.damage();
         }
+        // the buffer line's room may have changed with the settings
+        let size = self
+            .screens
+            .get(self.holder.tree.active_screen())
+            .map_or(self.latest_size, |screen| {
+                content_size(&settings, screen.rect)
+            });
         let applet_area = self.applet_area(&settings);
-        if applet_area != self.applet_area {
+        if applet_area != self.applet_area || size != self.latest_size {
+            self.latest_size = size;
+            let applet_area = self.applet_area(&settings);
             self.applet_area = applet_area;
             self.surface.damage();
             self.holder
@@ -185,19 +230,22 @@ impl RootNodeApplet {
         let shown = self.treeview_shown;
         let pinned = self.treeview_pinned;
         let quit_asked = self.quit_asked.is_some();
+        let buffer_mode = self.buffer_mode;
         let Self {
             holder,
             treeview_pointer,
             view_path,
             screens,
+            repl,
             ..
         } = self;
         let active = holder.tree.active_screen();
         self.surface.flush(
             || {
                 let screens = screens.iter_mut().enumerate().map(|(index, screen)| {
-                    let [x, y, width, height] = screen.rect;
-                    let size = DisplayContainerSize::new(width, height);
+                    let [x, y, _, height] = screen.rect;
+                    // above the buffer line, when it always shows
+                    let size = content_size(&settings, screen.rect);
                     // the active one's view is the root's own
                     let (shown, view_path, treeview_pointer) = if index == active {
                         (shown, &*view_path, &mut *treeview_pointer)
@@ -208,7 +256,7 @@ impl RootNodeApplet {
                     let [left, width] =
                         applet_area(treeview_area, size).map(|length| length as f32);
                     let mut window = vec![UITree::new_container_styled(
-                        Style::absolute([left, 0.0], [width, height as f32]),
+                        Style::absolute([left, 0.0], [width, size.height as f32]),
                         vec![holder.tree.get_screen_window(index)],
                     )];
                     if let Some(area) = treeview_area {
@@ -223,6 +271,12 @@ impl RootNodeApplet {
                     }
                     if quit_asked && index == active {
                         window.push(notice(&settings, Self::QUIT_NOTICE, size));
+                    }
+                    let full = DisplayContainerSize::new(size.width, height);
+                    if index == active && buffer_mode {
+                        window.push(buffer_line(repl, full, true));
+                    } else if settings.buffer_line == BufferLine::Always {
+                        window.push(buffer_line(repl, full, false));
                     }
                     UITree::new_container_styled(
                         Style::absolute([x as f32, y as f32], [size.width as f32, height as f32]),
@@ -248,8 +302,7 @@ impl RootNodeApplet {
         for (screen, rect) in self.screens.iter_mut().zip(rects) {
             screen.rect = rect;
         }
-        let [_, _, width, height] = self.screens[active].rect;
-        self.latest_size = DisplayContainerSize::new(width, height);
+        self.latest_size = content_size(&settings::get(), self.screens[active].rect);
         self.surface.damage();
         self.holder
             .tree
@@ -271,8 +324,7 @@ impl RootNodeApplet {
         let screen = &mut self.screens[index];
         self.view_path = screen.view_path.take();
         self.treeview_pointer = std::mem::take(&mut screen.treeview_pointer);
-        let [_, _, width, height] = screen.rect;
-        self.latest_size = DisplayContainerSize::new(width, height);
+        self.latest_size = content_size(&settings::get(), screen.rect);
         self.holder.tree.activate_screen(index);
         self.surface.damage();
     }
@@ -285,15 +337,14 @@ impl RootNodeApplet {
             if index == active {
                 continue;
             }
-            let [_, _, width, height] = screen.rect;
-            let size = DisplayContainerSize::new(width, height);
+            let size = content_size(&settings, screen.rect);
             let treeview_area =
                 treeview_area(&settings, size, self.treeview_pinned, self.treeview_pinned);
             self.holder.tree.resize_screen(
                 index,
                 Some(DisplayContainerSize::new(
                     applet_area(treeview_area, size)[1],
-                    height,
+                    size.height,
                 )),
             );
         }
@@ -368,6 +419,19 @@ impl RootNodeApplet {
         event_loop: &LoopHandle<'static, Self>,
         world: World,
     ) -> Self {
+        // the buffer line's evals and completions
+        let (repl_wake, repl_woken) = calloop::channel::channel();
+        event_loop
+            .insert_source(repl_woken, |event, &mut (), root: &mut Self| {
+                if let calloop::channel::Event::Msg(()) = event {
+                    root.repl.wake();
+                    root.surface.damage();
+                }
+            })
+            .unwrap();
+        let repl_waker: repl::Waker = Arc::new(move || {
+            let _ = repl_wake.send(());
+        });
         // saved projects are made again by these
         applet_spawner_registry.insert(
             ProjectApplet::SPAWNER.to_string(),
@@ -434,6 +498,8 @@ impl RootNodeApplet {
             select_swipe: None,
             remembered: HashMap::new(),
             quit_asked: None,
+            repl: Repl::new(repl_waker),
+            buffer_mode: false,
             loop_handle: event_loop.clone(),
         };
         // a clean session starts with the help shown
@@ -555,6 +621,25 @@ impl RootNodeApplet {
 
     /// From the runner
     fn handle_event(&mut self, event: StandardEvent) {
+        if let StandardEvent::UIEvent(UIEvent::Key {
+            symbol,
+            modifiers,
+            pressed,
+            ..
+        }) = event
+        {
+            if pressed && matches!(symbol, Some(KeySymbol::Escape)) && modifiers.logo {
+                self.set_buffer_mode(!self.buffer_mode);
+                return;
+            }
+            // releases too, so nothing else sees half a key
+            if self.buffer_mode {
+                if let (true, Some(key)) = (pressed, symbol) {
+                    self.handle_buffer_key(key, modifiers);
+                }
+                return;
+            }
+        }
         if let StandardEvent::UIEvent(UIEvent::Swipe { fingers, phase }) = event {
             match fingers {
                 3 => self.handle_swipe(phase),
@@ -1250,7 +1335,60 @@ impl RootKeybind {
 /// Whether the root or a node acts on this key, rather than a focused wl client.
 /// The runner sends other keys straight to the client (#56).
 pub fn is_keybind(ui_event: &UIEvent) -> bool {
-    RootKeybind::of(ui_event).is_some()
+    BUFFER_MODE.load(Ordering::Relaxed)
+        || matches!(
+            ui_event,
+            UIEvent::Key {
+                symbol: Some(KeySymbol::Escape),
+                modifiers: KeyModifiers { logo: true, .. },
+                ..
+            }
+        )
+        || RootKeybind::of(ui_event).is_some()
         || standard_keybind_request(ui_event).is_some()
         || Traversal::of(ui_event, false).is_some()
+}
+
+/// Rows the buffer line takes below the panes: one when it always shows, else none (it shows over them)
+fn buffer_line_height(settings: &Settings) -> u32 {
+    match settings.buffer_line {
+        BufferLine::Always => CharGrid::new_empty(1, 1).display_size().height,
+        BufferLine::BufferMode => 0,
+    }
+}
+
+/// A screen's (`[x, y, width, height]`) room for the treeview and panes, above the buffer line
+fn content_size(settings: &Settings, [_, _, width, height]: [u32; 4]) -> DisplayContainerSize {
+    DisplayContainerSize::new(width, height.saturating_sub(buffer_line_height(settings)))
+}
+
+/// The buffer line at the bottom of a screen of `size`: in buffer mode (`focused`) the prompt, under the last
+/// entry's output and Tab's candidates; else `INSERT`
+fn buffer_line(repl: &Repl, size: DisplayContainerSize, focused: bool) -> UITree {
+    let (columns, _) = CharGrid::largest_fittable_size(size);
+    let lines = if focused {
+        repl.lines(columns, repl.history.len().saturating_sub(1))
+    } else {
+        Vec::new()
+    };
+    let shown = &lines[lines.len().saturating_sub(BUFFER_OUTPUT_ROWS)..];
+    let mut grid = CharGrid::new_empty(columns, shown.len() + 1);
+    repl::draw_lines(&mut grid, 0, shown);
+    let prompt_row = shown.len();
+    fill_row(&mut grid, prompt_row, BAR_BG);
+    if focused {
+        repl.draw_prompt(&mut grid, prompt_row);
+    } else {
+        put(&mut grid, prompt_row, 1, "-- INSERT --", ACCENT);
+    }
+    let height = grid.display_size().height as f32;
+    let top = size.height as f32 - height;
+    UITree::new_container_styled(
+        Style::absolute([0.0, top], [size.width as f32, height]),
+        vec![
+            // the grid is whole cells; the bar spans the screen
+            ui::rect(BAR_BG, [0.0, 0.0], [size.width as f32, height]),
+            grid.element().into(),
+        ],
+    )
 }

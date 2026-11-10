@@ -61,8 +61,7 @@ const MENU_PAD: f32 = 12.0;
 /// Two clicks on a row within this are a double click (sets the view root)
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// What the menu's `New` items list, and their labels
-const NEW_APPLETS: [(NewApplet, &str); 5] = [
-    (NewApplet::CommandHub, "Command hub"),
+const NEW_APPLETS: [(NewApplet, &str); 4] = [
     (NewApplet::Terminal, "Terminal"),
     (NewApplet::Browser, "Browser"),
     (NewApplet::FileManager, "File manager"),

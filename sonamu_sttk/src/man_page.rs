@@ -42,6 +42,7 @@ const MAN_PAGE: &[ManSection] = &[
             entry("Super+P", "wrap current tab in a project"),
             entry("Super+W", "close current tab"),
             entry("Super+F", "toggle half-view"),
+            entry("Super+Esc", "buffer line: Luau prompt (Esc leaves)"),
             // entry("Super+Shift+\\ (Super+|)", "split to right"),
             // entry("Super+Shift+-", "split to bottom"),
         ],

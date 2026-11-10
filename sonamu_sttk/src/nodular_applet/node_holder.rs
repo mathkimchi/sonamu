@@ -2,7 +2,6 @@
 //! and wl surfaces on top of it.
 
 use crate::{
-    command_hub::CommandHubApplet,
     nodular_applet::{
         AppletClient, AppletSpawnerRegistry, NodeRequest, NodularAppletInitializer,
         WrapInitializer,
@@ -277,7 +276,6 @@ impl NodeHolder {
                 }
                 return;
             }
-            NewApplet::CommandHub => CommandHubApplet::get_boxed_initiator(),
             NewApplet::Project => ProjectApplet::empty(self.directory.clone()),
             NewApplet::FileManager => {
                 let directory = self

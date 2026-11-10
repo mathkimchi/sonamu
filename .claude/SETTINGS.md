@@ -70,7 +70,10 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
   start, keyboard driven, one process per document.
 - `startup`: `["dms run"]`, shell commands run once (`sh -c`, with Sonamu's `WAYLAND_DISPLAY`) when the runner starts (`AppletRunner::run_startup`); default none. Changing it later does nothing until restart. The example config runs DMS.
 - File manager and code editor (#126): text from `palette` (`fg`, `inactive` for dim text, `accent` for the active/open file and the normal mode cursor), backgrounds made translucent with the treeview's `with_opacity` (a constant 0.8, not a setting). The file manager's directory names stay blue (no palette color for them).
-- Not themed yet: command hub/help and the other applets keep their own constants.
+- `buffer_line` (`buffer_mode` default, `always`): the root's bottom Luau prompt (`.claude/COMMANDS.md`). `always`
+  takes a char-grid row below treeview and panes on every screen (`content_size`), `INSERT` while not in buffer mode;
+  `buffer_mode` draws it over the panes only while in it. The example config uses `always`.
+- Not themed yet: command hub/help, the buffer line and the other applets keep their own constants.
 
 ## Rendering changes
 

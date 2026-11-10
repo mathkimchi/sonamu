@@ -1,5 +1,7 @@
 //! TODO: move to sttk
 
+pub(crate) mod repl;
+
 use crate::{
     nodular_applet::{
         AppletContext, AppletSpawner, AppletSpawnerTrait, NodeRequest, NodularAppletInitializer,
@@ -7,18 +9,18 @@ use crate::{
     },
     standard_keybinds::handle_standard_keybinds,
 };
+use repl::{Output, Repl};
 use sonamu_common::{
     command::{self, CommandResult, Signature, Value},
     sap::{packets::StandardEvent, session::SavedWl},
 };
-use sonamu_script::EvalHandle;
 use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
     ui_element::{CharGrid, UITree},
     ui_event::{KeyModifiers, KeySymbol, MouseEventKind, UIEvent},
 };
-use std::{fmt::Write as _, path::PathBuf, sync::mpsc};
+use std::{path::PathBuf, sync::Arc};
 
 /// What `command` takes
 const COMMANDS: [Signature; 4] = [
@@ -48,13 +50,9 @@ const COMMANDS: [Signature; 4] = [
     },
 ];
 
-/// Kept per hub; older ones are dropped
-const MAX_ENTRIES: usize = 200;
-/// Longer outputs are cut off
-const MAX_OUTPUT_LINES: usize = 500;
 /// Lines per wheel notch
 const SCROLL_STEP: usize = 3;
-const PROMPT: &str = "> ";
+pub(crate) const PROMPT: &str = "> ";
 
 // The help applet uses these too
 pub(crate) const BG: Color = with_opacity(Color([0x0D, 0x0D, 0x16, 0]));
@@ -62,40 +60,10 @@ pub(crate) const BAR_BG: Color = with_opacity(Color([0x26, 0x2A, 0x32, 0]));
 pub(crate) const ACCENT: Color = Color([0x5F, 0xD7, 0x87, 0xFF]);
 pub(crate) const OUTPUT: Color = Color([0xC8, 0xCC, 0xD4, 0xFF]);
 pub(crate) const DIM: Color = Color([0x8A, 0x93, 0xA6, 0xFF]);
-const ERROR: Color = Color([0xFF, 0x6A, 0x6A, 0xFF]);
+pub(crate) const ERROR: Color = Color([0xFF, 0x6A, 0x6A, 0xFF]);
 pub(crate) const RUNNING: Color = Color([0xE5, 0xC0, 0x7A, 0xFF]);
 pub(crate) const CURSOR: Color = Color([0xDB, 0xDB, 0xDB, 0xFF]);
-const COMMAND: Color = Color::WHITE;
-
-enum Output {
-    Text(String),
-    Error(String),
-    /// Still running on the script thread
-    Running(u64),
-}
-
-struct Entry {
-    command: String,
-    /// Its `print`s so far
-    printed: String,
-    output: Output,
-}
-
-/// An entry's code running on the script thread
-struct Eval {
-    job: u64,
-    handle: EvalHandle,
-    outputs: mpsc::Receiver<sonamu_script::Output>,
-}
-
-/// A line of the scrollback
-struct Line {
-    text: String,
-    fg: Color,
-    bg: Color,
-    /// Leading chars drawn in `ACCENT` (the prompt of a command)
-    accent: usize,
-}
+pub(crate) const COMMAND: Color = Color::WHITE;
 
 /// Technically, this is a standard app, but it is so essential
 /// that I am considering it a tool for sttk.
@@ -104,26 +72,9 @@ struct Line {
 /// like Windows' start menu (the thing that pops up when you press Windows).
 pub struct CommandHubApplet {
     title: String,
-
-    history: Vec<Entry>,
-    /// The thing that is currently being typed.
-    current_prompt: String,
-    /// In chars, into `current_prompt`
-    cursor: usize,
+    repl: Repl,
     /// Lines scrolled up from the bottom
     scroll: usize,
-    /// Shown above the prompt until the next key (eg Tab's candidates)
-    hint: Option<String>,
-
-    /// Entered commands, for Up/Down
-    recall: Vec<String>,
-    /// Into `recall` while recalling, with the prompt from before
-    recalling: Option<(usize, String)>,
-
-    evals: Vec<Eval>,
-    next_job: u64,
-    /// Tab's candidates on the script thread, for this prompt
-    completing: Option<(String, mpsc::Receiver<Vec<String>>)>,
 
     /// Where `run_output` starts programs: the directory of the tree it is in (eg a project's); the runner's if `None`
     directory: Option<PathBuf>,
@@ -135,18 +86,13 @@ impl CommandHubApplet {
     #[must_use]
     pub fn new(hook: AppletContext) -> Self {
         hook.get_directory();
+        let waker = hook.waker();
         Self {
             title: "Command Hub".to_string(),
-            history: Vec::new(),
-            current_prompt: String::new(),
-            cursor: 0,
+            repl: Repl::new(Arc::new(move || {
+                waker.wake();
+            })),
             scroll: 0,
-            hint: None,
-            recall: Vec::new(),
-            recalling: None,
-            evals: Vec::new(),
-            next_job: 0,
-            completing: None,
             directory: None,
             size: DisplayContainerSize::new(800, 600),
             hook,
@@ -180,22 +126,6 @@ impl CommandHubApplet {
             }
         }
         Box::new(CommandHubSpawner)
-    }
-
-    /// Runs the entered code on the script thread
-    fn start_eval(&mut self, code: &str) -> Output {
-        let job = self.next_job;
-        self.next_job += 1;
-        let waker = self.hook.waker();
-        let (handle, outputs) = sonamu_script::eval(code.to_string(), move || {
-            waker.wake();
-        });
-        self.evals.push(Eval {
-            job,
-            handle,
-            outputs,
-        });
-        Output::Running(job)
     }
 
     /// `open`: replaces the hub with an applet, or with a program's window (`wl`)
@@ -242,180 +172,14 @@ impl CommandHubApplet {
         self.hook.get_applet_spawners().into_keys().collect()
     }
 
-    fn handle_enter(&mut self) {
-        let command = std::mem::take(&mut self.current_prompt);
-        self.cursor = 0;
-        self.recalling = None;
-        self.scroll = 0;
-        if command.trim().is_empty() {
-            return;
-        }
-        if self.recall.last() != Some(&command) {
-            self.recall.push(command.clone());
-            if self.recall.len() > MAX_ENTRIES {
-                self.recall.remove(0);
-            }
-        }
-
-        // like the old verb
-        let code = if command.trim() == "help" {
-            "help()"
-        } else {
-            &command
-        };
-        let output = self.start_eval(code);
-        self.history.push(Entry {
-            command,
-            printed: String::new(),
-            output,
-        });
-        if self.history.len() > MAX_ENTRIES {
-            self.history.remove(0);
-        }
-    }
-
-    /// Up (`back`) or Down through entered commands; Down past the newest gives back the prompt from before
-    fn recall_command(&mut self, back: bool) {
-        let index = match (&self.recalling, back) {
-            (None, false) => return,
-            (None, true) => self.recall.len().checked_sub(1),
-            (Some((index, _)), true) => Some(index.saturating_sub(1)),
-            (Some((index, _)), false) => Some(index + 1).filter(|&next| next < self.recall.len()),
-        };
-        match index {
-            Some(index) => {
-                let draft = match self.recalling.take() {
-                    Some((_, draft)) => draft,
-                    None => self.current_prompt.clone(),
-                };
-                self.current_prompt = self.recall[index].clone();
-                self.recalling = Some((index, draft));
-            }
-            None => {
-                if let Some((_, draft)) = self.recalling.take() {
-                    self.current_prompt = draft;
-                }
-            }
-        }
-        self.cursor = self.current_prompt.chars().count();
-    }
-
-    /// Asks the script thread what could follow the prompt, when the cursor is at its end
-    fn start_completion(&mut self) {
-        if self.cursor != self.current_prompt.chars().count() {
-            return;
-        }
-        let waker = self.hook.waker();
-        let candidates = sonamu_script::complete(self.current_prompt.clone(), move || {
-            waker.wake();
-        });
-        self.completing = Some((self.current_prompt.clone(), candidates));
-    }
-
-    /// Completes the prompt's last word: the only candidate, or what they all start with (listed in the hint)
-    fn complete(&mut self, candidates: &[String]) {
-        let word_start = self
-            .current_prompt
-            .char_indices()
-            .rev()
-            .find(|&(_, c)| !(c.is_alphanumeric() || c == '_'))
-            .map_or(0, |(index, c)| index + c.len_utf8());
-        let completed = match candidates {
-            [] => return,
-            [only] => only.clone(),
-            [first, rest @ ..] => {
-                self.hint = Some(candidates.join("  "));
-                let common = rest.iter().fold(first.as_str(), |common, candidate| {
-                    let len = common
-                        .chars()
-                        .zip(candidate.chars())
-                        .take_while(|(a, b)| a == b)
-                        .map(|(a, _)| a.len_utf8())
-                        .sum();
-                    &common[..len]
-                });
-                common.to_string()
-            }
-        };
-        self.current_prompt.replace_range(word_start.., &completed);
-        self.cursor = self.current_prompt.chars().count();
-    }
-
-    fn handle_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) {
-        self.hint = None;
-        // like a shell: no prompt until it finishes; it can still be cancelled or scrolled
-        let while_running = matches!(key, KeySymbol::PageUp | KeySymbol::PageDown)
-            || (matches!(key, KeySymbol::Char('c' | 'C')) && modifiers == KeyModifiers::CTRL);
-        if !self.evals.is_empty() && !while_running {
-            return;
-        }
-        match key {
-            KeySymbol::Enter => self.handle_enter(),
-            KeySymbol::Backspace => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                    self.current_prompt.remove(self.byte_index(self.cursor));
-                }
-            }
-            KeySymbol::ArrowKeyLeft => self.cursor = self.cursor.saturating_sub(1),
-            KeySymbol::ArrowKeyRight => {
-                self.cursor = (self.cursor + 1).min(self.current_prompt.chars().count());
-            }
-            KeySymbol::ArrowKeyUp => self.recall_command(true),
-            KeySymbol::ArrowKeyDown => self.recall_command(false),
-            KeySymbol::PageUp => self.scroll_by(self.body_rows().saturating_sub(1) as isize),
-            KeySymbol::PageDown => self.scroll_by(-(self.body_rows().saturating_sub(1) as isize)),
-            KeySymbol::Escape => {
-                self.current_prompt.clear();
-                self.cursor = 0;
-                self.recalling = None;
-            }
-            KeySymbol::Char('\t') if modifiers == KeyModifiers::NONE => self.start_completion(),
-            KeySymbol::Char('v') if modifiers == KeyModifiers::CTRL => self.paste(),
-            KeySymbol::Char('V') if modifiers == KeyModifiers::CTRL_SHIFT => self.paste(),
-            // cancels the running evals
-            KeySymbol::Char('c' | 'C') if modifiers == KeyModifiers::CTRL => {
-                for eval in &self.evals {
-                    eval.handle.cancel();
-                }
-            }
-            // Ctrl/Alt/Super combinations aren't text
-            KeySymbol::Char(key_char)
-                if !(modifiers.ctrl
-                    || modifiers.alt
-                    || modifiers.logo
-                    || key_char.is_control()) =>
-            {
-                self.current_prompt
-                    .insert(self.byte_index(self.cursor), key_char);
-                self.cursor += 1;
-            }
-            KeySymbol::Char(_) => {}
-        }
-    }
-
-    /// Inserts the clipboard's text at the cursor (newlines kept: it's Luau)
-    fn paste(&mut self) {
-        let Some(text) = sonamu_common::clipboard::paste() else {
-            return;
-        };
-        let text = text.trim_end_matches(['\n', '\r']).replace("\r\n", "\n");
-        self.current_prompt
-            .insert_str(self.byte_index(self.cursor), &text);
-        self.cursor += text.chars().count();
-    }
-
-    fn byte_index(&self, char_index: usize) -> usize {
-        self.current_prompt
-            .char_indices()
-            .nth(char_index)
-            .map_or(self.current_prompt.len(), |(index, _)| index)
-    }
-
     /// Positive scrolls up (back in the history)
     fn scroll_by(&mut self, lines: isize) {
         let (width, _) = CharGrid::largest_fittable_size(self.size);
-        let max = self.lines(width).len().saturating_sub(self.body_rows());
+        let max = self
+            .repl
+            .lines(width, 0)
+            .len()
+            .saturating_sub(self.body_rows());
         self.scroll = self.scroll.saturating_add_signed(lines).min(max);
     }
 
@@ -425,47 +189,18 @@ impl CommandHubApplet {
         height.saturating_sub(2)
     }
 
-    /// The whole scrollback, wrapped at `width`
-    fn lines(&self, width: usize) -> Vec<Line> {
-        let mut lines = Vec::new();
-        for entry in &self.history {
-            for (index, text) in wrap(&format!("{PROMPT}{}", entry.command), width).enumerate() {
-                lines.push(Line {
-                    text,
-                    fg: COMMAND,
-                    bg: BAR_BG,
-                    accent: if index == 0 { PROMPT.len() } else { 0 },
-                });
+    fn handle_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) {
+        match key {
+            KeySymbol::PageUp => self.scroll_by(self.body_rows().saturating_sub(1) as isize),
+            KeySymbol::PageDown => self.scroll_by(-(self.body_rows().saturating_sub(1) as isize)),
+            KeySymbol::Enter => {
+                self.scroll = 0;
+                self.repl.handle_key(key, modifiers);
             }
-            lines.extend(wrap(&entry.printed, width).map(|text| Line {
-                text,
-                fg: OUTPUT,
-                bg: BG,
-                accent: 0,
-            }));
-            let (text, fg) = match &entry.output {
-                Output::Text(text) => (text.as_str(), OUTPUT),
-                Output::Error(err) => (err.as_str(), ERROR),
-                Output::Running(_) => ("", OUTPUT),
-            };
-            if !text.is_empty() {
-                lines.extend(wrap(text, width).map(|text| Line {
-                    text,
-                    fg,
-                    bg: BG,
-                    accent: 0,
-                }));
+            _ => {
+                self.repl.handle_key(key, modifiers);
             }
         }
-        if let Some(hint) = &self.hint {
-            lines.extend(wrap(hint, width).map(|text| Line {
-                text,
-                fg: DIM,
-                bg: BG,
-                accent: 0,
-            }));
-        }
-        lines
     }
 }
 impl StandardApplet for CommandHubApplet {
@@ -525,55 +260,13 @@ impl StandardApplet for CommandHubApplet {
 
     /// An eval printed or finished, or Tab's candidates came
     fn wake(&mut self) {
-        if let Some((prompt, candidates)) = &self.completing
-            && let Ok(candidates) = candidates.try_recv()
-        {
-            // unless it was typed on meanwhile
-            if *prompt == self.current_prompt {
-                self.complete(&candidates);
-            }
-            self.completing = None;
-        }
-        let mut finished = Vec::new();
-        for eval in &self.evals {
-            // gone if cleared meanwhile
-            let mut entry = self.history.iter_mut().find(
-                |entry| matches!(entry.output, Output::Running(running) if running == eval.job),
-            );
-            loop {
-                let output = match eval.outputs.try_recv() {
-                    Ok(output) => output,
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    // eg it panicked
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        sonamu_script::Output::Done(Err("the script thread ended".to_string()))
-                    }
-                };
-                let Some(entry) = entry.as_deref_mut() else {
-                    break;
-                };
-                match output {
-                    sonamu_script::Output::Print(line) => {
-                        entry.printed.push_str(&line);
-                        entry.printed.push('\n');
-                    }
-                    sonamu_script::Output::Done(result) => {
-                        entry.output = trimmed(shown(result));
-                        break;
-                    }
-                }
-            }
-            if !matches!(entry.map(|entry| &entry.output), Some(Output::Running(_))) {
-                finished.push(eval.job);
-            }
-        }
-        self.evals.retain(|eval| !finished.contains(&eval.job));
+        self.repl.wake();
         self.hook.damage_window();
     }
 
     fn command(&mut self, name: &str, args: Vec<Value>) -> CommandResult {
         match name {
-            "clear" => self.history.clear(),
+            "clear" => self.repl.history.clear(),
             "set_title" => {
                 self.title = command::string_arg(&args, 0)?.to_string();
                 self.hook.damage_treeview();
@@ -623,32 +316,12 @@ impl StandardApplet for CommandHubApplet {
             fill_row(&mut grid, row, BG);
         }
 
-        // the prompt, scrolled sideways to keep the cursor in view; none while running, like a shell
-        let prompt_row = height - 1;
-        if self.evals.is_empty() {
-            fill_row(&mut grid, prompt_row, BAR_BG);
-            let start = put(&mut grid, prompt_row, 0, PROMPT, ACCENT);
-            let room = width.saturating_sub(start).max(1);
-            let skip = self.cursor.saturating_sub(room - 1);
-            // a pasted newline shows as `↵`
-            let visible: String = self
-                .current_prompt
-                .chars()
-                .skip(skip)
-                .map(|c| if c == '\n' { '↵' } else { c })
-                .collect();
-            put(&mut grid, prompt_row, start, &visible, COMMAND);
-            if let Some(cell) = (start + self.cursor - skip < width)
-                .then(|| grid.get_char_mut(prompt_row, start + self.cursor - skip))
-            {
-                cell.set_fg(BAR_BG).set_bg(CURSOR);
-            }
-        }
+        self.repl.draw_prompt(&mut grid, height - 1);
 
         if height < 2 {
             return grid.element().into();
         }
-        let lines = self.lines(width);
+        let lines = self.repl.lines(width, 0);
         let body_rows = height - 2;
         let scroll = self.scroll.min(lines.len().saturating_sub(body_rows));
 
@@ -672,13 +345,7 @@ impl StandardApplet for CommandHubApplet {
         let end = lines.len() - scroll;
         let shown = &lines[end.saturating_sub(body_rows)..end];
         let top = 1 + body_rows - shown.len();
-        for (row, line) in (top..).zip(shown) {
-            fill_row(&mut grid, row, line.bg);
-            // the prompt is ASCII, so this is a char boundary
-            let (accent, rest) = line.text.split_at(line.accent.min(line.text.len()));
-            let column = put(&mut grid, row, 0, accent, ACCENT);
-            put(&mut grid, row, column, rest, line.fg);
-        }
+        repl::draw_lines(&mut grid, top, shown);
 
         grid.element().into()
     }
@@ -707,66 +374,6 @@ fn run_captured(command: &mut std::process::Command) -> Output {
         }
         Err(err) => Output::Error(err.to_string()),
     }
-}
-
-/// An eval's return values (nothing for none), or its error
-fn shown(result: Result<Vec<Value>, String>) -> Output {
-    match result {
-        Ok(values) => Output::Text(
-            values
-                .iter()
-                // a string as is (eg `sonamu.help()`), not quoted
-                .map(|value| match value {
-                    Value::String(text) => text.clone(),
-                    value => value.to_string(),
-                })
-                .collect::<Vec<_>>()
-                .join(", "),
-        ),
-        Err(err) => Output::Error(err),
-    }
-}
-
-/// Cuts off long outputs
-fn trimmed(output: Output) -> Output {
-    let trim = |text: String| {
-        let count = text.lines().count();
-        if count <= MAX_OUTPUT_LINES {
-            return text;
-        }
-        let mut kept: String = text
-            .lines()
-            .take(MAX_OUTPUT_LINES)
-            .flat_map(|line| [line, "\n"])
-            .collect();
-        let _ = write!(kept, "... ({} more lines)", count - MAX_OUTPUT_LINES);
-        kept
-    };
-    match output {
-        Output::Text(text) => Output::Text(trim(text)),
-        Output::Error(err) => Output::Error(trim(err)),
-        running @ Output::Running(_) => running,
-    }
-}
-
-/// Each line of `text`, split into rows of `width` chars (tabs become spaces, other control chars are dropped)
-fn wrap(text: &str, width: usize) -> impl Iterator<Item = String> {
-    text.lines().flat_map(move |line| {
-        let chars: Vec<char> = line
-            .replace('\t', "    ")
-            .chars()
-            .filter(|c| !c.is_control())
-            .collect();
-        let rows: Vec<String> = if chars.is_empty() {
-            vec![String::new()]
-        } else {
-            chars
-                .chunks(width.max(1))
-                .map(|row| row.iter().collect())
-                .collect()
-        };
-        rows
-    })
 }
 
 pub(crate) fn fill_row(grid: &mut CharGrid, row: usize, bg: Color) {
