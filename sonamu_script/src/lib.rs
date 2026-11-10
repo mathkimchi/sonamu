@@ -584,7 +584,7 @@ Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) togg
       (also <type>.from_node(n), eg file_manager.from_node(n): typed in sonamu.definitions())
       spawn(program, {args}?) (in its tree's directory) quit()
       any other method is a command of its applet, eg hub:clear()
-Super+Esc: the buffer line (Esc leaves). There and in the hub: Tab completes, Up/Down recalls, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+C cancels.
+Super+Esc: the buffer line (Esc leaves). There and in the hub: Tab completes, Up/Down recalls, Shift+Enter adds a line, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+C cancels.
 Super+? lists every keybind.";
 
 /// The `Node` methods' Luau types, as in `NODE_COMMANDS` (and `cast`)

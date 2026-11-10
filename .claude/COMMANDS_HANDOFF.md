@@ -19,8 +19,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
 
 ## Gaps (see COMMANDS.md To do for the full list)
 
-- Buffer line: scrolling its output (PageUp/Down in buffer mode), drawing on every screen, sharing history with hubs
-  (one `Repl` history store), a newline key (Shift+Enter) and type-ahead.
 - Events: emit `close`, `open`, `settings`, `screens`; pass the focused node to `focus`; forward over the socket as
   `EvalReply`-like lines (a `sonamu-msg subscribe`).
 - `keymap.unset`, and focus-path layering / `when` conditions (see the plan's Later).

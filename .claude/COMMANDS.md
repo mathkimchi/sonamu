@@ -14,7 +14,7 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
   `StandardApplet::handle_node_call`; `command(INNER_FOCUS)`).
 - `sonamu_script`: script thread, sandboxed Luau, `print`, return values (`return <code>` tried first, like a REPL),
   `Node` userdata (node commands, `cast`, `__index` → applet command, `==`, `tostring`), cancel via interrupt.
-- Hub: Luau only, one eval at a time (like a shell: no prompt, keys ignored but Ctrl+C/PageUp/PageDown, until it ends), `print`s then results (strings unquoted), Ctrl+C cancels; commands `clear`, `set_title`, `open` (replace the hub, as
+- Hub: Luau only, one eval at a time (like a shell: no prompt until it ends; keys typed meanwhile edit it, Enter queues), `print`s then results (strings unquoted), Ctrl+C cancels; commands `clear`, `set_title`, `open` (replace the hub, as
   before; `"wl", {argv}` too). `run_output` (old `$`) dropped for `process.output`.
 - Signatures: `AppletSpawnerTrait::commands` (`&'static [command::Signature]`: name, params, returns, doc), declared
   into `command::declare` when spawners register (`RootNodeApplet::new`, `register_applet_spawner`); clashes with
@@ -29,10 +29,14 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
   mode); `sonamu_common::BUFFER_MODE` makes `is_keybind` send every key to the root then, and the runner
   (`runner::run_binding`) skip settings/`keymap.set` bindings on keys with a symbol unless Super is held (minibuffer-like
   shadowing; media/F-keys and Super combos still work). Esc clears the prompt, or leaves if empty.
-  Bottom of the active screen: the last entry's output and Tab's candidates (≤ `BUFFER_OUTPUT_ROWS`) over the prompt.
+  Bottom of the active screen only (decided: like Emacs frames, the others show `-- INSERT --` or nothing): the last
+  entry's output and Tab's candidates (≤ `BUFFER_OUTPUT_ROWS`) over the prompt; PageUp/PageDown scroll the whole
+  history there (`buffer_scroll`, back to 0 on Enter).
   Setting `buffer_line` (`.claude/SETTINGS.md`): `always` reserves the row and shows `-- INSERT --` outside buffer mode.
   `context.focus()` there is the real focus (no "previous focus" problem). Not a node: no applet commands of its own.
-- `command_hub/repl.rs`: `Repl` (prompt, history, recall, evals, completion, paste, `lines`, `draw_prompt`), shared by
+- Up/Down recall (`repl::RECALL`) is one list for every prompt (nvim-like); outputs stay per prompt.
+- `command_hub/repl.rs`: `Repl` (prompt, history, recall, evals, completion, paste, `lines`, `draw_prompt`; Shift+Enter
+  a newline), shared by
   the hub and the buffer line; owners pass a `Waker` and call `wake`. Hub keeps scrolling, its commands and its window.
 - The hub is no longer in the treeview's New menu or the project overview (`NewApplet::CommandHub`, `n` row gone);
   still `command_hub` (`sonamu.open`, `n:add_child`); Ctrl+Shift++ is gone too.
@@ -178,9 +182,6 @@ Untested:
 Gaps:
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
-- Prompt: no type-ahead while running; no newline key (only pasted ones).
-- Buffer line: active screen only; output ≤ `BUFFER_OUTPUT_ROWS`, no scroll; shown only in buffer mode; history
-  separate from each hub's.
 - Events: only `focus` (no args) and `window` (app id); none for close, open, settings, screens; not over the socket.
 - `keymap`: no unset; global only (no layering along the focus path, no `when` conditions).
 - `init.luau` shares the one environment (no per-script environments, no `require`).

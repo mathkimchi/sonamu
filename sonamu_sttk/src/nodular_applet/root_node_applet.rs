@@ -112,6 +112,8 @@ pub struct RootNodeApplet {
     repl: Repl,
     /// Keys go to the buffer line (Super+Esc), like vim's normal mode; else `INSERT`
     buffer_mode: bool,
+    /// Lines the buffer line is scrolled up (PageUp) through its history; 0: the last entry's output
+    buffer_scroll: usize,
     /// The last `sonamu_script` message, shown over the buffer line for `ECHO_TIME` (Emacs' echo area)
     echo: Option<(sonamu_script::Message, Instant)>,
     /// `sonamu_script::last_message`'s count when last echoed
@@ -164,7 +166,29 @@ impl RootNodeApplet {
             self.set_buffer_mode(false);
             return;
         }
-        self.repl.handle_key(key, modifiers);
+        match key {
+            // through the whole history (`buffer_line`)
+            KeySymbol::PageUp => {
+                let [_, _, width, height] = self.screens[self.holder.tree.active_screen()].rect;
+                let (columns, _) =
+                    CharGrid::largest_fittable_size(DisplayContainerSize::new(width, height));
+                let max = self
+                    .repl
+                    .lines(columns, 0, &settings::get().palette)
+                    .len()
+                    .saturating_sub(BUFFER_OUTPUT_ROWS);
+                self.buffer_scroll = (self.buffer_scroll + BUFFER_OUTPUT_ROWS - 1).min(max);
+            }
+            KeySymbol::PageDown => {
+                self.buffer_scroll = self.buffer_scroll.saturating_sub(BUFFER_OUTPUT_ROWS - 1);
+            }
+            _ => {
+                if matches!(key, KeySymbol::Enter) {
+                    self.buffer_scroll = 0;
+                }
+                self.repl.handle_key(key, modifiers);
+            }
+        }
         self.surface.damage();
     }
 
@@ -232,6 +256,7 @@ impl RootNodeApplet {
         let pinned = self.treeview_pinned;
         let quit_asked = self.quit_asked.is_some();
         let buffer_mode = self.buffer_mode;
+        let buffer_scroll = self.buffer_scroll;
         let echo = self.echo.as_ref().map(|(message, _)| message);
         let Self {
             holder,
@@ -281,7 +306,7 @@ impl RootNodeApplet {
                             repl,
                             echo,
                             full,
-                            Bar::Prompt,
+                            Bar::Prompt(buffer_scroll),
                             &settings.palette,
                         ));
                     } else if settings.buffer_line == BufferLine::Always {
@@ -553,6 +578,7 @@ impl RootNodeApplet {
             repl: Repl::new(repl_waker),
             buffer_mode: false,
             echo: None,
+            buffer_scroll: 0,
             echoed: 0,
             loop_handle: event_loop.clone(),
         };
@@ -1429,8 +1455,9 @@ fn content_size(settings: &Settings, [_, _, width, height]: [u32; 4]) -> Display
 /// The buffer line's bottom row
 #[derive(Clone, Copy, PartialEq)]
 enum Bar {
-    /// In buffer mode: the prompt, under the last entry's output and Tab's candidates
-    Prompt,
+    /// In buffer mode: the prompt, under the last entry's output and Tab's candidates, or the whole history
+    /// scrolled up this many lines (clamped)
+    Prompt(usize),
     /// `-- INSERT --` (setting `buffer_line: always`)
     Insert,
     /// Only the echoed message
@@ -1446,22 +1473,29 @@ fn buffer_line(
     palette: &Palette,
 ) -> UITree {
     let (columns, _) = CharGrid::largest_fittable_size(size);
-    let mut lines = if bar == Bar::Prompt {
-        repl.lines(columns, repl.history.len().saturating_sub(1), palette)
-    } else {
-        Vec::new()
+    let (mut lines, scroll) = match bar {
+        Bar::Prompt(0) => (
+            repl.lines(columns, repl.history.len().saturating_sub(1), palette),
+            0,
+        ),
+        Bar::Prompt(scroll) => (repl.lines(columns, 0, palette), scroll),
+        Bar::Insert | Bar::None => (Vec::new(), 0),
     };
     if let Some(message) = echo {
         let fg = if message.error { ERROR } else { palette.fg };
         lines.extend(repl::text_lines(&message.text, fg, columns, palette));
     }
-    let shown = &lines[lines.len().saturating_sub(BUFFER_OUTPUT_ROWS)..];
+    let end = lines
+        .len()
+        .saturating_sub(scroll)
+        .max(BUFFER_OUTPUT_ROWS.min(lines.len()));
+    let shown = &lines[end.saturating_sub(BUFFER_OUTPUT_ROWS)..end];
     let bar_rows = usize::from(bar != Bar::None);
     let mut grid = CharGrid::new_empty(columns, shown.len() + bar_rows);
     repl::draw_lines(&mut grid, 0, shown, palette.accent);
     let prompt_row = shown.len();
     match bar {
-        Bar::Prompt => {
+        Bar::Prompt(_) => {
             fill_row(&mut grid, prompt_row, bar_bg(palette));
             repl.draw_prompt(&mut grid, prompt_row, palette);
         }

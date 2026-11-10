@@ -12,11 +12,14 @@ use sonamu_ui::{
 };
 use std::{
     fmt::Write as _,
-    sync::{Arc, mpsc},
+    sync::{Arc, Mutex, PoisonError, mpsc},
 };
 
 /// Kept; older ones are dropped
 const MAX_ENTRIES: usize = 200;
+/// Entered commands, for Up/Down; shared by every prompt (hubs and the buffer line), like nvim's cmdline history
+static RECALL: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 /// Longer outputs are cut off
 const MAX_OUTPUT_LINES: usize = 500;
 
@@ -62,9 +65,7 @@ pub(crate) struct Repl {
     /// Shown above the prompt until the next key (eg Tab's candidates)
     pub hint: Option<String>,
 
-    /// Entered commands, for Up/Down
-    recall: Vec<String>,
-    /// Into `recall` while recalling, with the prompt from before
+    /// Into `RECALL` while recalling, with the prompt from before
     recalling: Option<(usize, String)>,
 
     evals: Vec<Eval>,
@@ -80,7 +81,6 @@ impl Repl {
             prompt: String::new(),
             cursor: 0,
             hint: None,
-            recall: Vec::new(),
             recalling: None,
             evals: Vec::new(),
             next_job: 0,
@@ -94,15 +94,14 @@ impl Repl {
         !self.evals.is_empty()
     }
 
-    /// Edits the prompt, runs it (Enter), recalls (Up/Down), completes (Tab), pastes (Ctrl+V), cancels (Ctrl+C).
-    /// While running, only Ctrl+C. Returns whether it took the key.
+    /// Edits the prompt, runs it (Enter), adds a newline (Shift+Enter), recalls (Up/Down), completes (Tab), pastes
+    /// (Ctrl+V), cancels (Ctrl+C). While running too (type-ahead: shown once it ends, Enter queues).
+    /// Returns whether it took the key.
     pub fn handle_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) -> bool {
         self.hint = None;
         let cancel = matches!(key, KeySymbol::Char('c' | 'C')) && modifiers == KeyModifiers::CTRL;
-        if self.running() && !cancel {
-            return false;
-        }
         match key {
+            KeySymbol::Enter if modifiers.shift => self.insert("\n"),
             KeySymbol::Enter => self.enter(),
             KeySymbol::Backspace => {
                 if self.cursor > 0 {
@@ -134,8 +133,7 @@ impl Repl {
                     || modifiers.logo
                     || key_char.is_control()) =>
             {
-                self.prompt.insert(self.byte_index(self.cursor), key_char);
-                self.cursor += 1;
+                self.insert(key_char.encode_utf8(&mut [0; 4]));
             }
             _ => return false,
         }
@@ -159,12 +157,14 @@ impl Repl {
         if command.trim().is_empty() {
             return;
         }
-        if self.recall.last() != Some(&command) {
-            self.recall.push(command.clone());
-            if self.recall.len() > MAX_ENTRIES {
-                self.recall.remove(0);
+        let mut recall = RECALL.lock().unwrap_or_else(PoisonError::into_inner);
+        if recall.last() != Some(&command) {
+            recall.push(command.clone());
+            if recall.len() > MAX_ENTRIES {
+                recall.remove(0);
             }
         }
+        drop(recall);
 
         // like the old verb
         let code = if command.trim() == "help" {
@@ -193,19 +193,24 @@ impl Repl {
 
     /// Up (`back`) or Down through entered commands; Down past the newest gives back the prompt from before
     fn recall_command(&mut self, back: bool) {
+        let recall = RECALL.lock().unwrap_or_else(PoisonError::into_inner);
         let index = match (&self.recalling, back) {
             (None, false) => return,
-            (None, true) => self.recall.len().checked_sub(1),
+            (None, true) => recall.len().checked_sub(1),
             (Some((index, _)), true) => Some(index.saturating_sub(1)),
-            (Some((index, _)), false) => Some(index + 1).filter(|&next| next < self.recall.len()),
+            (Some((index, _)), false) => Some(index + 1).filter(|&next| next < recall.len()),
         };
         match index {
             Some(index) => {
+                // another prompt may have dropped old ones meanwhile
+                let Some(command) = recall.get(index) else {
+                    return;
+                };
                 let draft = match self.recalling.take() {
                     Some((_, draft)) => draft,
                     None => self.prompt.clone(),
                 };
-                self.prompt = self.recall[index].clone();
+                self.prompt.clone_from(command);
                 self.recalling = Some((index, draft));
             }
             None => {
@@ -261,8 +266,11 @@ impl Repl {
         let Some(text) = sonamu_common::clipboard::paste() else {
             return;
         };
-        let text = text.trim_end_matches(['\n', '\r']).replace("\r\n", "\n");
-        self.prompt.insert_str(self.byte_index(self.cursor), &text);
+        self.insert(&text.trim_end_matches(['\n', '\r']).replace("\r\n", "\n"));
+    }
+
+    fn insert(&mut self, text: &str) {
+        self.prompt.insert_str(self.byte_index(self.cursor), text);
         self.cursor += text.chars().count();
     }
 
