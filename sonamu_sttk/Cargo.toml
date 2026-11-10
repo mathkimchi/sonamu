@@ -18,8 +18,6 @@ slotmap = { workspace = true }
 
 log = { workspace = true }
 
-arboard = { version = "^3.6.1", features = ["wayland-data-control"] }
-
 [build-dependencies]
 regex = "1.12"
 

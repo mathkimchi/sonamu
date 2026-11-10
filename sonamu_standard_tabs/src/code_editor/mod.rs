@@ -220,17 +220,12 @@ impl CodeEditorApplet {
             }
             (KeySymbol::Char('v'), KeyModifiers::CTRL)
             | (KeySymbol::Char('V'), KeyModifiers::CTRL_SHIFT) => {
-                // log::debug!("Pasting");
-                // no clipboard on a TTY
-                if let Ok(text) =
-                    arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text())
-                {
+                if let Some(text) = sonamu_common::clipboard::paste() {
                     self.buffer.insert(self.cursor, &text);
                     // in chars, like the cursor
                     self.cursor += text.chars().count();
                     self.clamp_view_to_cursor();
                 }
-                // dbg!(arboard::Clipboard::new().unwrap().get_text());
             }
             _ => {}
         }

@@ -67,7 +67,8 @@ use smithay::{
         selection::{
             SelectionHandler,
             data_device::{
-                DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
+                DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler,
+                request_data_device_client_selection, set_data_device_focus,
             },
             ext_data_control,
             primary_selection::{
@@ -276,6 +277,26 @@ impl SmithayState {
         };
         toplevel.with_pending_state(|state| state.size = Some(self.screen_size(screen)));
         toplevel.send_configure();
+    }
+
+    /// Has the clipboard's owner write its text into a copy of `fd` (`sonamu_common::clipboard::paste`); without one,
+    /// the reader sees nothing once `fd` is dropped
+    pub fn write_clipboard(&self, fd: &std::os::fd::OwnedFd) {
+        // the first text type it offers; a failed request drops its fd, so each gets a copy
+        for mime_type in [
+            "text/plain;charset=utf-8",
+            "text/plain",
+            "UTF8_STRING",
+            "STRING",
+        ] {
+            let Ok(copy) = fd.try_clone() else {
+                return;
+            };
+            if request_data_device_client_selection(&self.seat, mime_type.to_string(), copy).is_ok()
+            {
+                return;
+            }
+        }
     }
 
     pub fn flush_clients(&mut self) {

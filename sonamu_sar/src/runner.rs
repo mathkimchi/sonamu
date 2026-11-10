@@ -160,6 +160,17 @@ impl AppletRunner {
         if let Some(msg_socket) = msg_socket {
             msg_socket.insert(&event_loop.handle());
         }
+        // native applets' paste (`sonamu_common::clipboard`)
+        let (clipboard, clipboard_requests) = calloop::channel::channel();
+        event_loop
+            .handle()
+            .insert_source(clipboard_requests, |event, (), runner| {
+                if let calloop::channel::Event::Msg(fd) = event {
+                    runner.smithay_state.write_clipboard(&fd);
+                }
+            })
+            .unwrap();
+        sonamu_common::clipboard::serve(clipboard);
 
         dbg!("Will run event loop");
 

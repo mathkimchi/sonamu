@@ -1,5 +1,6 @@
 //! For things that are used by both the manager and subapps.
 
+pub mod clipboard;
 pub mod msg;
 pub mod notification;
 pub mod sap;

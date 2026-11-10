@@ -396,9 +396,7 @@ impl CommandHubApplet {
 
     /// Inserts the clipboard's text at the cursor (newlines kept: it's Luau)
     fn paste(&mut self) {
-        // no clipboard on a TTY
-        let Ok(text) = arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text())
-        else {
+        let Some(text) = sonamu_common::clipboard::paste() else {
             return;
         };
         let text = text.trim_end_matches(['\n', '\r']).replace("\r\n", "\n");
