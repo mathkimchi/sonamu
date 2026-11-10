@@ -14,7 +14,7 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
   `StandardApplet::handle_node_call`; `command(INNER_FOCUS)`).
 - `sonamu_script`: script thread, sandboxed Luau, `print`, return values (`return <code>` tried first, like a REPL),
   `Node` userdata (node commands, `cast`, `__index` → applet command, `==`, `tostring`), cancel via interrupt.
-- Hub: Luau only, `print`s then results, Ctrl+C cancels; commands `clear`, `set_title`, `open` (replace the hub, as
+- Hub: Luau only, one eval at a time (Enter waits for it), `print`s then results (strings unquoted), Ctrl+C cancels; commands `clear`, `set_title`, `open` (replace the hub, as
   before; `"wl", {argv}` too), `run_output` (old `$`).
 
 Deviations from the decisions below:

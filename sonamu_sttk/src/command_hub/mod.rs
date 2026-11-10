@@ -208,6 +208,11 @@ impl CommandHubApplet {
     }
 
     fn handle_enter(&mut self) {
+        // one at a time: the next waits for this one to finish
+        if !self.evals.is_empty() {
+            self.hint = Some("Still running; Ctrl+C cancels it.".to_string());
+            return;
+        }
         let command = std::mem::take(&mut self.current_prompt);
         self.cursor = 0;
         self.recalling = None;
@@ -429,16 +434,27 @@ impl StandardApplet for CommandHubApplet {
             let mut entry = self.history.iter_mut().find(
                 |entry| matches!(entry.output, Output::Running(running) if running == eval.job),
             );
-            while let Ok(output) = eval.outputs.try_recv() {
+            loop {
+                let output = match eval.outputs.try_recv() {
+                    Ok(output) => output,
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    // eg it panicked
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        sonamu_script::Output::Done(Err("the script thread ended".to_string()))
+                    }
+                };
                 let Some(entry) = entry.as_deref_mut() else {
-                    continue;
+                    break;
                 };
                 match output {
                     sonamu_script::Output::Print(line) => {
                         entry.printed.push_str(&line);
                         entry.printed.push('\n');
                     }
-                    sonamu_script::Output::Done(result) => entry.output = trimmed(shown(result)),
+                    sonamu_script::Output::Done(result) => {
+                        entry.output = trimmed(shown(result));
+                        break;
+                    }
                 }
             }
             if !matches!(entry.map(|entry| &entry.output), Some(Output::Running(_))) {
@@ -585,7 +601,11 @@ fn shown(result: Result<Vec<Value>, String>) -> Output {
         Ok(values) => Output::Text(
             values
                 .iter()
-                .map(ToString::to_string)
+                // a string as is (eg `sonamu.help()`), not quoted
+                .map(|value| match value {
+                    Value::String(text) => text.clone(),
+                    value => value.to_string(),
+                })
                 .collect::<Vec<_>>()
                 .join(", "),
         ),
