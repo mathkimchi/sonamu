@@ -224,6 +224,9 @@ fn run(jobs: &mpsc::Receiver<Job>) {
     let mut lua = new_lua().expect("the script state");
     for job in jobs {
         QUIT.store(false, Ordering::Relaxed);
+        if let Err(err) = add_type_tables(&lua) {
+            message(err.to_string(), true);
+        }
         let (code, output, notify, cancelled) = match job {
             Job::Call(call) => {
                 if let Err(err) = run_call(&lua, call) {
@@ -577,6 +580,7 @@ sonamu.messages(): string      prints and errors of init.luau, bindings and hook
 sonamu.definitions(): string   luau-lsp definitions of all this, eg `sonamu-msg eval 'sonamu.definitions()'`
 Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) toggle_half() wrap_project()
       parent(): Node? children(): {Node} type(): string title(): string cast(type): Node?
+      (also <type>.from_node(n), eg file_manager.from_node(n): typed in sonamu.definitions())
       spawn(program, {args}?) (in its tree's directory) quit()
       any other method is a command of its applet, eg hub:clear()
 Super+Esc: the buffer line (Esc leaves). There and in the hub: Tab completes, Up/Down recalls, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+C cancels.
@@ -594,7 +598,7 @@ const NODE_METHODS: &str = "\
     function children(self): {Node}
     function type(self): string
     function title(self): string
-    function cast(self, applet_type: string): Node?
+    function cast(self, applet_type: string): Node?  -- typed: <applet_type>.from_node(n)
     function spawn(self, program: string, args: {string}?): ()
     function quit(self): ()
 ";
@@ -619,6 +623,10 @@ fn definitions() -> String {
             );
         }
         out.push_str("end\n");
+        let _ = writeln!(
+            out,
+            "declare {applet_type}: {{ from_node: (node: Node) -> {applet_type}? }}"
+        );
     }
     out.push_str(
         "
@@ -741,15 +749,7 @@ impl UserData for Node {
         }
         // itself if its applet is of that type
         methods.add_method("cast", |lua, node, applet_type: String| {
-            let actual = call(lua, Some(node.0), "type", &MultiValue::new())?;
-            if actual
-                .as_string()
-                .is_some_and(|actual| *actual.as_bytes() == *applet_type.as_bytes())
-            {
-                Ok(Some(*node))
-            } else {
-                Ok(None)
-            }
+            cast(lua, *node, &applet_type)
         });
         // any other method is its applet's command
         methods.add_meta_method(MetaMethod::Index, |lua, _, name: String| {
@@ -766,6 +766,34 @@ impl UserData for Node {
             Ok(Value::Node(node.0).to_string())
         });
     }
+}
+
+/// `node` if its applet is of `applet_type`
+fn cast(lua: &Lua, node: Node, applet_type: &str) -> mlua::Result<Option<Node>> {
+    let actual = call(lua, Some(node.0), "type", &MultiValue::new())?;
+    Ok(actual
+        .as_string()
+        .is_some_and(|actual| *actual.as_bytes() == *applet_type.as_bytes())
+        .then_some(node))
+}
+
+/// A global table per declared applet type with `from_node(n)` (`cast`, but typed in `definitions`), unless the
+/// name is taken; types are declared as spawners register, so before each job
+fn add_type_tables(lua: &Lua) -> mlua::Result<()> {
+    let globals = lua.globals();
+    for applet_type in command::all_signatures().into_keys() {
+        if globals.contains_key(applet_type.as_str())? {
+            continue;
+        }
+        let table = lua.create_table()?;
+        let name = applet_type.clone();
+        table.set(
+            "from_node",
+            lua.create_function(move |lua, node: mlua::UserDataRef<Node>| cast(lua, *node, &name))?,
+        )?;
+        globals.set(applet_type, table)?;
+    }
+    Ok(())
 }
 
 /// Read-only functions completion may run to know what they give (eg `context.focus():`)
@@ -1184,5 +1212,12 @@ mod tests {
         let definitions = definitions();
         assert!(definitions.contains("declare class Node"));
         assert!(definitions.contains("function set_title(self, title: string): nil"));
+        assert!(definitions.contains("declare type []: { from_node"));
+        // the fake root isn't of this type
+        command::declare("from_node_test", &[]);
+        assert_eq!(
+            eval_all("from_node_test.from_node(context.root())").1,
+            Ok(vec![Value::Nil])
+        );
     }
 }

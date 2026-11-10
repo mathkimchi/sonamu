@@ -57,7 +57,9 @@ Deviations from the decisions below:
 - Signatures are checked in the node's world (`command::check` in `NodeHolder::handle_node_call`, before forwarding;
   arity and `string`/`number`/`boolean`/`{T}`/`T?`, other types just non-nil; undeclared commands pass, eg
   `INNER_FOCUS`), not in the script before sending.
-- `cast` takes the type name (`n:cast("file_manager")`), returns the same `Node`; no per-type handles.
+- `cast` takes the type name (`n:cast("file_manager")`), returns the same `Node`; no per-type userdata (decided: one
+  `Node` already dispatches by actual type). Typed instead by `<type>.from_node(n)`: a global table per declared type
+  (`add_type_tables`, before each job, unless the name is taken), declared in `definitions()` as `-> <type>?`.
 - No `split` (splits no longer exist). `parent()` of a project's inner root is the project node's parent (the two
   are one row): mains get `StandardEvent::NodeUid` (`NodeTree::register` and wherever a main is replaced; kept in
   `AppletContext::uid`), and `ProjectApplet::handle_node_call` asks its own node's world from a thread. The root
@@ -84,7 +86,7 @@ Deviations from the decisions below:
 
 - `sonamu.definitions()`: luau-lsp definitions (`declare class Node`, a class per declared applet type named like it,
   extending `Node`; the globals), eg `sonamu-msg eval 'sonamu.definitions()' > sonamu.d.luau`. Not checked against
-  luau-lsp yet. `cast` still returns `Node`, so applet methods need an annotation (`local fm: file_manager = n :: any`).
+  luau-lsp yet. `cast` returns `Node`; `file_manager.from_node(n)` is typed `file_manager?`.
 
 - Keybinds: `standard_keybinds::standard_keybind` maps a key to a `KeybindCommand` (`quit`, `wrap_project`, `close`,
   `toggle_half`, `spawn(program)`, `swap_sibling(±1)`); `handle_standard_keybinds` sends it to the applet's own node
@@ -178,7 +180,6 @@ Gaps:
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
 - Prompt: no type-ahead while running; no newline key (only pasted ones).
 - `hub:run_output` blocks the hub's thread (`process.output` doesn't).
-- `cast` returns the same `Node`: no per-type handles, no `file_manager.from_node`.
 - A node in JSON (socket) is its bare uid, not `{"type", "node"}`.
 - A project node's `children()` are its outer children; no `Node` method reaches its inner tree (eg `n:inner()`).
 - Buffer line: active screen only; output ≤ `BUFFER_OUTPUT_ROWS`, no scroll; shown only in buffer mode; history
