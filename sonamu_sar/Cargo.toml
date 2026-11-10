@@ -10,6 +10,8 @@ workspace = true
 sonamu_common = { workspace = true }
 sonamu_ui = { workspace = true }
 sonamu_sync = { workspace = true }
+sonamu_script = { workspace = true }
+serde_json = { workspace = true }
 
 slotmap = { workspace = true }
 

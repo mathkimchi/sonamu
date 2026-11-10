@@ -3289,9 +3289,11 @@ dependencies = [
  "calloop",
  "libc",
  "pollster",
+ "serde_json",
  "slotmap",
  "smithay",
  "sonamu_common",
+ "sonamu_script",
  "sonamu_sync",
  "sonamu_ui",
  "wayland-protocols",
@@ -3311,6 +3313,7 @@ dependencies = [
 name = "sonamu_sde"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "sonamu_common",
  "sonamu_sar",
  "sonamu_standard_tabs",

@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(complete_all("x = context.fo"), ["focus"]);
         assert_eq!(complete_all("context.focus():ti"), ["title"]);
         assert_eq!(complete_all("string.le"), ["len"]);
-        assert!(complete_all("context.focus():title():").is_empty());
+        assert_eq!(complete_all("context.focus():title():"), Vec::<String>::new());
         assert!(eval_all("my_var = 1").1.is_ok());
         assert_eq!(complete_all("my_v"), ["my_var"]);
         // the fake root is a command hub (its `type` answer is `"type []"`, declared below)

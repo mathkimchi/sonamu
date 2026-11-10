@@ -1,13 +1,13 @@
-//! Where other processes ask the runner to open applets (`sonamu_common::msg`)
+//! Where other processes ask the runner to open applets or run Luau (`sonamu_common::msg`)
 
 use crate::runner::AppletRunner;
 use calloop::{Interest, LoopHandle, Mode, PostAction, generic::Generic};
 use sonamu_common::{
-    msg::Message,
+    msg::{EvalReply, Message},
     sap::packets::{OpenApplet, StandardEvent},
 };
 use std::{
-    io::Read,
+    io::{Read, Write},
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     time::Duration,
@@ -40,11 +40,15 @@ impl MsgSocket {
             .insert_source(
                 Generic::new(self, Interest::READ, Mode::Level),
                 |_, socket, runner| {
-                    while let Ok((stream, _)) = socket.listener.accept() {
-                        match read_message(stream) {
+                    while let Ok((mut stream, _)) = socket.listener.accept() {
+                        match read_message(&mut stream) {
                             Ok(Message::Open { applet, args }) => runner
                                 .root_client
                                 .send_event(StandardEvent::Open(OpenApplet { applet, args })),
+                            // answered from its own thread, so the loop doesn't wait for it
+                            Ok(Message::Eval(code)) => {
+                                std::thread::spawn(move || answer_eval(stream, code));
+                            }
                             Err(err) => eprintln!("Bad message on the socket: {err}"),
                         }
                     }
@@ -65,10 +69,70 @@ impl Drop for MsgSocket {
     }
 }
 
-fn read_message(mut stream: UnixStream) -> std::io::Result<Message> {
+/// Writes the eval's outputs back as `EvalReply` lines; cancels it if the sender hangs up
+fn answer_eval(mut stream: UnixStream, code: String) {
+    const POLL: Duration = Duration::from_millis(100);
+    let (handle, outputs) = sonamu_script::eval(code, || {});
+    loop {
+        let reply = match outputs.recv_timeout(POLL) {
+            Ok(sonamu_script::Output::Print(line)) => EvalReply::Print(line),
+            Ok(sonamu_script::Output::Done(result)) => EvalReply::Done(result.map(|values| {
+                values
+                    .iter()
+                    .map(|value| serde_json::to_value(value).unwrap_or_default())
+                    .collect()
+            })),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // an empty line (ignored by the reader) fails once the sender is gone; reading can't tell, since
+                // it already shut its writing half
+                if stream.write_all(b"\n").is_err() {
+                    handle.cancel();
+                }
+                continue;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+        };
+        let done = matches!(reply, EvalReply::Done(_));
+        let mut line = serde_json::to_string(&reply).unwrap_or_default();
+        line.push('\n');
+        if stream.write_all(line.as_bytes()).is_err() {
+            handle.cancel();
+        }
+        if done {
+            return;
+        }
+    }
+}
+
+fn read_message(stream: &mut UnixStream) -> std::io::Result<Message> {
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(MsgSocket::READ_TIMEOUT))?;
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes)?;
     Message::decode(&bytes).ok_or_else(|| std::io::Error::other("unknown message"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader};
+
+    #[test]
+    fn eval_answers_prints_then_the_result() {
+        let (client, server) = UnixStream::pair().unwrap();
+        std::thread::spawn(move || answer_eval(server, "print('a') return 1 + 1".to_string()));
+        let replies: Vec<EvalReply> = BufReader::new(client)
+            .lines()
+            .map(Result::unwrap)
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_str(&line).unwrap())
+            .collect();
+        assert_eq!(
+            replies,
+            [
+                EvalReply::Print("a".to_string()),
+                EvalReply::Done(Ok(vec![serde_json::json!(2.0)])),
+            ]
+        );
+    }
 }

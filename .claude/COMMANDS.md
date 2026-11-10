@@ -56,7 +56,13 @@ Deviations from the decisions below:
 - No `split` (splits no longer exist). `parent()` stops at its world's root (nil there, even inside a project).
 - `hub:run_output` blocks the hub's thread while the program runs.
 
-Not done: keybinds through `NodeCall`, socket `eval`; signatures aren't checked against calls (`command()` is).
+- Socket: `Message::Eval(code)`; the runner answers from a thread (`msg_socket::answer_eval`) with JSON lines
+  (`msg::EvalReply`: `print`, then `done` `Ok(values)`/`Err`), plus empty keepalive lines every 100 ms, which fail once
+  the sender is gone and cancel the eval (reading can't tell: it already shut its writing half). `sonamu-msg eval
+  '<code>'` (`-`: stdin): prints to stderr, one value as JSON (several as an array) on stdout, error → exit 1. A node
+  is its uid number in JSON (not `{"type", "node"}`).
+
+Not done: keybinds through `NodeCall`; signatures aren't checked against calls (`command()` is).
 
 ## Decisions
 
