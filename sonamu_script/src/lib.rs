@@ -104,6 +104,8 @@ enum Call {
     Binding(u64),
     /// `events.on` functions for this event
     Emit(String, Vec<Value>),
+    /// A `process.output` callback (in the state's `CALLBACKS_KEY` table, taken out), with the program's result
+    Callback(u64, Result<String, String>),
 }
 
 /// `keymap.set`'s keys, by binding id (the function is in the state's `BINDINGS_KEY` table)
@@ -111,6 +113,9 @@ static BINDINGS: Mutex<Vec<(Keybind, u64)>> = Mutex::new(Vec::new());
 /// Named registry values of the state: `keymap.set`'s functions by id, `events.on`'s by event
 const BINDINGS_KEY: &str = "sonamu_bindings";
 const HOOKS_KEY: &str = "sonamu_hooks";
+const CALLBACKS_KEY: &str = "sonamu_callbacks";
+/// Ids of bindings and callbacks (not reused across `sonamu.reset()`)
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Runs `init.luau` from the config dir, once Sonamu has started (again after `sonamu.reset()`)
 pub fn start() {
@@ -288,6 +293,25 @@ fn run_call(lua: &Lua, call: Call) -> Result<(), String> {
                 function.call::<()>(()).map_err(|err| err.to_string())
             })
         }
+        Call::Callback(id, result) => {
+            let callbacks: mlua::Table = lua
+                .named_registry_value(CALLBACKS_KEY)
+                .map_err(|err| err.to_string())?;
+            let function: Option<mlua::Function> =
+                callbacks.get(id).map_err(|err| err.to_string())?;
+            callbacks
+                .set(id, LuaValue::Nil)
+                .map_err(|err| err.to_string())?;
+            // gone after `sonamu.reset()`
+            let Some(function) = function else {
+                return Ok(());
+            };
+            match result {
+                Ok(text) => function.call::<()>(text),
+                Err(err) => function.call::<()>((LuaValue::Nil, err)),
+            }
+            .map_err(|err| err.to_string())
+        }
         Call::Emit(event, args) => {
             let hooks: mlua::Table = lua
                 .named_registry_value(HOOKS_KEY)
@@ -375,18 +399,7 @@ fn new_lua() -> mlua::Result<Lua> {
     )?;
     globals.set("clipboard", clipboard)?;
 
-    let process = lua.create_table()?;
-    process.set("spawn", tree_function(&lua, "spawn")?)?;
-    process.set(
-        "output",
-        lua.create_function(
-            |_, (program, args, dir): (String, Option<Vec<String>>, Option<String>)| {
-                output(&program, &args.unwrap_or_default(), dir.as_deref())
-                    .map_err(mlua::Error::runtime)
-            },
-        )?,
-    )?;
-    globals.set("process", process)?;
+    add_process(&lua, &globals)?;
 
     let sonamu = lua.create_table()?;
     for name in ["open", "quit", "reload_settings"] {
@@ -431,9 +444,46 @@ fn new_lua() -> mlua::Result<Lua> {
     Ok(lua)
 }
 
+/// `process.spawn` and `process.output`
+fn add_process(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
+    let process = lua.create_table()?;
+    process.set("spawn", tree_function(lua, "spawn")?)?;
+    process.set(
+        "output",
+        lua.create_function(
+            |lua,
+             (program, args, dir, callback): (
+                String,
+                Option<Vec<String>>,
+                Option<String>,
+                Option<mlua::Function>,
+            )| {
+                let args = args.unwrap_or_default();
+                let Some(callback) = callback else {
+                    return output(&program, &args, dir.as_deref(), &cancelled)
+                        .map(Some)
+                        .map_err(mlua::Error::runtime);
+                };
+                // like nvim's `vim.system(cmd, on_exit)`: off the script thread, so others run meanwhile
+                let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+                lua.named_registry_value::<mlua::Table>(CALLBACKS_KEY)?
+                    .set(id, callback)?;
+                std::thread::spawn(move || {
+                    let result = output(&program, &args, dir.as_deref(), &|| false);
+                    send_job(Job::Call(Call::Callback(id, result)));
+                });
+                Ok(None)
+            },
+        )?,
+    )?;
+    globals.set("process", process)?;
+    Ok(())
+}
+
 /// `keymap.set` and `events.on`, whose functions are kept in the state's registry
 fn add_keymap_and_events(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
     lua.set_named_registry_value(BINDINGS_KEY, lua.create_table()?)?;
+    lua.set_named_registry_value(CALLBACKS_KEY, lua.create_table()?)?;
     lua.set_named_registry_value(HOOKS_KEY, lua.create_table()?)?;
     let keymap = lua.create_table()?;
     keymap.set(
@@ -469,8 +519,7 @@ fn add_keymap_and_events(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
                         )));
                     }
                 };
-                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                let id = NEXT.fetch_add(1, Ordering::Relaxed);
+                let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
                 lua.named_registry_value::<mlua::Table>(BINDINGS_KEY)?
                     .set(id, function)?;
                 let keybind = Keybind {
@@ -514,6 +563,7 @@ context.focus(): Node          the innermost focused node
 context.root(): Node           the root node
 process.spawn(program, {args}?)
 process.output(program, {args}?, dir?): string   waits for it (Ctrl+C kills it); stdout, then stderr
+process.output(program, {args}?, dir?, fn(out, err))   doesn't wait (other Luau runs meanwhile): fn gets either
 keymap.set({mods}, key, fn)   a global key (`ctrl`, `alt`, `shift`, `logo`; a character or evdev code)
 events.on(event, fn)           `focus` (focus moved), `window` (a wl window opened: its app id)
 ~/.config/sonamu/init.luau     runs at start and on sonamu.reset()
@@ -575,7 +625,8 @@ fn definitions() -> String {
 declare context: { focus: () -> Node, root: () -> Node }
 declare process: {
     spawn: (program: string, args: {string}?) -> (),
-    output: (program: string, args: {string}?, dir: string?) -> string,
+    output: ((program: string, args: {string}?, dir: string?) -> string)
+        & ((program: string, args: {string}?, dir: string?, fn: (string?, string?) -> ()) -> ()),
 }
 declare clipboard: { copy: (text: string) -> boolean, paste: () -> string? }
 declare keymap: { set: (mods: {string}, key: string | number, fn: () -> ()) -> () }
@@ -614,9 +665,14 @@ fn help() -> String {
     help
 }
 
-/// Runs the program (in `dir`, else Sonamu's) and waits for it, polling so a cancelled eval kills it;
+/// Runs the program (in `dir`, else Sonamu's) and waits for it, polling `cancelled` to kill it;
 /// its stdout then stderr, an error if it failed
-fn output(program: &str, args: &[String], dir: Option<&str>) -> Result<String, String> {
+fn output(
+    program: &str,
+    args: &[String],
+    dir: Option<&str>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<String, String> {
     use std::io::Read as _;
     let mut command = std::process::Command::new(program);
     command
@@ -989,6 +1045,16 @@ mod tests {
             Ok(vec![Value::String("hi\nerr\n".to_string())])
         );
         assert!(eval_all("process.output('false')").1.is_err());
+        assert!(
+            eval_all("process.output('echo', {'later'}, nil, function(out) later = out end)")
+                .1
+                .is_ok()
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while eval_all("later").1 != Ok(vec![Value::String("later\n".to_string())]) {
+            assert!(std::time::Instant::now() < deadline, "the callback ran");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     #[test]

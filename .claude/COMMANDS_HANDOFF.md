@@ -17,12 +17,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
   `assets/settings.schema.json` and fails once when settings change: rerun).
 - Nothing was run in the live compositor: headless sway (`.claude/TESTING.md`) wasn't installed. First job: run it.
 
-## Fix first (by risk)
-
-4. **One queue.** A slow `sonamu-msg eval` / `process.output` delays everything. Options: run `process.output` off
-   the script thread (Luau can't yield without `mlua` async; would need coroutines + `async` feature), or accept and
-   document. Measure first.
-
 ## Gaps (see COMMANDS.md To do for the full list)
 
 - Signatures unchecked: parse `Signature::params` (`name: type`, `T?`, `{T}`) once and check arity/types in

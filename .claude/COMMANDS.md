@@ -142,7 +142,8 @@ Deviations from the decisions below:
   `swap_sibling(offset)`, `toggle_half()`, `wrap_project()`, `parent(): Node?`, `children(): {Node}`,
   `type(): string`, `title(): string`, `cast(T): T?`.
 - `context.focus(): Node` (innermost, across worlds), `context.root(): Node`.
-- `process.spawn(program, args?)`, `process.output(program, args?, dir?): string`; `clipboard.copy(text)`, `clipboard.paste(): string?`.
+- `process.spawn(program, args?)`, `process.output(program, args?, dir?): string` (or with `fn(out, err)` last: doesn't wait, like nvim's `vim.system`;
+  the program runs on its own thread, then `Call::Callback` queues `fn`; not cancellable); `clipboard.copy(text)`, `clipboard.paste(): string?`.
 - `sonamu.open(applet, args?)`, `sonamu.reload_settings()`, `sonamu.quit()`, `sonamu.help(): string`, `sonamu.reset()`.
 - `CommandHub`: `clear()`, `set_title(t)`, `run_output(program, args?): string`.
 - `file_manager`: `root(): string`, `selected(): string?`, `open(path)` (shows its document).
@@ -169,8 +170,8 @@ Untested:
 - `sonamu.definitions()` not checked with luau-lsp.
 
 Gaps:
-- One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or
-  `process.output` delays the buffer line and Luau keybinds.
+- One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
+  `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
 - Luau tables pass/return only their sequence part (`Value::List`); map keys are dropped silently.
 - Prompt: no type-ahead while running; no newline key (only pasted ones).
 - Signatures aren't checked against calls (each `command()` validates its own args).
