@@ -324,7 +324,16 @@ fn run(jobs: &mpsc::Receiver<Job>) {
             max,
             reset: false,
         }));
-        let result = run_code(&lua, &code, require::EVAL_CHUNK);
+        // a limited one can't change what bindings and hooks (unlimited) see
+        let result = if max < Effect::Spawn {
+            require::own_environment(&lua)
+                .map_err(|err| err.to_string())
+                .and_then(|environment| {
+                    run_code(&lua, &code, require::EVAL_CHUNK, Some(&environment))
+                })
+        } else {
+            run_code(&lua, &code, require::EVAL_CHUNK, None)
+        };
         send(Output::Done(result));
         let reset = CURRENT.take().is_some_and(|current| current.reset);
         if reset {
@@ -350,7 +359,7 @@ fn run_call(lua: &Lua, call: Call) -> Result<(), String> {
             let Ok(code) = std::fs::read_to_string(&path) else {
                 return Ok(());
             };
-            run_code(lua, &code, &format!("@{}", path.display())).map(drop)
+            run_code(lua, &code, &format!("@{}", path.display()), None).map(drop)
         }
         Call::Binding(id) => {
             let bindings: mlua::Table = lua
@@ -425,13 +434,24 @@ fn run_call(lua: &Lua, call: Call) -> Result<(), String> {
 }
 
 /// As an expression if it is one (like a REPL), else as statements
-/// `name`: the chunk's, eg `@<path>` for a file (`require` is relative to it)
-fn run_code(lua: &Lua, code: &str, name: &str) -> Result<Vec<Value>, String> {
-    let function = lua
-        .load(format!("return {code}"))
-        .set_name(name)
+/// `name`: the chunk's, eg `@<path>` for a file (`require` is relative to it); `environment`: its globals, else the
+/// shared ones
+fn run_code(
+    lua: &Lua,
+    code: &str,
+    name: &str,
+    environment: Option<&mlua::Table>,
+) -> Result<Vec<Value>, String> {
+    let load = |code: &str| {
+        let chunk = lua.load(code.to_string()).set_name(name);
+        match environment {
+            Some(environment) => chunk.set_environment(environment.clone()),
+            None => chunk,
+        }
         .into_function()
-        .or_else(|_| lua.load(code).set_name(name).into_function())
+    };
+    let function = load(&format!("return {code}"))
+        .or_else(|_| load(code))
         .map_err(|err| err.to_string())?;
     let values = function
         .call::<MultiValue>(())
@@ -1371,6 +1391,14 @@ mod tests {
             panic!("refused");
         };
         assert!(err.contains("above this eval's limit"), "{err}");
+        let (_handle, outputs) =
+            eval_limited("limited_global = 1".to_string(), Effect::Read, || {});
+        assert!(matches!(outputs.recv(), Ok(Output::Done(Ok(_)))));
+        assert_eq!(
+            eval_all("limited_global").1,
+            Ok(vec![Value::Nil]),
+            "its own env"
+        );
     }
 
     #[test]

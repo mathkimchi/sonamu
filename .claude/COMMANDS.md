@@ -75,8 +75,9 @@ Deviations from the decisions below:
   checked by the node's world (`NodeHolder::handle_node_call`); `eval_limited` sets the eval's max, which its
   `call`s pass and its builtins check (`allow`: `process.output` spawn, `clipboard.copy` modify, `sonamu.reset`
   destructive, `keymap.set`/`events.on` spawn since they run later unlimited). Buffer line, hubs, init, bindings and
-  hooks: unlimited. Socket: `sonamu-msg eval --max <effect>` (default unlimited). A limited eval can still call
-  functions defined earlier: their calls are checked against its max.
+  hooks: unlimited. Socket: `sonamu-msg eval --max <effect>` (default unlimited). A limited eval runs in its own env
+  (`require::own_environment`, reading through), so it can't redefine what unlimited bindings/hooks call; functions
+  defined earlier that it calls are checked against its max.
 - Socket: `Message::Eval { code, max }`; the runner answers from a thread (`msg_socket::answer_eval`) with JSON lines
   (`msg::EvalReply`: `print`, then `done` `Ok(values)`/`Err`), plus empty keepalive lines every 100 ms, which fail once
   the sender is gone and cancel the eval (reading can't tell: it already shut its writing half). `sonamu-msg eval
@@ -202,8 +203,6 @@ Gaps:
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
 - Clipboard: the code editor can't copy (it has no selection yet).
-- Limited evals share the one env: one can redefine a global a binding/hook calls, which then runs unlimited (fix:
-  run limited evals in their own env reading through to the shared one, like `require`d modules).
 - `docs/usage.md` doesn't mention Super+Esc or the buffer line (docs aren't edited from here).
 
 Later:

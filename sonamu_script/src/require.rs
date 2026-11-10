@@ -35,6 +35,15 @@ impl ConfigRequirer {
     }
 }
 
+/// A table of its own globals, reading through to the shared ones
+pub(crate) fn own_environment(lua: &Lua) -> mlua::Result<mlua::Table> {
+    let environment = lua.create_table()?;
+    let shared = lua.create_table()?;
+    shared.set("__index", lua.globals())?;
+    environment.set_metatable(Some(shared))?;
+    Ok(environment)
+}
+
 impl Require for ConfigRequirer {
     fn is_require_allowed(&self, chunk_name: &str) -> bool {
         chunk_name == EVAL_CHUNK || chunk_name.starts_with('@')
@@ -95,13 +104,9 @@ impl Require for ConfigRequirer {
         let file = self
             .file()
             .ok_or_else(|| mlua::Error::runtime("the module is gone"))?;
-        let environment = lua.create_table()?;
-        let shared = lua.create_table()?;
-        shared.set("__index", lua.globals())?;
-        environment.set_metatable(Some(shared))?;
         lua.load(file.as_path())
             .set_name(format!("@{}", file.display()))
-            .set_environment(environment)
+            .set_environment(own_environment(lua)?)
             .into_function()
     }
 }
