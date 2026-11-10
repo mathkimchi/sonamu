@@ -23,6 +23,7 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
   changed): globals (incl. builtins), table fields after `.`, after `:` on a node its `Node` methods + its type's
   signatures. To know the node, completion runs read-only getters only: `context.focus()`, `context.root()`,
   `:parent()` (deviation: Q22 said no calls); `:add_child()` gives a node of unknown type (`Node` methods only).
+- Paste: Ctrl+V / Ctrl+Shift+V (`arboard`, like the code editor) inserts at the cursor; newlines kept (shown `↵`).
 
 Try in a hub:
 

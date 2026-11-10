@@ -371,6 +371,8 @@ impl CommandHubApplet {
                 self.recalling = None;
             }
             KeySymbol::Char('\t') if modifiers == KeyModifiers::NONE => self.start_completion(),
+            KeySymbol::Char('v') if modifiers == KeyModifiers::CTRL => self.paste(),
+            KeySymbol::Char('V') if modifiers == KeyModifiers::CTRL_SHIFT => self.paste(),
             // cancels the running evals
             KeySymbol::Char('c' | 'C') if modifiers == KeyModifiers::CTRL => {
                 for eval in &self.evals {
@@ -390,6 +392,19 @@ impl CommandHubApplet {
             }
             KeySymbol::Char(_) => {}
         }
+    }
+
+    /// Inserts the clipboard's text at the cursor (newlines kept: it's Luau)
+    fn paste(&mut self) {
+        // no clipboard on a TTY
+        let Ok(text) = arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text())
+        else {
+            return;
+        };
+        let text = text.trim_end_matches(['\n', '\r']).replace("\r\n", "\n");
+        self.current_prompt
+            .insert_str(self.byte_index(self.cursor), &text);
+        self.cursor += text.chars().count();
     }
 
     fn byte_index(&self, char_index: usize) -> usize {
@@ -617,7 +632,13 @@ impl StandardApplet for CommandHubApplet {
             let start = put(&mut grid, prompt_row, 0, PROMPT, ACCENT);
             let room = width.saturating_sub(start).max(1);
             let skip = self.cursor.saturating_sub(room - 1);
-            let visible: String = self.current_prompt.chars().skip(skip).collect();
+            // a pasted newline shows as `↵`
+            let visible: String = self
+                .current_prompt
+                .chars()
+                .skip(skip)
+                .map(|c| if c == '\n' { '↵' } else { c })
+                .collect();
             put(&mut grid, prompt_row, start, &visible, COMMAND);
             if let Some(cell) = (start + self.cursor - skip < width)
                 .then(|| grid.get_char_mut(prompt_row, start + self.cursor - skip))

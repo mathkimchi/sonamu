@@ -3414,6 +3414,7 @@ dependencies = [
 name = "sonamu_sttk"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "calloop",
  "log",
  "regex",
