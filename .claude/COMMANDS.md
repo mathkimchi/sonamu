@@ -16,6 +16,9 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
   `Node` userdata (node commands, `cast`, `__index` → applet command, `==`, `tostring`), cancel via interrupt.
 - Hub: Luau only, one eval at a time (like a shell: no prompt, keys ignored but Ctrl+C/PageUp/PageDown, until it ends), `print`s then results (strings unquoted), Ctrl+C cancels; commands `clear`, `set_title`, `open` (replace the hub, as
   before; `"wl", {argv}` too), `run_output` (old `$`).
+- Tab: `sonamu_script::complete` (a job on the script thread, answered through the waker, dropped if the prompt
+  changed): globals (incl. builtins), table fields after `.`, `Node` methods after `:` on a `Node` value or after a
+  call in `RETURN_NODE` (`focus`, `root`, `parent`, `add_child`; nothing else is run or known yet).
 
 Try in a hub:
 
@@ -39,7 +42,7 @@ Deviations from the decisions below:
 - No `split` (splits no longer exist). `parent()` stops at its world's root (nil there, even inside a project).
 - `hub:run_output` blocks the hub's thread while the program runs.
 
-Not done: keybinds through `NodeCall`, Tab completion (removed with the old verbs), socket `eval`, spawner signatures.
+Not done: keybinds through `NodeCall`, socket `eval`, spawner signatures (so no applet commands in completion).
 
 ## Decisions
 

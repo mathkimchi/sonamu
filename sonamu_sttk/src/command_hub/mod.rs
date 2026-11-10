@@ -94,6 +94,8 @@ pub struct CommandHubApplet {
 
     evals: Vec<Eval>,
     next_job: u64,
+    /// Tab's candidates on the script thread, for this prompt
+    completing: Option<(String, mpsc::Receiver<Vec<String>>)>,
 
     /// Where `run_output` starts programs: the directory of the tree it is in (eg a project's); the runner's if `None`
     directory: Option<PathBuf>,
@@ -116,6 +118,7 @@ impl CommandHubApplet {
             recalling: None,
             evals: Vec::new(),
             next_job: 0,
+            completing: None,
             directory: None,
             size: DisplayContainerSize::new(800, 600),
             hook,
@@ -259,6 +262,47 @@ impl CommandHubApplet {
         self.cursor = self.current_prompt.chars().count();
     }
 
+    /// Asks the script thread what could follow the prompt, when the cursor is at its end
+    fn start_completion(&mut self) {
+        if self.cursor != self.current_prompt.chars().count() {
+            return;
+        }
+        let waker = self.hook.waker();
+        let candidates = sonamu_script::complete(self.current_prompt.clone(), move || {
+            waker.wake();
+        });
+        self.completing = Some((self.current_prompt.clone(), candidates));
+    }
+
+    /// Completes the prompt's last word: the only candidate, or what they all start with (listed in the hint)
+    fn complete(&mut self, candidates: &[String]) {
+        let word_start = self
+            .current_prompt
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| !(c.is_alphanumeric() || c == '_'))
+            .map_or(0, |(index, c)| index + c.len_utf8());
+        let completed = match candidates {
+            [] => return,
+            [only] => only.clone(),
+            [first, rest @ ..] => {
+                self.hint = Some(candidates.join("  "));
+                let common = rest.iter().fold(first.as_str(), |common, candidate| {
+                    let len = common
+                        .chars()
+                        .zip(candidate.chars())
+                        .take_while(|(a, b)| a == b)
+                        .map(|(a, _)| a.len_utf8())
+                        .sum();
+                    &common[..len]
+                });
+                common.to_string()
+            }
+        };
+        self.current_prompt.replace_range(word_start.., &completed);
+        self.cursor = self.current_prompt.chars().count();
+    }
+
     fn handle_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) {
         self.hint = None;
         // like a shell: no prompt until it finishes; it can still be cancelled or scrolled
@@ -288,6 +332,7 @@ impl CommandHubApplet {
                 self.cursor = 0;
                 self.recalling = None;
             }
+            KeySymbol::Char('\t') if modifiers == KeyModifiers::NONE => self.start_completion(),
             // cancels the running evals
             KeySymbol::Char('c' | 'C') if modifiers == KeyModifiers::CTRL => {
                 for eval in &self.evals {
@@ -427,8 +472,17 @@ impl StandardApplet for CommandHubApplet {
         }
     }
 
-    /// An eval printed or finished
+    /// An eval printed or finished, or Tab's candidates came
     fn wake(&mut self) {
+        if let Some((prompt, candidates)) = &self.completing
+            && let Ok(candidates) = candidates.try_recv()
+        {
+            // unless it was typed on meanwhile
+            if *prompt == self.current_prompt {
+                self.complete(&candidates);
+            }
+            self.completing = None;
+        }
         let mut finished = Vec::new();
         for eval in &self.evals {
             // gone if cleared meanwhile
@@ -547,7 +601,7 @@ impl StandardApplet for CommandHubApplet {
         let note = if scroll > 0 {
             format!("{scroll} lines below (PageDown) ")
         } else {
-            "sonamu.help() | Up/Down | Ctrl+C ".to_string()
+            "sonamu.help() | Tab | Up/Down | Ctrl+C ".to_string()
         };
         let title_end = self.title.chars().count() + 2;
         if let Some(column) = width

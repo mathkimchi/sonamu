@@ -30,19 +30,22 @@ impl EvalHandle {
     }
 }
 
-struct Job {
-    code: String,
-    output: mpsc::Sender<Output>,
-    /// Called after each output (eg wakes the hub's thread)
-    notify: Box<dyn Fn() + Send>,
-    cancelled: Arc<AtomicBool>,
+enum Job {
+    Eval {
+        code: String,
+        output: mpsc::Sender<Output>,
+        /// Called after each output (eg wakes the hub's thread)
+        notify: Box<dyn Fn() + Send>,
+        cancelled: Arc<AtomicBool>,
+    },
+    Complete {
+        text: String,
+        reply: mpsc::Sender<Vec<String>>,
+        notify: Box<dyn Fn() + Send>,
+    },
 }
 
-/// Runs `code` on the script thread, after any evals before it. `notify` is called after each output.
-pub fn eval(
-    code: String,
-    notify: impl Fn() + Send + 'static,
-) -> (EvalHandle, mpsc::Receiver<Output>) {
+fn send_job(job: Job) {
     static JOBS: LazyLock<Mutex<mpsc::Sender<Job>>> = LazyLock::new(|| {
         let (jobs, received) = mpsc::channel();
         std::thread::Builder::new()
@@ -51,20 +54,39 @@ pub fn eval(
             .unwrap();
         Mutex::new(jobs)
     });
-    let (output, outputs) = mpsc::channel();
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let job = Job {
-        code,
-        output,
-        notify: Box::new(notify),
-        cancelled: Arc::clone(&cancelled),
-    };
     // the thread runs as long as the process
     let _ = JOBS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .send(job);
+}
+
+/// Runs `code` on the script thread, after any evals before it. `notify` is called after each output.
+pub fn eval(
+    code: String,
+    notify: impl Fn() + Send + 'static,
+) -> (EvalHandle, mpsc::Receiver<Output>) {
+    let (output, outputs) = mpsc::channel();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    send_job(Job::Eval {
+        code,
+        output,
+        notify: Box::new(notify),
+        cancelled: Arc::clone(&cancelled),
+    });
     (EvalHandle(cancelled), outputs)
+}
+
+/// What could follow the end of `text` (the word it ends in), from the live state, after any evals before it.
+/// `notify` is called once it is ready.
+pub fn complete(text: String, notify: impl Fn() + Send + 'static) -> mpsc::Receiver<Vec<String>> {
+    let (reply, replied) = mpsc::channel();
+    send_job(Job::Complete {
+        text,
+        reply,
+        notify: Box::new(notify),
+    });
+    replied
 }
 
 thread_local! {
@@ -100,13 +122,30 @@ fn send(output: Output) {
 fn run(jobs: &mpsc::Receiver<Job>) {
     let mut lua = new_lua().expect("the script state");
     for job in jobs {
+        let (code, output, notify, cancelled) = match job {
+            Job::Eval {
+                code,
+                output,
+                notify,
+                cancelled,
+            } => (code, output, notify, cancelled),
+            Job::Complete {
+                text,
+                reply,
+                notify,
+            } => {
+                let _ = reply.send(completions(&lua, &text));
+                notify();
+                continue;
+            }
+        };
         CURRENT.set(Some(Current {
-            output: job.output,
-            notify: job.notify,
-            cancelled: job.cancelled,
+            output,
+            notify,
+            cancelled,
             reset: false,
         }));
-        let result = run_code(&lua, &job.code);
+        let result = run_code(&lua, &code);
         send(Output::Done(result));
         let reset = CURRENT.take().is_some_and(|current| current.reset);
         if reset {
@@ -268,6 +307,104 @@ impl UserData for Node {
     }
 }
 
+/// Functions returning a `Node`, so `:` after a call to them completes `Node` methods without running it
+const RETURN_NODE: [&str; 4] = ["focus", "root", "parent", "add_child"];
+
+/// What a chain of fields ends in, without calling anything (except knowing what `RETURN_NODE` give)
+enum Resolved {
+    Value(LuaValue),
+    Node,
+}
+
+/// Candidates for the word `text` ends in: globals, a table's fields after `.`, or `Node` methods after `:`
+fn completions(lua: &Lua, text: &str) -> Vec<String> {
+    // the trailing chain, eg `context.focus():ti`
+    let start = text
+        .char_indices()
+        .rev()
+        .find(|&(_, c)| !(c.is_alphanumeric() || "_.:()".contains(c)))
+        .map_or(0, |(index, c)| index + c.len_utf8());
+    let chain = &text[start..];
+    let (receiver, separator, word) = match chain.rfind(['.', ':']) {
+        Some(index) => (&chain[..index], &chain[index..=index], &chain[index + 1..]),
+        None => ("", "", chain),
+    };
+    let mut candidates: Vec<String> = if receiver.is_empty() {
+        global_names(lua)
+    } else {
+        match resolve(lua, receiver) {
+            Some(Resolved::Node) if separator == ":" => node_methods(),
+            Some(Resolved::Value(LuaValue::UserData(data)))
+                if separator == ":" && data.is::<Node>() =>
+            {
+                node_methods()
+            }
+            Some(Resolved::Value(LuaValue::Table(table))) if separator == "." => keys(&table),
+            _ => Vec::new(),
+        }
+    };
+    candidates.retain(|candidate| candidate.starts_with(word));
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
+fn resolve(lua: &Lua, chain: &str) -> Option<Resolved> {
+    let mut resolved: Option<Resolved> = None;
+    for segment in chain.split(['.', ':']) {
+        let (name, called) = match segment.strip_suffix("()") {
+            Some(name) => (name, true),
+            None => (segment, false),
+        };
+        if called {
+            // only what's known to give a `Node`
+            if !RETURN_NODE.contains(&name) {
+                return None;
+            }
+            resolved = Some(Resolved::Node);
+            continue;
+        }
+        let value = match resolved {
+            None => lua.globals().get::<LuaValue>(name).ok()?,
+            Some(Resolved::Value(LuaValue::Table(table))) => table.get::<LuaValue>(name).ok()?,
+            _ => return None,
+        };
+        resolved = Some(Resolved::Value(value));
+    }
+    resolved
+}
+
+fn node_methods() -> Vec<String> {
+    NODE_COMMANDS
+        .iter()
+        .chain(&["cast"])
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn keys(table: &mlua::Table) -> Vec<String> {
+    table
+        .pairs::<LuaValue, LuaValue>()
+        .filter_map(|pair| match pair.ok()?.0 {
+            LuaValue::String(key) => Some(key.to_str().ok()?.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The eval's own globals, and the builtins under them (sandbox mode puts those in the globals' `__index`)
+fn global_names(lua: &Lua) -> Vec<String> {
+    let globals = lua.globals();
+    let mut names = keys(&globals);
+    if let Some(LuaValue::Table(builtins)) = globals
+        .metatable()
+        .and_then(|metatable| metatable.get::<LuaValue>("__index").ok())
+    {
+        names.extend(keys(&builtins));
+    }
+    names
+}
+
 fn from_lua(value: &LuaValue) -> mlua::Result<Value> {
     Ok(match value {
         LuaValue::Nil => Value::Nil,
@@ -343,6 +480,18 @@ mod tests {
             eval_all("string.len = nil").1.is_err(),
             "builtins are read-only"
         );
+    }
+
+    #[test]
+    fn completion() {
+        let complete_all = |text: &str| complete(text.to_string(), || {}).recv().unwrap();
+        assert_eq!(complete_all("cont"), ["context"]);
+        assert_eq!(complete_all("x = context.fo"), ["focus"]);
+        assert_eq!(complete_all("context.focus():ti"), ["title"]);
+        assert_eq!(complete_all("string.le"), ["len"]);
+        assert!(complete_all("context.focus():title():").is_empty());
+        assert!(eval_all("my_var = 1").1.is_ok());
+        assert_eq!(complete_all("my_v"), ["my_var"]);
     }
 
     #[test]
