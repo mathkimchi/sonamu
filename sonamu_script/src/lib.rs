@@ -2,6 +2,8 @@
 //!
 //! Commands block the script thread until their world answers; worlds never wait on it, so this can't deadlock.
 
+mod require;
+
 use mlua::{Lua, MetaMethod, MultiValue, UserData, UserDataMethods, Value as LuaValue, VmState};
 use sonamu_command::{self as command, CommandResult, NODE_COMMANDS, NodeUid, Value};
 use sonamu_common::settings::{Key, Keybind};
@@ -289,7 +291,7 @@ fn run(jobs: &mpsc::Receiver<Job>) {
             cancelled,
             reset: false,
         }));
-        let result = run_code(&lua, &code);
+        let result = run_code(&lua, &code, require::EVAL_CHUNK);
         send(Output::Done(result));
         let reset = CURRENT.take().is_some_and(|current| current.reset);
         if reset {
@@ -315,9 +317,7 @@ fn run_call(lua: &Lua, call: Call) -> Result<(), String> {
             let Ok(code) = std::fs::read_to_string(&path) else {
                 return Ok(());
             };
-            run_code(lua, &code)
-                .map(drop)
-                .map_err(|err| format!("{}: {err}", path.display()))
+            run_code(lua, &code, &format!("@{}", path.display())).map(drop)
         }
         Call::Binding(id) => {
             let bindings: mlua::Table = lua
@@ -392,12 +392,13 @@ fn run_call(lua: &Lua, call: Call) -> Result<(), String> {
 }
 
 /// As an expression if it is one (like a REPL), else as statements
-fn run_code(lua: &Lua, code: &str) -> Result<Vec<Value>, String> {
+/// `name`: the chunk's, eg `@<path>` for a file (`require` is relative to it)
+fn run_code(lua: &Lua, code: &str, name: &str) -> Result<Vec<Value>, String> {
     let function = lua
         .load(format!("return {code}"))
-        .set_name("=input")
+        .set_name(name)
         .into_function()
-        .or_else(|_| lua.load(code).set_name("=input").into_function())
+        .or_else(|_| lua.load(code).set_name(name).into_function())
         .map_err(|err| err.to_string())?;
     let values = function
         .call::<MultiValue>(())
@@ -491,6 +492,10 @@ fn new_lua() -> mlua::Result<Lua> {
     globals.set("sonamu", sonamu)?;
 
     add_keymap_and_events(&lua, &globals)?;
+    globals.set(
+        "require",
+        lua.create_require_function(require::ConfigRequirer::default())?,
+    )?;
 
     // builtins read-only; what evals define goes in a table of its own
     lua.sandbox(true)?;
@@ -663,7 +668,8 @@ keymap.set({mods}, key, fn, {type = t}?)   a key (`ctrl`, `alt`, `shift`, `logo`
                                global or while focus is of applet type t (wins); keymap.unset({mods}, key, {type}?)
 events.on(event, fn)           `focus` (focus moved: the node), `open` (a new node), `close` (its gone node),
                                `window` (a wl window opened: its app id), `settings` (reloaded), `screens` (count)
-~/.config/sonamu/init.luau     runs at start and on sonamu.reset()
+~/.config/sonamu/init.luau     runs at start and on sonamu.reset(); `require('./name')` loads name.luau beside it
+                               (own globals; it shares what it returns), from the buffer line too
 clipboard.copy(text)           Sonamu's clipboard, for wl clients too
 clipboard.paste(): string?
 sonamu.open(applet, {args}?)   like `sonamu-msg open`
@@ -748,6 +754,7 @@ declare sonamu: {
     definitions: () -> string,
 }
 declare function help(): string
+declare function require(path: string): any
 ",
     );
     out
@@ -1254,6 +1261,29 @@ mod tests {
             panic!("done");
         };
         assert!(result.unwrap_err().contains("cancelled"));
+    }
+
+    #[test]
+    fn require_config_modules() {
+        let dir = std::env::temp_dir().join(format!("sonamu-require-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("module.luau"),
+            "module_global = 1\nreturn { get = function() return module_global end }",
+        )
+        .unwrap();
+        // SAFETY: only this test reads `SONAMU_CONFIG` (no `start()` in tests)
+        unsafe { std::env::set_var("SONAMU_CONFIG", &dir) };
+        assert_eq!(
+            eval_all("require('./module').get()").1,
+            Ok(vec![Value::Number(1.0)])
+        );
+        assert_eq!(
+            eval_all("module_global").1,
+            Ok(vec![Value::Nil]),
+            "modules have their own globals"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

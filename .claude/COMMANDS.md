@@ -76,7 +76,10 @@ Deviations from the decisions below:
   is `{"type": .., "node": uid}` (`msg_socket::to_json` asks its type when answering; null if gone).
 
 - Startup / keys / hooks (`sonamu_script`): `start()` (the root, at init) runs `<config dir>/init.luau` (again after
-  `sonamu.reset()`, which also drops bindings). `keymap.set({mods}, key, fn, {type = t}?)`: keys in the static `BINDINGS`
+  `sonamu.reset()`, which also drops bindings), in the shared env, as chunk `@<path>`. `require("./name")`
+  (`require.rs`, `ConfigRequirer`): relative to the requiring file, or the config dir from evals (`=input`);
+  `name.luau`/`.lua`/`name/init.luau`; no `.luaurc` aliases; cached per state. Each module has its own globals
+  (reading through to the shared env; Roblox model) and shares what it returns (decided over a shared env). `keymap.set({mods}, key, fn, {type = t}?)`: keys in the static `BINDINGS`
   (matched like settings `Keybind`s; same key and type replaces); with `type`, only while the innermost focus is of
   that applet type, and it wins over a global one (decided: like Emacs major-mode maps; over focus-path layering or
   `when` predicates, which would run Luau per key). `FOCUS_TYPE` is set when the script thread resolves a `focus`
@@ -190,7 +193,6 @@ Untested:
 Gaps:
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
-- `init.luau` shares the one environment (no per-script environments, no `require`).
 - Clipboard: applets can't copy from their own UI (only Luau's `clipboard.copy`); no primary selection.
 - No effect levels / permissions on commands (`process.spawn`/`output` run anything), needed before agents.
 - `docs/usage.md` doesn't mention Super+Esc or the buffer line (docs aren't edited from here).

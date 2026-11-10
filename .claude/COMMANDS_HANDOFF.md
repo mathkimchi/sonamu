@@ -19,7 +19,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
 
 ## Gaps (see COMMANDS.md To do for the full list)
 
-- `init.luau` environments: per-file environments + `require` (Roblox model) once there are several files.
 - Clipboard: a copy key in the hub/buffer line (last output) and the code editor (selection, once it has one);
   primary selection (`primary_selection` state is there in smithay).
 - Effect levels on commands (read / modify / destructive / spawn) before an MCP bridge; `process.*` runs anything.
