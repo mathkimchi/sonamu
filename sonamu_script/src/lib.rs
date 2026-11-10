@@ -108,8 +108,16 @@ enum Call {
     Callback(u64, Result<String, String>),
 }
 
-/// `keymap.set`'s keys, by binding id (the function is in the state's `BINDINGS_KEY` table)
-static BINDINGS: Mutex<Vec<(Keybind, u64)>> = Mutex::new(Vec::new());
+/// A `keymap.set` key: for focus of `applet_type` only, or any (`None`); its function is `id` in the state's
+/// `BINDINGS_KEY` table
+struct Binding {
+    keybind: Keybind,
+    applet_type: Option<String>,
+    id: u64,
+}
+static BINDINGS: Mutex<Vec<Binding>> = Mutex::new(Vec::new());
+/// The innermost focus's applet type, as of the last `focus` event (for `binding`)
+static FOCUS_TYPE: Mutex<Option<String>> = Mutex::new(None);
 /// Named registry values of the state: `keymap.set`'s functions by id, `events.on`'s by event
 const BINDINGS_KEY: &str = "sonamu_bindings";
 const HOOKS_KEY: &str = "sonamu_hooks";
@@ -122,14 +130,23 @@ pub fn start() {
     send_job(Job::Call(Call::Init));
 }
 
-/// The `keymap.set` binding for this key with exactly these mods (`[ctrl, alt, shift, logo]`), if any
+/// The `keymap.set` binding for this key with exactly these mods (`[ctrl, alt, shift, logo]`), if any: the focus's
+/// applet type's (like an Emacs major mode's map), else a global one
 pub fn binding(symbol: Option<char>, raw_keycode: u32, mods: [bool; 4]) -> Option<u64> {
-    BINDINGS
+    let focus_type = FOCUS_TYPE
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .iter()
-        .find(|(keybind, _)| keybind.matches(symbol, raw_keycode, mods))
-        .map(|&(_, id)| id)
+        .clone();
+    let bindings = BINDINGS.lock().unwrap_or_else(PoisonError::into_inner);
+    let matching = || {
+        bindings
+            .iter()
+            .filter(|binding| binding.keybind.matches(symbol, raw_keycode, mods))
+    };
+    matching()
+        .find(|binding| binding.applet_type.is_some() && binding.applet_type == focus_type)
+        .or_else(|| matching().find(|binding| binding.applet_type.is_none()))
+        .map(|binding| binding.id)
 }
 
 /// Runs a `binding`'s function
@@ -334,6 +351,16 @@ fn run_call(lua: &Lua, call: Call) -> Result<(), String> {
         Call::Emit(event, mut args) => {
             if event == "focus" && args.is_empty() {
                 args.extend(command::focus(&cancelled).ok());
+                let focus_type = match args.first() {
+                    Some(&Value::Node(uid)) => {
+                        match command::call(Some(uid), "type", Vec::new(), &cancelled) {
+                            Ok(Value::String(applet_type)) => Some(applet_type),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                *FOCUS_TYPE.lock().unwrap_or_else(PoisonError::into_inner) = focus_type;
             }
             SUBSCRIBERS
                 .lock()
@@ -506,6 +533,59 @@ fn add_process(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
     Ok(())
 }
 
+impl Binding {
+    fn is(&self, keybind: &Keybind, applet_type: Option<&String>) -> bool {
+        self.keybind.mods == keybind.mods
+            && self.keybind.key == keybind.key
+            && self.applet_type.as_ref() == applet_type
+    }
+}
+
+/// `keymap.set`'s/`unset`'s key (a character or an evdev code) and its options' `type`
+fn keymap_key(
+    mods: Vec<String>,
+    key: &LuaValue,
+    options: Option<&mlua::Table>,
+) -> mlua::Result<(Keybind, Option<String>)> {
+    let key = match key {
+        &LuaValue::Integer(code) => Key::Code(u32::try_from(code).map_err(mlua::Error::runtime)?),
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a key code"
+        )]
+        &LuaValue::Number(code) => Key::Code(code as u32),
+        LuaValue::String(text) => {
+            let text = text.to_str()?;
+            let mut chars = text.chars();
+            match (chars.next(), chars.next()) {
+                (Some(c), None) => Key::Char(c),
+                _ => {
+                    return Err(mlua::Error::runtime(
+                        "the key is one character or a key code",
+                    ));
+                }
+            }
+        }
+        other => {
+            return Err(mlua::Error::runtime(format!(
+                "can't bind a {}",
+                other.type_name()
+            )));
+        }
+    };
+    let applet_type = options
+        .map(|options| options.get("type"))
+        .transpose()?
+        .flatten();
+    let keybind = Keybind {
+        mods,
+        key,
+        command: String::new(),
+    };
+    Ok((keybind, applet_type))
+}
+
 /// `keymap.set` and `events.on`, whose functions are kept in the state's registry
 fn add_keymap_and_events(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
     lua.set_named_registry_value(BINDINGS_KEY, lua.create_table()?)?;
@@ -515,50 +595,39 @@ fn add_keymap_and_events(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
     keymap.set(
         "set",
         lua.create_function(
-            |lua, (mods, key, function): (Vec<String>, LuaValue, mlua::Function)| {
-                let key = match key {
-                    LuaValue::Integer(code) => {
-                        Key::Code(u32::try_from(code).map_err(mlua::Error::runtime)?)
-                    }
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        clippy::cast_sign_loss,
-                        reason = "a key code"
-                    )]
-                    LuaValue::Number(code) => Key::Code(code as u32),
-                    LuaValue::String(text) => {
-                        let text = text.to_str()?;
-                        let mut chars = text.chars();
-                        match (chars.next(), chars.next()) {
-                            (Some(c), None) => Key::Char(c),
-                            _ => {
-                                return Err(mlua::Error::runtime(
-                                    "the key is one character or a key code",
-                                ));
-                            }
-                        }
-                    }
-                    other => {
-                        return Err(mlua::Error::runtime(format!(
-                            "can't bind a {}",
-                            other.type_name()
-                        )));
-                    }
-                };
+            |lua,
+             (mods, key, function, options): (
+                Vec<String>,
+                LuaValue,
+                mlua::Function,
+                Option<mlua::Table>,
+            )| {
+                let (keybind, applet_type) = keymap_key(mods, &key, options.as_ref())?;
                 let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
                 lua.named_registry_value::<mlua::Table>(BINDINGS_KEY)?
                     .set(id, function)?;
-                let keybind = Keybind {
-                    mods,
-                    key,
-                    command: String::new(),
-                };
                 let mut bindings = BINDINGS.lock().unwrap_or_else(PoisonError::into_inner);
-                // the same key bound again replaces it
-                bindings
-                    .retain(|(bound, _)| bound.mods != keybind.mods || bound.key != keybind.key);
-                bindings.push((keybind, id));
+                // the same key bound again (for the same type) replaces it
+                bindings.retain(|bound| !bound.is(&keybind, applet_type.as_ref()));
+                bindings.push(Binding {
+                    keybind,
+                    applet_type,
+                    id,
+                });
                 Ok(())
+            },
+        )?,
+    )?;
+    keymap.set(
+        "unset",
+        lua.create_function(
+            |_, (mods, key, options): (Vec<String>, LuaValue, Option<mlua::Table>)| {
+                let (keybind, applet_type) = keymap_key(mods, &key, options.as_ref())?;
+                let mut bindings = BINDINGS.lock().unwrap_or_else(PoisonError::into_inner);
+                let count = bindings.len();
+                bindings.retain(|bound| !bound.is(&keybind, applet_type.as_ref()));
+                // whether it was bound
+                Ok(bindings.len() != count)
             },
         )?,
     )?;
@@ -590,7 +659,8 @@ context.root(): Node           the root node
 process.spawn(program, {args}?)
 process.output(program, {args}?, dir?): string   waits for it (Ctrl+C kills it); stdout, then stderr
 process.output(program, {args}?, dir?, fn(out, err))   doesn't wait (other Luau runs meanwhile): fn gets either
-keymap.set({mods}, key, fn)   a global key (`ctrl`, `alt`, `shift`, `logo`; a character or evdev code)
+keymap.set({mods}, key, fn, {type = t}?)   a key (`ctrl`, `alt`, `shift`, `logo`; a character or evdev code),
+                               global or while focus is of applet type t (wins); keymap.unset({mods}, key, {type}?)
 events.on(event, fn)           `focus` (focus moved: the node), `open` (a new node), `close` (its gone node),
                                `window` (a wl window opened: its app id), `settings` (reloaded), `screens` (count)
 ~/.config/sonamu/init.luau     runs at start and on sonamu.reset()
@@ -663,7 +733,10 @@ declare process: {
         & ((program: string, args: {string}?, dir: string?, fn: (string?, string?) -> ()) -> ()),
 }
 declare clipboard: { copy: (text: string) -> boolean, paste: () -> string? }
-declare keymap: { set: (mods: {string}, key: string | number, fn: () -> ()) -> () }
+declare keymap: {
+    set: (mods: {string}, key: string | number, fn: () -> (), options: { type: string? }?) -> (),
+    unset: (mods: {string}, key: string | number, options: { type: string? }?) -> boolean,
+}
 declare events: { on: (event: string, fn: (...any) -> ()) -> () }
 declare sonamu: {
     open: (applet: string, args: {string}?) -> (),
@@ -1114,6 +1187,21 @@ mod tests {
         let id = binding(Some('Q'), 0, logo).expect("bound, case-insensitive");
         run_binding(id);
         assert_eq!(eval_all("bound").1, Ok(vec![Value::Bool(true)]));
+        // typed ones only for focus of their type (none yet)
+        assert!(
+            eval_all("keymap.set({'logo'}, 'q', function() end, {type = 'file_manager'})")
+                .1
+                .is_ok()
+        );
+        assert_eq!(binding(Some('q'), 0, logo), Some(id));
+        *FOCUS_TYPE.lock().unwrap() = Some("file_manager".to_string());
+        assert_ne!(binding(Some('q'), 0, logo), Some(id));
+        *FOCUS_TYPE.lock().unwrap() = None;
+        assert_eq!(
+            eval_all("keymap.unset({'logo'}, 'q')").1,
+            Ok(vec![Value::Bool(true)])
+        );
+        assert_eq!(binding(Some('q'), 0, logo), None);
 
         assert!(
             eval_all("events.on('focus', function(x) got = x end)")
