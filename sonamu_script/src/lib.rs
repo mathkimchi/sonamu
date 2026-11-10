@@ -333,6 +333,10 @@ fn new_lua() -> mlua::Result<Lua> {
     for name in ["open", "quit", "reload_settings"] {
         sonamu.set(name, tree_function(&lua, name)?)?;
     }
+    sonamu.set(
+        "definitions",
+        lua.create_function(|_, ()| Ok(definitions()))?,
+    )?;
     let help_function = lua.create_function(|_, ()| Ok(help()))?;
     sonamu.set("help", help_function.clone())?;
     globals.set("help", help_function)?;
@@ -447,11 +451,69 @@ sonamu.open(applet, {args}?)   like `sonamu-msg open`
 sonamu.reload_settings()
 sonamu.quit()
 sonamu.reset()                 a fresh Luau state
+sonamu.definitions(): string   luau-lsp definitions of all this, eg `sonamu-msg eval 'sonamu.definitions()'`
 Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) toggle_half() wrap_project()
       parent(): Node? children(): {Node} type(): string title(): string cast(type): Node?
       any other method is a command of its applet, eg hub:clear()
 Super+Esc: the buffer line (Esc leaves). There and in the hub: Tab completes, Up/Down recalls, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+C cancels.
 Super+? lists every keybind.";
+
+/// The `Node` methods' Luau types, as in `NODE_COMMANDS` (and `cast`)
+const NODE_METHODS: &str = "\
+    function close(self): ()
+    function focus(self): ()
+    function add_child(self, applet: string, args: {string}?): Node
+    function swap_sibling(self, offset: number): ()
+    function toggle_half(self): ()
+    function wrap_project(self): ()
+    function parent(self): Node?
+    function children(self): {Node}
+    function type(self): string
+    function title(self): string
+    function cast(self, applet_type: string): Node?
+";
+
+/// A luau-lsp definitions file: the globals, `Node`, and a class per applet type (from its declared commands)
+/// extending it, named after the type (eg `file_manager`)
+fn definitions() -> String {
+    let mut out = format!("declare class Node\n{NODE_METHODS}end\n");
+    for (applet_type, signatures) in command::all_signatures() {
+        let _ = writeln!(out, "\ndeclare class {applet_type} extends Node");
+        for signature in signatures {
+            let params = if signature.params.is_empty() {
+                String::new()
+            } else {
+                format!(", {}", signature.params)
+            };
+            let _ = writeln!(out, "    -- {}", signature.doc);
+            let _ = writeln!(
+                out,
+                "    function {}(self{params}): {}",
+                signature.name, signature.returns
+            );
+        }
+        out.push_str("end\n");
+    }
+    out.push_str(
+        "
+declare context: { focus: () -> Node, root: () -> Node }
+declare process: { spawn: (program: string, args: {string}?) -> () }
+declare clipboard: { copy: (text: string) -> boolean, paste: () -> string? }
+declare keymap: { set: (mods: {string}, key: string | number, fn: () -> ()) -> () }
+declare events: { on: (event: string, fn: (...any) -> ()) -> () }
+declare sonamu: {
+    open: (applet: string, args: {string}?) -> (),
+    quit: () -> (),
+    reload_settings: () -> (),
+    reset: () -> (),
+    help: () -> string,
+    definitions: () -> string,
+}
+declare function help(): string
+",
+    );
+    out
+}
 
 /// `HELP`, then each applet type's commands
 fn help() -> String {
@@ -851,5 +913,8 @@ mod tests {
         assert_eq!(complete_all("context.root():set"), ["set_title"]);
         let help = eval_all("sonamu.help()").1.unwrap();
         assert!(help[0].to_string().contains("set_title"));
+        let definitions = definitions();
+        assert!(definitions.contains("declare class Node"));
+        assert!(definitions.contains("function set_title(self, title: string): nil"));
     }
 }

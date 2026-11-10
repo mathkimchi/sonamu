@@ -70,6 +70,10 @@ Deviations from the decisions below:
   (app id, on `WlSurfaceRegistered`). These run as `Job::Call`: no one waits, `print`s and errors go to stderr.
   Example: `examples/config/init.luau` (all commented).
 
+- `sonamu.definitions()`: luau-lsp definitions (`declare class Node`, a class per declared applet type named like it,
+  extending `Node`; the globals), eg `sonamu-msg eval 'sonamu.definitions()' > sonamu.d.luau`. Not checked against
+  luau-lsp yet. `cast` still returns `Node`, so applet methods need an annotation (`local fm: file_manager = n :: any`).
+
 Not done: keybinds through `NodeCall`; signatures aren't checked against calls (`command()` is).
 
 ## Decisions
