@@ -159,6 +159,13 @@ Untested:
 - `sonamu.definitions()` not checked with luau-lsp.
 
 Gaps:
+- `Job::Call`s (`init.luau`, bindings, hooks) have no cancel flag: an infinite loop there hangs the script thread for
+  good (buffer line, hubs, socket, completion; `sonamu.reset()` queues behind it).
+- One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or
+  `process.output` delays the buffer line and Luau keybinds.
+- Errors and `print`s of `init.luau`, bindings and hooks only go to stderr (nothing in the UI).
+- Luau tables pass/return only their sequence part (`Value::List`); map keys are dropped silently.
+- Prompt: no type-ahead while running; no newline key (only pasted ones).
 - Signatures aren't checked against calls (each `command()` validates its own args).
 - Settings keybinds and `keymap.set` are matched before buffer mode, so an unmodified binding can't be typed there.
 - `hub:run_output` blocks the hub's thread (`process.output` doesn't).
