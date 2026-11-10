@@ -65,10 +65,11 @@ use smithay::{
         relative_pointer::RelativePointerManagerState,
         security_context::SecurityContext,
         selection::{
-            SelectionHandler,
+            SelectionHandler, SelectionTarget,
             data_device::{
                 DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler,
-                request_data_device_client_selection, set_data_device_focus,
+                current_data_device_selection_userdata, request_data_device_client_selection,
+                set_data_device_focus, set_data_device_selection,
             },
             ext_data_control,
             primary_selection::{
@@ -101,7 +102,7 @@ use sonamu_ui::{
     ui_event::{MouseEvent, MouseEventKind},
     winit_backend::drm::{REPEAT_DELAY, REPEAT_INTERVAL},
 };
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, os::fd::OwnedFd, sync::Arc, time::Duration};
 use wgpu::{TextureView, TextureViewDescriptor};
 
 #[derive(Debug, Default)]
@@ -281,14 +282,17 @@ impl SmithayState {
 
     /// Has the clipboard's owner write its text into a copy of `fd` (`sonamu_common::clipboard::paste`); without one,
     /// the reader sees nothing once `fd` is dropped
-    pub fn write_clipboard(&self, fd: &std::os::fd::OwnedFd) {
+    pub fn write_clipboard(&self, fd: &OwnedFd) {
+        // one a native applet copied (`set_clipboard`)
+        if let Some(text) =
+            current_data_device_selection_userdata(&self.seat).map(|text| Arc::clone(&text))
+            && let Ok(copy) = fd.try_clone()
+        {
+            write_text(copy, text);
+            return;
+        }
         // the first text type it offers; a failed request drops its fd, so each gets a copy
-        for mime_type in [
-            "text/plain;charset=utf-8",
-            "text/plain",
-            "UTF8_STRING",
-            "STRING",
-        ] {
+        for mime_type in TEXT_MIME_TYPES {
             let Ok(copy) = fd.try_clone() else {
                 return;
             };
@@ -297,6 +301,16 @@ impl SmithayState {
                 return;
             }
         }
+    }
+
+    /// Makes the runner the clipboard's owner, offering `text` (a native applet copied it)
+    pub fn set_clipboard(&self, text: String) {
+        set_data_device_selection(
+            &self.display_handle,
+            &self.seat,
+            TEXT_MIME_TYPES.map(ToString::to_string).to_vec(),
+            Arc::new(text),
+        );
     }
 
     pub fn flush_clients(&mut self) {
@@ -1892,7 +1906,35 @@ impl XdgShellHandler for AppletRunner {
 impl OutputHandler for AppletRunner {}
 
 impl SelectionHandler for AppletRunner {
-    type SelectionUserData = ();
+    /// The text a native applet copied (`SmithayState::set_clipboard`)
+    type SelectionUserData = Arc<String>;
+
+    fn send_selection(
+        &mut self,
+        _ty: SelectionTarget,
+        _mime_type: String,
+        fd: OwnedFd,
+        _seat: Seat<Self>,
+        text: &Arc<String>,
+    ) {
+        write_text(fd, Arc::clone(text));
+    }
+}
+
+/// Text mime types, preferred first
+const TEXT_MIME_TYPES: [&str; 4] = [
+    "text/plain;charset=utf-8",
+    "text/plain",
+    "UTF8_STRING",
+    "STRING",
+];
+
+/// On another thread: a reader that is slow (or never reads) can't block the loop
+fn write_text(fd: OwnedFd, text: Arc<String>) {
+    std::thread::spawn(move || {
+        use std::io::Write as _;
+        let _ = std::fs::File::from(fd).write_all(text.as_bytes());
+    });
 }
 
 impl DataDeviceHandler for AppletRunner {

@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 sonamu_command = { workspace = true }
+sonamu_common = { workspace = true }
 mlua = { version = "^0.12", features = ["luau", "vendored"] }
 
 [dev-dependencies]

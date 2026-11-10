@@ -205,6 +205,17 @@ fn new_lua() -> mlua::Result<Lua> {
     context.set("root", tree_function(&lua, "root")?)?;
     globals.set("context", context)?;
 
+    let clipboard = lua.create_table()?;
+    clipboard.set(
+        "copy",
+        lua.create_function(|_, text: String| Ok(sonamu_common::clipboard::copy(text)))?,
+    )?;
+    clipboard.set(
+        "paste",
+        lua.create_function(|_, ()| Ok(sonamu_common::clipboard::paste()))?,
+    )?;
+    globals.set("clipboard", clipboard)?;
+
     let process = lua.create_table()?;
     process.set("spawn", tree_function(&lua, "spawn")?)?;
     globals.set("process", process)?;
@@ -239,6 +250,8 @@ help() / sonamu.help()         this
 context.focus(): Node          the innermost focused node
 context.root(): Node           the root node
 process.spawn(program, {args}?)
+clipboard.copy(text)           Sonamu's clipboard, for wl clients too
+clipboard.paste(): string?
 sonamu.open(applet, {args}?)   like `sonamu-msg open`
 sonamu.reload_settings()
 sonamu.quit()

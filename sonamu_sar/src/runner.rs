@@ -2,6 +2,7 @@ use crate::{
     msg_socket::MsgSocket, pluck_place::PluckPlace, smithay::SmithayState, ui_handle::UIHandle,
 };
 use calloop::{EventLoop, LoopHandle, LoopSignal};
+use sonamu_common::clipboard::{self, Request};
 use sonamu_common::{
     msg,
     sap::{
@@ -160,17 +161,21 @@ impl AppletRunner {
         if let Some(msg_socket) = msg_socket {
             msg_socket.insert(&event_loop.handle());
         }
-        // native applets' paste (`sonamu_common::clipboard`)
+        // native applets' paste and copy (`sonamu_common::clipboard`)
         let (clipboard, clipboard_requests) = calloop::channel::channel();
         event_loop
             .handle()
-            .insert_source(clipboard_requests, |event, (), runner| {
-                if let calloop::channel::Event::Msg(fd) = event {
+            .insert_source(clipboard_requests, |event, (), runner| match event {
+                calloop::channel::Event::Msg(Request::Paste(fd)) => {
                     runner.smithay_state.write_clipboard(&fd);
                 }
+                calloop::channel::Event::Msg(Request::Copy(text)) => {
+                    runner.smithay_state.set_clipboard(text);
+                }
+                calloop::channel::Event::Closed => {}
             })
             .unwrap();
-        sonamu_common::clipboard::serve(clipboard);
+        clipboard::serve(clipboard);
 
         dbg!("Will run event loop");
 

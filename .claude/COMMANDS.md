@@ -114,7 +114,7 @@ Not done: keybinds through `NodeCall`; signatures aren't checked against calls (
   `swap_sibling(offset)`, `toggle_half()`, `wrap_project()`, `parent(): Node?`, `children(): {Node}`,
   `type(): string`, `title(): string`, `cast(T): T?`.
 - `context.focus(): Node` (innermost, across worlds), `context.root(): Node`.
-- `process.spawn(program, args?)`.
+- `process.spawn(program, args?)`; `clipboard.copy(text)`, `clipboard.paste(): string?`.
 - `sonamu.open(applet, args?)`, `sonamu.reload_settings()`, `sonamu.quit()`, `sonamu.help(): string`, `sonamu.reset()`.
 - `CommandHub`: `clear()`, `set_title(t)`, `run_output(program, args?): string`.
 - `file_manager`: `root(): string`, `selected(): string?`, `open(path)` (shows its document).
