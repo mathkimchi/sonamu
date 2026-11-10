@@ -1,5 +1,5 @@
 //! Sonamu's own clipboard (what wl clients inside it copied), for native applets: `paste`, and `copy`, which makes
-//! the runner the clipboard's owner.
+//! the runner the clipboard's owner. `paste_primary`/`copy_primary`: the same for the primary selection.
 //!
 //! Not `arboard`: that connects to the process's `WAYLAND_DISPLAY`, which is the host's when nested and missing on a TTY.
 
@@ -10,12 +10,19 @@ use std::{
     time::Duration,
 };
 
+/// The clipboard, or the primary selection (middle click)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Clipboard,
+    Primary,
+}
+
 /// To the runner
 pub enum Request {
-    /// Write the clipboard's text into it
-    Paste(OwnedFd),
-    /// Offer this text as the clipboard
-    Copy(String),
+    /// Write the target's text into it
+    Paste(OwnedFd, Target),
+    /// Offer this text as the target
+    Copy(String, Target),
 }
 
 static SERVICE: Mutex<Option<calloop::channel::Sender<Request>>> = Mutex::new(None);
@@ -30,21 +37,41 @@ pub fn serve(requests: calloop::channel::Sender<Request>) {
 
 /// Makes `text` the clipboard (for wl clients too); false without a runner
 pub fn copy(text: String) -> bool {
+    copy_to(text, Target::Clipboard)
+}
+
+/// Makes `text` the primary selection
+pub fn copy_primary(text: String) -> bool {
+    copy_to(text, Target::Primary)
+}
+
+fn copy_to(text: String, target: Target) -> bool {
     SERVICE
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()
-        .is_some_and(|service| service.send(Request::Copy(text)).is_ok())
+        .is_some_and(|service| service.send(Request::Copy(text, target)).is_ok())
 }
 
 /// The clipboard's text, if there is any (waits up to `TIMEOUT`)
 pub fn paste() -> Option<String> {
+    paste_from(Target::Clipboard)
+}
+
+/// The primary selection's text
+pub fn paste_primary() -> Option<String> {
+    paste_from(Target::Primary)
+}
+
+fn paste_from(target: Target) -> Option<String> {
     let service = SERVICE
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone()?;
     let (mut reader, writer) = std::io::pipe().ok()?;
-    service.send(Request::Paste(OwnedFd::from(writer))).ok()?;
+    service
+        .send(Request::Paste(OwnedFd::from(writer), target))
+        .ok()?;
     // on another thread, so an owner that never closes it can't hang the caller
     let (text, received) = mpsc::channel();
     std::thread::spawn(move || {
@@ -74,7 +101,7 @@ mod tests {
             event_loop
                 .handle()
                 .insert_source(received, |event, (), ()| {
-                    if let calloop::channel::Event::Msg(Request::Paste(fd)) = event {
+                    if let calloop::channel::Event::Msg(Request::Paste(fd, _)) = event {
                         let _ = std::fs::File::from(fd).write_all("hi\nthere".as_bytes());
                     }
                 })

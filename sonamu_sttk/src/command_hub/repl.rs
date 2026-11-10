@@ -95,7 +95,7 @@ impl Repl {
     }
 
     /// Edits the prompt, runs it (Enter), adds a newline (Shift+Enter), recalls (Up/Down), completes (Tab), pastes
-    /// (Ctrl+V), cancels (Ctrl+C). While running too (type-ahead: shown once it ends, Enter queues).
+    /// (Ctrl+V), copies the last output (Ctrl+Shift+C), cancels (Ctrl+C). While running too (type-ahead: shown once it ends, Enter queues).
     /// Returns whether it took the key.
     pub fn handle_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) -> bool {
         self.hint = None;
@@ -119,6 +119,7 @@ impl Repl {
             KeySymbol::Char('\t') if modifiers == KeyModifiers::NONE => self.start_completion(),
             KeySymbol::Char('v') if modifiers == KeyModifiers::CTRL => self.paste(),
             KeySymbol::Char('V') if modifiers == KeyModifiers::CTRL_SHIFT => self.paste(),
+            KeySymbol::Char('C') if modifiers == KeyModifiers::CTRL_SHIFT => self.copy_output(),
             _ if cancel => {
                 for eval in &self.evals {
                     eval.handle.cancel();
@@ -267,6 +268,18 @@ impl Repl {
             return;
         };
         self.insert(&text.trim_end_matches(['\n', '\r']).replace("\r\n", "\n"));
+    }
+
+    /// Copies the last entry's prints and result (like a terminal's Ctrl+Shift+C)
+    fn copy_output(&self) {
+        let Some(entry) = self.history.last() else {
+            return;
+        };
+        let result = match &entry.output {
+            Output::Text(text) | Output::Error(text) => text.as_str(),
+            Output::Running(_) => "",
+        };
+        sonamu_common::clipboard::copy(format!("{}{result}", entry.printed));
     }
 
     fn insert(&mut self, text: &str) {

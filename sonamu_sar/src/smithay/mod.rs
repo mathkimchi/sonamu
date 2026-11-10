@@ -73,7 +73,8 @@ use smithay::{
             },
             ext_data_control,
             primary_selection::{
-                PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
+                PrimarySelectionHandler, PrimarySelectionState, current_primary_selection_userdata,
+                request_primary_client_selection, set_primary_focus, set_primary_selection,
             },
             wlr_data_control,
         },
@@ -92,6 +93,7 @@ use smithay::{
         },
     },
 };
+use sonamu_common::clipboard::Target;
 use sonamu_common::sap::packets::{
     NewWlSurface, StandardEvent, WlSurfaceEvent, WlSurfaceId, WlSurfaceRequest,
 };
@@ -280,12 +282,19 @@ impl SmithayState {
         toplevel.send_configure();
     }
 
-    /// Has the clipboard's owner write its text into a copy of `fd` (`sonamu_common::clipboard::paste`); without one,
+    /// Has the target's owner write its text into a copy of `fd` (`sonamu_common::clipboard::paste`); without one,
     /// the reader sees nothing once `fd` is dropped
-    pub fn write_clipboard(&self, fd: &OwnedFd) {
+    pub fn write_clipboard(&self, fd: &OwnedFd, target: Target) {
         // one a native applet copied (`set_clipboard`)
-        if let Some(text) =
-            current_data_device_selection_userdata(&self.seat).map(|text| Arc::clone(&text))
+        let own = match target {
+            Target::Clipboard => {
+                current_data_device_selection_userdata(&self.seat).map(|text| Arc::clone(&text))
+            }
+            Target::Primary => {
+                current_primary_selection_userdata(&self.seat).map(|text| Arc::clone(&text))
+            }
+        };
+        if let Some(text) = own
             && let Ok(copy) = fd.try_clone()
         {
             write_text(copy, text);
@@ -296,21 +305,38 @@ impl SmithayState {
             let Ok(copy) = fd.try_clone() else {
                 return;
             };
-            if request_data_device_client_selection(&self.seat, mime_type.to_string(), copy).is_ok()
-            {
+            let requested = match target {
+                Target::Clipboard => {
+                    request_data_device_client_selection(&self.seat, mime_type.to_string(), copy)
+                        .is_ok()
+                }
+                Target::Primary => {
+                    request_primary_client_selection(&self.seat, mime_type.to_string(), copy)
+                        .is_ok()
+                }
+            };
+            if requested {
                 return;
             }
         }
     }
 
-    /// Makes the runner the clipboard's owner, offering `text` (a native applet copied it)
-    pub fn set_clipboard(&self, text: String) {
-        set_data_device_selection(
-            &self.display_handle,
-            &self.seat,
-            TEXT_MIME_TYPES.map(ToString::to_string).to_vec(),
-            Arc::new(text),
-        );
+    /// Makes the runner the target's owner, offering `text` (a native applet copied it)
+    pub fn set_clipboard(&self, text: String, target: Target) {
+        let mime_types = TEXT_MIME_TYPES.map(ToString::to_string).to_vec();
+        match target {
+            Target::Clipboard => {
+                set_data_device_selection(
+                    &self.display_handle,
+                    &self.seat,
+                    mime_types,
+                    Arc::new(text),
+                );
+            }
+            Target::Primary => {
+                set_primary_selection(&self.display_handle, &self.seat, mime_types, Arc::new(text));
+            }
+        }
     }
 
     pub fn flush_clients(&mut self) {

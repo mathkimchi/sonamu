@@ -442,16 +442,7 @@ fn new_lua() -> mlua::Result<Lua> {
     context.set("root", tree_function(&lua, "root")?)?;
     globals.set("context", context)?;
 
-    let clipboard = lua.create_table()?;
-    clipboard.set(
-        "copy",
-        lua.create_function(|_, text: String| Ok(sonamu_common::clipboard::copy(text)))?,
-    )?;
-    clipboard.set(
-        "paste",
-        lua.create_function(|_, ()| Ok(sonamu_common::clipboard::paste()))?,
-    )?;
-    globals.set("clipboard", clipboard)?;
+    add_clipboard(&lua, &globals)?;
 
     add_process(&lua, &globals)?;
 
@@ -500,6 +491,41 @@ fn new_lua() -> mlua::Result<Lua> {
     // builtins read-only; what evals define goes in a table of its own
     lua.sandbox(true)?;
     Ok(lua)
+}
+
+/// `clipboard.copy` and `clipboard.paste`
+fn add_clipboard(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
+    let clipboard = lua.create_table()?;
+    // `{primary = true}`: the primary selection
+    let primary = |options: Option<mlua::Table>| -> mlua::Result<bool> {
+        Ok(options
+            .map(|options| options.get::<Option<bool>>("primary"))
+            .transpose()?
+            .flatten()
+            .unwrap_or(false))
+    };
+    clipboard.set(
+        "copy",
+        lua.create_function(move |_, (text, options): (String, Option<mlua::Table>)| {
+            Ok(if primary(options)? {
+                sonamu_common::clipboard::copy_primary(text)
+            } else {
+                sonamu_common::clipboard::copy(text)
+            })
+        })?,
+    )?;
+    clipboard.set(
+        "paste",
+        lua.create_function(move |_, options: Option<mlua::Table>| {
+            Ok(if primary(options)? {
+                sonamu_common::clipboard::paste_primary()
+            } else {
+                sonamu_common::clipboard::paste()
+            })
+        })?,
+    )?;
+    globals.set("clipboard", clipboard)?;
+    Ok(())
 }
 
 /// `process.spawn` and `process.output`
@@ -670,8 +696,8 @@ events.on(event, fn)           `focus` (focus moved: the node), `open` (a new no
                                `window` (a wl window opened: its app id), `settings` (reloaded), `screens` (count)
 ~/.config/sonamu/init.luau     runs at start and on sonamu.reset(); `require('./name')` loads name.luau beside it
                                (own globals; it shares what it returns), from the buffer line too
-clipboard.copy(text)           Sonamu's clipboard, for wl clients too
-clipboard.paste(): string?
+clipboard.copy(text, {primary = true}?)   Sonamu's clipboard (or primary selection), for wl clients too
+clipboard.paste({primary = true}?): string?
 sonamu.open(applet, {args}?)   like `sonamu-msg open`
 sonamu.reload_settings()
 sonamu.quit()
@@ -684,7 +710,7 @@ Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) togg
       (also <type>.from_node(n), eg file_manager.from_node(n): typed in sonamu.definitions())
       spawn(program, {args}?) (in its tree's directory) quit()
       any other method is a command of its applet, eg hub:clear()
-Super+Esc: the buffer line (Esc leaves). There and in the hub: Tab completes, Up/Down recalls, Shift+Enter adds a line, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+C cancels.
+Super+Esc: the buffer line (Esc leaves). There and in the hub: Tab completes, Up/Down recalls, Shift+Enter adds a line, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+Shift+C copies the last output, Ctrl+C cancels.
 Super+? lists every keybind.";
 
 /// The `Node` methods' Luau types, as in `NODE_COMMANDS` (and `cast`)
@@ -738,7 +764,10 @@ declare process: {
     output: ((program: string, args: {string}?, dir: string?) -> string)
         & ((program: string, args: {string}?, dir: string?, fn: (string?, string?) -> ()) -> ()),
 }
-declare clipboard: { copy: (text: string) -> boolean, paste: () -> string? }
+declare clipboard: {
+    copy: (text: string, options: { primary: boolean? }?) -> boolean,
+    paste: (options: { primary: boolean? }?) -> string?,
+}
 declare keymap: {
     set: (mods: {string}, key: string | number, fn: () -> (), options: { type: string? }?) -> (),
     unset: (mods: {string}, key: string | number, options: { type: string? }?) -> boolean,

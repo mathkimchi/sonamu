@@ -24,6 +24,7 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
   signatures. To know the node, completion runs read-only getters only: `context.focus()`, `context.root()`,
   `:parent()`, `:inner()` (deviation: Q22 said no calls); `:add_child()` gives a node of unknown type (`Node` methods only).
 - Paste: Ctrl+V / Ctrl+Shift+V (`sonamu_common::clipboard::paste`) inserts at the cursor; newlines kept (shown `↵`).
+  Ctrl+Shift+C copies the last entry's prints and result.
 
 - Buffer line (root, `RootNodeApplet::{buffer_mode, repl}`): Super+Esc toggles buffer mode (like vim's normal
   mode); `sonamu_common::BUFFER_MODE` makes `is_keybind` send every key to the root then, and the runner
@@ -164,7 +165,7 @@ Deviations from the decisions below:
   project's tree; `command::INNER_ROOT`, nil for other applets; `children()` stay outer).
 - `context.focus(): Node` (innermost, across worlds), `context.root(): Node`.
 - `process.spawn(program, args?)`, `process.output(program, args?, dir?): string` (or with `fn(out, err)` last: doesn't wait, like nvim's `vim.system`;
-  the program runs on its own thread, then `Call::Callback` queues `fn`; not cancellable); `clipboard.copy(text)`, `clipboard.paste(): string?`.
+  the program runs on its own thread, then `Call::Callback` queues `fn`; not cancellable); `clipboard.copy(text, {primary}?)`, `clipboard.paste({primary}?): string?`.
 - `sonamu.open(applet, args?)`, `sonamu.reload_settings()`, `sonamu.quit()`, `sonamu.help(): string`, `sonamu.reset()`.
 - `CommandHub`: `clear()`, `set_title(t)`, `open(applet, args?)`.
 - `file_manager`: `root(): string`, `selected(): string?`, `open(path)` (shows its document).
@@ -193,7 +194,7 @@ Untested:
 Gaps:
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
-- Clipboard: applets can't copy from their own UI (only Luau's `clipboard.copy`); no primary selection.
+- Clipboard: the code editor can't copy (it has no selection yet).
 - No effect levels / permissions on commands (`process.spawn`/`output` run anything), needed before agents.
 - `docs/usage.md` doesn't mention Super+Esc or the buffer line (docs aren't edited from here).
 

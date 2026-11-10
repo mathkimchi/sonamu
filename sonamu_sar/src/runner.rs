@@ -166,11 +166,11 @@ impl AppletRunner {
         event_loop
             .handle()
             .insert_source(clipboard_requests, |event, (), runner| match event {
-                calloop::channel::Event::Msg(Request::Paste(fd)) => {
-                    runner.smithay_state.write_clipboard(&fd);
+                calloop::channel::Event::Msg(Request::Paste(fd, target)) => {
+                    runner.smithay_state.write_clipboard(&fd, target);
                 }
-                calloop::channel::Event::Msg(Request::Copy(text)) => {
-                    runner.smithay_state.set_clipboard(text);
+                calloop::channel::Event::Msg(Request::Copy(text, target)) => {
+                    runner.smithay_state.set_clipboard(text, target);
                 }
                 calloop::channel::Event::Closed => {}
             })
