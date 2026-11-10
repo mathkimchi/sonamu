@@ -19,8 +19,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
 
 ## Gaps (see COMMANDS.md To do for the full list)
 
-- Signatures unchecked: parse `Signature::params` (`name: type`, `T?`, `{T}`) once and check arity/types in
-  `sonamu_script::call` before sending; errors name the param.
 - Tables: `from_lua` drops map keys. Add `Value::Map(BTreeMap<String, Value>)` (serde untagged works), convert both
   ways, `Display` as `{k = v}`.
 - `cast`/typed handles: `cast` could return a userdata carrying the type tag so `definitions()` types line up;

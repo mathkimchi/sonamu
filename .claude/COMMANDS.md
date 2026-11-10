@@ -53,7 +53,10 @@ while true do end                           -- Ctrl+C cancels
 Deviations from the decisions below:
 - Calls block the script thread instead of `mlua` async (same effect: worlds never wait on it).
 - Type tag: derived when asked (`NodeTree::applet_type`: wl surface, else saved/hibernated spawner name, else
-  `container`/`applet`), not stored.
+  `container`/`applet`), not stored (decided: it changes asynchronously, eg placeholders, hibernation, a publish).
+- Signatures are checked in the node's world (`command::check` in `NodeHolder::handle_node_call`, before forwarding;
+  arity and `string`/`number`/`boolean`/`{T}`/`T?`, other types just non-nil; undeclared commands pass, eg
+  `INNER_FOCUS`), not in the script before sending.
 - `cast` takes the type name (`n:cast("file_manager")`), returns the same `Node`; no per-type handles.
 - No `split` (splits no longer exist). `parent()` of a project's inner root is the project node's parent (the two
   are one row): mains get `StandardEvent::NodeUid` (`NodeTree::register` and wherever a main is replaced; kept in
@@ -174,11 +177,9 @@ Gaps:
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
 - Luau tables pass/return only their sequence part (`Value::List`); map keys are dropped silently.
 - Prompt: no type-ahead while running; no newline key (only pasted ones).
-- Signatures aren't checked against calls (each `command()` validates its own args).
 - `hub:run_output` blocks the hub's thread (`process.output` doesn't).
 - `cast` returns the same `Node`: no per-type handles, no `file_manager.from_node`.
 - A node in JSON (socket) is its bare uid, not `{"type", "node"}`.
-- Type tag derived on demand (`NodeTree::applet_type`), not stored at creation.
 - A project node's `children()` are its outer children; no `Node` method reaches its inner tree (eg `n:inner()`).
 - Buffer line: active screen only; output ≤ `BUFFER_OUTPUT_ROWS`, no scroll; shown only in buffer mode; history
   separate from each hub's.

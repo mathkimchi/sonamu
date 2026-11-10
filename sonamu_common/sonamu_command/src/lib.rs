@@ -60,6 +60,20 @@ impl fmt::Display for Value {
     }
 }
 
+impl Value {
+    /// Its Luau type's name, for errors
+    pub const fn type_name(&self) -> &'static str {
+        match self {
+            Self::Nil => "nil",
+            Self::Bool(_) => "boolean",
+            Self::Number(_) => "number",
+            Self::String(_) => "string",
+            Self::List(_) => "table",
+            Self::Node(_) => "Node",
+        }
+    }
+}
+
 pub type CommandResult = Result<Value, String>;
 
 /// A command for a node (`uid`), or for the world itself (`None`)
@@ -302,4 +316,105 @@ pub fn all_signatures() -> BTreeMap<String, Vec<Signature>> {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone()
+}
+
+/// Checks `args` against `applet_type`'s declared `name` command (arity, and the Luau types `string`, `number`,
+/// `boolean`, `{T}`, `T?`; others, eg `Node` or `any`, take anything but nil). Undeclared commands pass.
+pub fn check(applet_type: &str, name: &str, args: &[Value]) -> Result<(), String> {
+    let Some(signature) = signatures(applet_type)
+        .into_iter()
+        .find(|signature| signature.name == name)
+    else {
+        return Ok(());
+    };
+    let params: Vec<(&str, &str)> = signature
+        .params
+        .split(", ")
+        .filter(|param| !param.is_empty())
+        .map(|param| param.split_once(": ").unwrap_or((param, "any")))
+        .collect();
+    if args.len() > params.len() {
+        return Err(format!(
+            "`{name}({})` takes {} arguments, not {}",
+            signature.params,
+            params.len(),
+            args.len()
+        ));
+    }
+    for (index, (param, ty)) in params.iter().enumerate() {
+        let arg = args.get(index).unwrap_or(&Value::Nil);
+        if !matches_type(arg, ty) {
+            return Err(format!(
+                "`{name}`'s `{param}` must be a {ty} (got {})",
+                arg.type_name()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether `value` is of the Luau type `ty` (see `check`)
+fn matches_type(value: &Value, ty: &str) -> bool {
+    if let Some(inner) = ty.strip_suffix('?') {
+        return *value == Value::Nil || matches_type(value, inner);
+    }
+    if let Some(element) = ty.strip_prefix('{').and_then(|ty| ty.strip_suffix('}')) {
+        return match value {
+            Value::List(values) => values.iter().all(|value| matches_type(value, element)),
+            _ => false,
+        };
+    }
+    match ty {
+        "string" => matches!(value, Value::String(_)),
+        "number" => matches!(value, Value::Number(_)),
+        "boolean" => matches!(value, Value::Bool(_)),
+        "nil" => *value == Value::Nil,
+        "any" => true,
+        _ => *value != Value::Nil,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checks_declared_signatures() {
+        declare(
+            "check_test",
+            &[Signature {
+                name: "open",
+                params: "path: string, args: {string}?",
+                returns: "nil",
+                doc: "",
+            }],
+        );
+        let path = Value::String("/tmp".to_string());
+        assert_eq!(
+            check("check_test", "open", std::slice::from_ref(&path)),
+            Ok(())
+        );
+        assert_eq!(
+            check(
+                "check_test",
+                "open",
+                &[path.clone(), Value::List(vec![path.clone()])]
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            check("check_test", "open", &[]),
+            Err("`open`'s `path` must be a string (got nil)".to_string())
+        );
+        assert!(
+            check(
+                "check_test",
+                "open",
+                &[path.clone(), Value::List(vec![Value::Nil])]
+            )
+            .is_err()
+        );
+        assert!(check("check_test", "open", &[path.clone(), Value::Nil, path]).is_err());
+        assert_eq!(check("check_test", "undeclared", &[Value::Nil]), Ok(()));
+    }
 }

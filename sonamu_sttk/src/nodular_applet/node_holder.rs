@@ -447,6 +447,10 @@ impl NodeHolder {
             Some(Ok((value, request))) => (Ok(value), request),
             Some(Err(err)) => (Err(err), None),
             None => {
+                if let Err(err) = command::check(&self.tree.applet_type(id), &name, &args) {
+                    let _ = reply.send(Err(err));
+                    return None;
+                }
                 let event = StandardEvent::Command { name, args, reply };
                 if let Err(StandardEvent::Command { reply, .. }) =
                     self.tree.try_send_event(id, event)
