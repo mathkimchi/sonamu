@@ -17,6 +17,19 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
 - Hub: Luau only, one eval at a time (like a shell: no prompt, keys ignored but Ctrl+C/PageUp/PageDown, until it ends), `print`s then results (strings unquoted), Ctrl+C cancels; commands `clear`, `set_title`, `open` (replace the hub, as
   before; `"wl", {argv}` too), `run_output` (old `$`).
 
+Try in a hub:
+
+```lua
+sonamu.help()
+context.focus():title()                     -- "Command Hub": in the hub, focus is the hub
+for _, n in context.root():children() do print(n:type(), n:title()) end
+context.focus():parent():add_child("file_manager", {"/tmp"})
+context.focus():set_title("Lua hub")        -- applet command, via __index
+context.focus():run_output("ls", {"-a"})
+x = 5                                       -- then `x * 2` gives 10
+while true do end                           -- Ctrl+C cancels
+```
+
 Deviations from the decisions below:
 - Calls block the script thread instead of `mlua` async (same effect: worlds never wait on it).
 - Type tag: derived when asked (`NodeTree::applet_type`: wl surface, else saved/hibernated spawner name, else
@@ -74,7 +87,7 @@ Not done: keybinds through `NodeCall`, Tab completion (removed with the old verb
 
 ## v0 API
 
-- `Node`: `close()`, `focus()`, `add_child(applet, args?): Node`, `split("horizontal" | "vertical")`,
+- `Node`: `close()`, `focus()`, `add_child(applet, args?): Node`,
   `swap_sibling(offset)`, `toggle_half()`, `wrap_project()`, `parent(): Node?`, `children(): {Node}`,
   `type(): string`, `title(): string`, `cast(T): T?`.
 - `context.focus(): Node` (innermost, across worlds), `context.root(): Node`.
