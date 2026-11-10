@@ -153,6 +153,8 @@ Deviations from the decisions below:
 
 ## To do
 
+What to fix first and how: `.claude/COMMANDS_HANDOFF.md`.
+
 Untested:
 - Nothing here was tried in a running compositor (no headless sway on the dev machine): buffer line, palette
   colors, clipboard copy/paste with real clients, keybinds as commands, `parent()` across projects, `init.luau`.
