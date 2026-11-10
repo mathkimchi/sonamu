@@ -1095,6 +1095,8 @@ impl StandardApplet for ProjectApplet {
                     Value::Bool(tree.is_inner(id)),
                 ]))
             }
+            // for `n:inner()`
+            command::INNER_ROOT => Ok(Value::Node(self.holder.tree.uid(self.holder.tree.root()))),
             _ => Err(command::unknown(name)),
         }
     }

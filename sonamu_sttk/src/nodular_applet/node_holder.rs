@@ -455,7 +455,7 @@ impl NodeHolder {
                 if let Err(StandardEvent::Command { reply, .. }) =
                     self.tree.try_send_event(id, event)
                 {
-                    let _ = reply.send(Err("the node has no applet".to_string()));
+                    let _ = reply.send(Err(command::NO_APPLET.to_string()));
                 }
                 return None;
             }

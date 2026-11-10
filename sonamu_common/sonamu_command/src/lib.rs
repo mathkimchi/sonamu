@@ -210,6 +210,20 @@ pub fn focus(cancelled: &dyn Fn() -> bool) -> CommandResult {
 /// Applet command answered by applets holding a world (eg projects): `{node, inside}` like the root's `focus`
 pub const INNER_FOCUS: &str = "__inner_focus";
 
+/// Applet command answered by applets holding a world (eg projects): their inner root
+pub const INNER_ROOT: &str = "__inner_root";
+
+/// The root of the world inside the node's applet (eg a project's), or nil if it has none
+pub fn inner(uid: NodeUid, cancelled: &dyn Fn() -> bool) -> CommandResult {
+    match call(Some(uid), INNER_ROOT, Vec::new(), cancelled) {
+        Err(err) if err == unknown(INNER_ROOT) || err == NO_APPLET => Ok(Value::Nil),
+        result => result,
+    }
+}
+
+/// The error for a command to a node without an applet
+pub const NO_APPLET: &str = "the node has no applet";
+
 /// A command an applet doesn't have
 pub fn unknown(name: &str) -> String {
     format!("no command `{name}`")

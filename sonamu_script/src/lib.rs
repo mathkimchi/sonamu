@@ -580,6 +580,7 @@ sonamu.messages(): string      prints and errors of init.luau, bindings and hook
 sonamu.definitions(): string   luau-lsp definitions of all this, eg `sonamu-msg eval 'sonamu.definitions()'`
 Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) toggle_half() wrap_project()
       parent(): Node? children(): {Node} type(): string title(): string cast(type): Node?
+      inner(): Node? (the root of a project's own tree)
       (also <type>.from_node(n), eg file_manager.from_node(n): typed in sonamu.definitions())
       spawn(program, {args}?) (in its tree's directory) quit()
       any other method is a command of its applet, eg hub:clear()
@@ -599,6 +600,7 @@ const NODE_METHODS: &str = "\
     function type(self): string
     function title(self): string
     function cast(self, applet_type: string): Node?  -- typed: <applet_type>.from_node(n)
+    function inner(self): Node?
     function spawn(self, program: string, args: {string}?): ()
     function quit(self): ()
 ";
@@ -751,6 +753,12 @@ impl UserData for Node {
         methods.add_method("cast", |lua, node, applet_type: String| {
             cast(lua, *node, &applet_type)
         });
+        methods.add_method("inner", |lua, node, ()| {
+            to_lua(
+                lua,
+                command::inner(node.0, &cancelled).map_err(mlua::Error::runtime)?,
+            )
+        });
         // any other method is its applet's command
         methods.add_meta_method(MetaMethod::Index, |lua, _, name: String| {
             lua.create_function(
@@ -799,7 +807,7 @@ fn add_type_tables(lua: &Lua) -> mlua::Result<()> {
 /// Read-only functions completion may run to know what they give (eg `context.focus():`)
 const READ_ONLY_CALLS: [&str; 2] = ["focus", "root"];
 
-/// What a chain ends in. Only `READ_ONLY_CALLS` and `parent` are run; `add_child` is known to give a `Node`.
+/// What a chain ends in. Only `READ_ONLY_CALLS`, `parent` and `inner` are run; `add_child` is known to give a `Node`.
 enum Resolved {
     Value(LuaValue),
     /// Of no known type
@@ -875,6 +883,12 @@ fn resolve(lua: &Lua, chain: &str) -> Option<Resolved> {
             {
                 Resolved::Value(to_lua(lua, node_call(&node, name)?).ok()?)
             }
+            (Some(Resolved::Value(LuaValue::UserData(node))), Some(':'), true)
+                if node.is::<Node>() && name == "inner" =>
+            {
+                let uid = node.borrow::<Node>().ok()?.0;
+                Resolved::Value(to_lua(lua, command::inner(uid, &cancelled).ok()?).ok()?)
+            }
             (Some(_), Some(':'), true) if name == "add_child" => Resolved::Node,
             _ => return None,
         });
@@ -895,7 +909,7 @@ fn node_call(node: &mlua::AnyUserData, name: &str) -> Option<Value> {
 fn node_methods() -> Vec<String> {
     NODE_COMMANDS
         .iter()
-        .chain(&["cast"])
+        .chain(&["cast", "inner"])
         .map(ToString::to_string)
         .collect()
 }

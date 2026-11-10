@@ -19,8 +19,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
 
 ## Gaps (see COMMANDS.md To do for the full list)
 
-- Project contents: add a node command `inner(): Node?` answered by applets holding a world (like `INNER_FOCUS`,
-  returning their inner root's uid); `children()` of a project node could then stay outer.
 - `hub:run_output`: reimplement on `process.output` semantics (worker thread + reply later). `StandardApplet::command`
   is sync, so either add `Answer::Later`-style replies for commands or drop `run_output` for `process.output`.
 - Buffer line: scrolling its output (PageUp/Down in buffer mode), drawing on every screen, sharing history with hubs

@@ -22,7 +22,7 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
 - Tab: `sonamu_script::complete` (a job on the script thread, answered through the waker, dropped if the prompt
   changed): globals (incl. builtins), table fields after `.`, after `:` on a node its `Node` methods + its type's
   signatures. To know the node, completion runs read-only getters only: `context.focus()`, `context.root()`,
-  `:parent()` (deviation: Q22 said no calls); `:add_child()` gives a node of unknown type (`Node` methods only).
+  `:parent()`, `:inner()` (deviation: Q22 said no calls); `:add_child()` gives a node of unknown type (`Node` methods only).
 - Paste: Ctrl+V / Ctrl+Shift+V (`sonamu_common::clipboard::paste`) inserts at the cursor; newlines kept (shown `↵`).
 
 - Buffer line (root, `RootNodeApplet::{buffer_mode, repl}`): Super+Esc toggles buffer mode (like vim's normal
@@ -146,7 +146,8 @@ Deviations from the decisions below:
 
 - `Node`: `close()`, `focus()`, `add_child(applet, args?): Node`,
   `swap_sibling(offset)`, `toggle_half()`, `wrap_project()`, `parent(): Node?`, `children(): {Node}`,
-  `type(): string`, `title(): string`, `cast(T): T?`.
+  `type(): string`, `title(): string`, `cast(T): T?`, `inner(): Node?` (the root of the world in its applet: a
+  project's tree; `command::INNER_ROOT`, nil for other applets; `children()` stay outer).
 - `context.focus(): Node` (innermost, across worlds), `context.root(): Node`.
 - `process.spawn(program, args?)`, `process.output(program, args?, dir?): string` (or with `fn(out, err)` last: doesn't wait, like nvim's `vim.system`;
   the program runs on its own thread, then `Call::Callback` queues `fn`; not cancellable); `clipboard.copy(text)`, `clipboard.paste(): string?`.
@@ -180,7 +181,6 @@ Gaps:
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
 - Prompt: no type-ahead while running; no newline key (only pasted ones).
 - `hub:run_output` blocks the hub's thread (`process.output` doesn't).
-- A project node's `children()` are its outer children; no `Node` method reaches its inner tree (eg `n:inner()`).
 - Buffer line: active screen only; output ≤ `BUFFER_OUTPUT_ROWS`, no scroll; shown only in buffer mode; history
   separate from each hub's.
 - Events: only `focus` (no args) and `window` (app id); none for close, open, settings, screens; not over the socket.
