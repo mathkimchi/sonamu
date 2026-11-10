@@ -3,7 +3,7 @@
 Emacs-like model: every action is a named command; keybinds, the hub, the socket and (later) agents all call the same ones.
 Embedded language: Luau via `mlua`. Other languages: over the socket.
 
-## Status (milestones 1, 3 and most of 4 done)
+## Status (milestones 1–5 done; see To do)
 
 - `sonamu_common/sonamu_command` (re-exported as `sonamu_common::command`): `NodeUid`, `Value`, `NodeCall`, registry,
   `call` (blocks, polls `cancelled` every 50 ms), `focus` (descends through `INNER_FOCUS`), arg helpers.
@@ -84,8 +84,6 @@ Deviations from the decisions below:
   selected node, `is_keybind`) still gives the request. So Super+W on an applet now asks it (`close_requested`) first.
   `spawn`/`quit` are node commands too (`n:spawn` runs in its tree's directory).
 
-Not done: signatures aren't checked against calls (`command()` is).
-
 ## Decisions
 
 - Language: Luau (`mlua`, vendored, `async`, `send`), sandbox mode (read-only builtins, no `io`/`os.execute`).
@@ -144,7 +142,7 @@ Not done: signatures aren't checked against calls (`command()` is).
 - `wl_surface` (declared by the root, no spawner): `app_id(): string?`, `pid(): number?`.
 - Not exposed: `Unwrap`, `Replace`, `StartWl`, `AddWlSurface` (sessions/plucking internals).
 
-## Milestones
+## Milestones (all done)
 
 1. Identity: `NodeUid`, registry, type tag; worlds keep it updated.
 2. Commands without Lua: `Value`, `NodeCall`, `NodeHolder` handler, applet `command()` + events; keybinds issue calls.
@@ -153,13 +151,32 @@ Not done: signatures aren't checked against calls (`command()` is).
 4. Hub on Luau: input, `CommandHub` methods, output, completion.
 5. Socket: `Message::Eval`, `sonamu-msg eval`, JSON output.
 
-## Later
+## To do
 
-- User-rebindable keymaps (layered along the focus path; VS Code-style `when` conditions).
-- Hooks/events (over the socket too).
-- Script files, each with its own environment, sharing through `require` (Roblox model).
-- Generated Luau definitions file → optional static typing, editor completion.
-- Hub sugar: `context.focus` as a property narrowed by its live type; a "previous focus" (in the hub, focus is the
-  hub itself).
+Untested:
+- Nothing here was tried in a running compositor (no headless sway on the dev machine): buffer line, palette
+  colors, clipboard copy/paste with real clients, keybinds as commands, `parent()` across projects, `init.luau`.
+- `sonamu.definitions()` not checked with luau-lsp.
+
+Gaps:
+- Signatures aren't checked against calls (each `command()` validates its own args).
+- Settings keybinds and `keymap.set` are matched before buffer mode, so an unmodified binding can't be typed there.
+- `hub:run_output` blocks the hub's thread (`process.output` doesn't).
+- `cast` returns the same `Node`: no per-type handles, no `file_manager.from_node`.
+- A node in JSON (socket) is its bare uid, not `{"type", "node"}`.
+- Type tag derived on demand (`NodeTree::applet_type`), not stored at creation.
+- A project node's `children()` are its outer children; no `Node` method reaches its inner tree (eg `n:inner()`).
+- Buffer line: active screen only; output ≤ `BUFFER_OUTPUT_ROWS`, no scroll; shown only in buffer mode; history
+  separate from each hub's.
+- Events: only `focus` (no args) and `window` (app id); none for close, open, settings, screens; not over the socket.
+- `keymap`: no unset; global only (no layering along the focus path, no `when` conditions).
+- `init.luau` shares the one environment (no per-script environments, no `require`).
+- Clipboard: applets can't copy from their own UI (only Luau's `clipboard.copy`); no primary selection.
+- No effect levels / permissions on commands (`process.spawn`/`output` run anything), needed before agents.
+- `docs/usage.md` doesn't mention Super+Esc or the buffer line (docs aren't edited from here).
+
+Later:
 - MCP bridge (tool schemas from the signatures), socket client libraries (Python, Go).
+- Hub sugar: `context.focus` as a property narrowed by its live type (less needed: the buffer line sees the real
+  focus).
 - Indirect views (one applet in two nodes), node properties, subtree-scoped settings.
