@@ -192,17 +192,20 @@ Deviations from the decisions below:
 
 ## To do
 
-What to fix first and how: `.claude/COMMANDS_HANDOFF.md`.
 
 Untested:
-- Nothing here was tried in a running compositor (no headless sway on the dev machine): buffer line, palette
-  colors, clipboard copy/paste with real clients, keybinds as commands, `parent()` across projects, `init.luau`.
+- Tried live (headless sway, 2026-11-10, over `sonamu-msg`): `init.luau`, `focus(node)` events, node JSON, effect
+  limits, signature errors, `from_node`, `inner()`, `subscribe`, tables. Not yet (injected keys didn't arrive): the
+  buffer line UI and echo area, palette colors, keybinds as commands, `keymap.set` keys, clipboard with real
+  clients, `parent()` across projects.
 - `sonamu.definitions()` not checked with luau-lsp.
 
 Gaps:
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
-- Clipboard: the code editor can't copy (it has no selection yet).
+- Clipboard: the code editor can't copy (it has no selection yet; add a copy key once it has one).
+- `n:type()` right after `add_child` is `applet`: the derived type waits for the applet's first treeview publish
+  (`saved`); `cast`/`from_node`/typed bindings miss it until then.
 - `docs/usage.md` doesn't mention Super+Esc or the buffer line (docs aren't edited from here).
 
 Later:

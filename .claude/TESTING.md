@@ -29,3 +29,6 @@ Found while debugging #60; nothing here is in the repo's code.
 - Focus moves without input (#145): a temporary env-gated hook in `RootNodeApplet::remember_focus` (runs each loop)
   calling `self.traverse(Traversal::Select / Enter)` every 2 s and `eprintln!`ing `get_focus_path()` checked 4 finger
   round trips through nested projects. Start focus deep via the session's `focus` (`[{"Inner":1},{"Child":0}]`).
+- 2026-11-10: in a fresh headless sway, `wtype` Escape never reached Sonamu (plain or with Super) and `6` was dropped
+  from typed text, while letters did arrive; drive Luau features over `sonamu-msg eval` instead (`SONAMU_SOCKET` is
+  `$XDG_RUNTIME_DIR/sonamu-<its wl socket>.sock`; stale ones from old runs stay in the dir).
