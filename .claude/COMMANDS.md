@@ -15,7 +15,7 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
 - `sonamu_script`: script thread, sandboxed Luau, `print`, return values (`return <code>` tried first, like a REPL),
   `Node` userdata (node commands, `cast`, `__index` → applet command, `==`, `tostring`), cancel via interrupt.
 - Hub: Luau only, one eval at a time (like a shell: no prompt, keys ignored but Ctrl+C/PageUp/PageDown, until it ends), `print`s then results (strings unquoted), Ctrl+C cancels; commands `clear`, `set_title`, `open` (replace the hub, as
-  before; `"wl", {argv}` too), `run_output` (old `$`).
+  before; `"wl", {argv}` too). `run_output` (old `$`) dropped for `process.output`.
 - Signatures: `AppletSpawnerTrait::commands` (`&'static [command::Signature]`: name, params, returns, doc), declared
   into `command::declare` when spawners register (`RootNodeApplet::new`, `register_applet_spawner`); clashes with
   `command::NODE_COMMANDS` dropped with a warning. Hub: `COMMANDS`. `sonamu.help()` (also global `help()`; a bare `help` in the hub runs it) lists them per type, and the hub keys.
@@ -45,7 +45,7 @@ context.focus():title()                     -- in a hub, focus is the hub; in th
 for _, n in context.root():children() do print(n:type(), n:title()) end
 context.focus():parent():add_child("file_manager", {"/tmp"})
 context.focus():set_title("Lua hub")        -- in a hub: applet command, via __index
-context.focus():run_output("ls", {"-a"})    -- in a hub
+process.output("ls", {"-a"})
 x = 5                                       -- then `x * 2` gives 10
 while true do end                           -- Ctrl+C cancels
 ```
@@ -64,7 +64,6 @@ Deviations from the decisions below:
   are one row): mains get `StandardEvent::NodeUid` (`NodeTree::register` and wherever a main is replaced; kept in
   `AppletContext::uid`), and `ProjectApplet::handle_node_call` asks its own node's world from a thread. The root
   tree's root has no parent (nil).
-- `hub:run_output` blocks the hub's thread while the program runs; `process.output` (script thread, Ctrl+C kills it) doesn't.
 
 - Socket: `Message::Eval(code)`; the runner answers from a thread (`msg_socket::answer_eval`) with JSON lines
   (`msg::EvalReply`: `print`, then `done` `Ok(values)`/`Err`), plus empty keepalive lines every 100 ms, which fail once
@@ -137,7 +136,7 @@ Deviations from the decisions below:
   - Output: `print` as it comes, then return values formatted Lua-style (nothing for nil), errors in red.
   - Tab completion against the live environment: globals, fields of field chains (no calls), methods of a chain's
     actual handle type; after a call, the declared return type.
-  - Old verbs: `add_child` → `n:add_child`, `run` → `process.spawn`, `$` → `hub:run_output`,
+  - Old verbs: `add_child` → `n:add_child`, `run` → `process.spawn`, `$` → `process.output` (`hub:run_output` was dropped),
     `project` → `n:wrap_project()`, `help` → `sonamu.help()`; `test`, `addition` dropped.
 - Socket: `Message::Eval(String)` with a reply (the socket is one-way today); `sonamu-msg eval '<code>'`:
   `print` to stderr, result as JSON on stdout, error → exit 1. `open` unchanged.
@@ -152,7 +151,7 @@ Deviations from the decisions below:
 - `process.spawn(program, args?)`, `process.output(program, args?, dir?): string` (or with `fn(out, err)` last: doesn't wait, like nvim's `vim.system`;
   the program runs on its own thread, then `Call::Callback` queues `fn`; not cancellable); `clipboard.copy(text)`, `clipboard.paste(): string?`.
 - `sonamu.open(applet, args?)`, `sonamu.reload_settings()`, `sonamu.quit()`, `sonamu.help(): string`, `sonamu.reset()`.
-- `CommandHub`: `clear()`, `set_title(t)`, `run_output(program, args?): string`.
+- `CommandHub`: `clear()`, `set_title(t)`, `open(applet, args?)`.
 - `file_manager`: `root(): string`, `selected(): string?`, `open(path)` (shows its document).
 - `code_editor`: `path(): string`, `text(): string`, `save()`.
 - `wl_surface` (declared by the root, no spawner): `app_id(): string?`, `pid(): number?`.
@@ -180,7 +179,6 @@ Gaps:
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
 - Prompt: no type-ahead while running; no newline key (only pasted ones).
-- `hub:run_output` blocks the hub's thread (`process.output` doesn't).
 - Buffer line: active screen only; output ≤ `BUFFER_OUTPUT_ROWS`, no scroll; shown only in buffer mode; history
   separate from each hub's.
 - Events: only `focus` (no args) and `window` (app id); none for close, open, settings, screens; not over the socket.

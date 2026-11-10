@@ -9,7 +9,7 @@ use crate::{
     },
     standard_keybinds::handle_standard_keybinds,
 };
-use repl::{Output, Repl};
+use repl::Repl;
 use sonamu_common::{
     command::{self, CommandResult, Signature, Value},
     sap::{packets::StandardEvent, session::SavedWl},
@@ -24,7 +24,7 @@ use sonamu_ui::{
 use std::{path::PathBuf, sync::Arc};
 
 /// What `command` takes
-const COMMANDS: [Signature; 4] = [
+const COMMANDS: [Signature; 3] = [
     Signature {
         name: "clear",
         params: "",
@@ -42,12 +42,6 @@ const COMMANDS: [Signature; 4] = [
         params: "applet: string, args: {string}?",
         returns: "nil",
         doc: "replace this hub with an applet (`\"wl\", {argv}`: a program's window)",
-    },
-    Signature {
-        name: "run_output",
-        params: "program: string, args: {string}?",
-        returns: "string",
-        doc: "run a program and wait for its output",
     },
 ];
 
@@ -78,7 +72,7 @@ pub struct CommandHubApplet {
     /// Lines scrolled up from the bottom
     scroll: usize,
 
-    /// Where `run_output` starts programs: the directory of the tree it is in (eg a project's); the runner's if `None`
+    /// Where `open("wl", ..)` starts programs: the directory of the tree it is in (eg a project's); the runner's if `None`
     directory: Option<PathBuf>,
 
     size: DisplayContainerSize,
@@ -160,15 +154,6 @@ impl CommandHubApplet {
                 Ok(String::new())
             }
         }
-    }
-
-    /// `program_command`, in the hub's directory
-    fn program_command(&self, program: &str, args: &[&str]) -> std::process::Command {
-        let mut command = program_command(program, args);
-        if let Some(directory) = &self.directory {
-            command.current_dir(directory);
-        }
-        command
     }
 
     fn applet_names(&self) -> Vec<String> {
@@ -286,17 +271,6 @@ impl StandardApplet for CommandHubApplet {
                 let words: Vec<&str> = words.iter().map(String::as_str).collect();
                 self.open(&words)?;
             }
-            // NOTE: the hub waits for the program
-            "run_output" => {
-                let program = command::string_arg(&args, 0)?;
-                let program_args = command::strings_arg(&args, 1)?;
-                let program_args: Vec<&str> = program_args.iter().map(String::as_str).collect();
-                return match run_captured(&mut self.program_command(program, &program_args)) {
-                    Output::Text(text) => Ok(Value::String(text)),
-                    Output::Error(err) => Err(err),
-                    Output::Running(_) => unreachable!("it waited"),
-                };
-            }
             _ => return Err(command::unknown(name)),
         }
         Ok(Value::Nil)
@@ -365,23 +339,6 @@ pub fn program_command(program: &str, args: &[&str]) -> std::process::Command {
     command.args(args);
     sonamu_common::connect_wl_client(&mut command);
     command
-}
-
-/// Waits for the process; its stdout, then stderr. An error if it failed.
-fn run_captured(command: &mut std::process::Command) -> Output {
-    match command.output() {
-        Ok(output) => {
-            let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-            text.push_str(&String::from_utf8_lossy(&output.stderr));
-            if output.status.success() {
-                Output::Text(text)
-            } else {
-                text.push_str(&output.status.to_string());
-                Output::Error(text)
-            }
-        }
-        Err(err) => Output::Error(err.to_string()),
-    }
 }
 
 pub(crate) fn fill_row(grid: &mut CharGrid, row: usize, bg: Color) {
