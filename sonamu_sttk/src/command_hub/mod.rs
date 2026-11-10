@@ -208,11 +208,6 @@ impl CommandHubApplet {
     }
 
     fn handle_enter(&mut self) {
-        // one at a time: the next waits for this one to finish
-        if !self.evals.is_empty() {
-            self.hint = Some("Still running; Ctrl+C cancels it.".to_string());
-            return;
-        }
         let command = std::mem::take(&mut self.current_prompt);
         self.cursor = 0;
         self.recalling = None;
@@ -266,6 +261,12 @@ impl CommandHubApplet {
 
     fn handle_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) {
         self.hint = None;
+        // like a shell: no prompt until it finishes; it can still be cancelled or scrolled
+        let while_running = matches!(key, KeySymbol::PageUp | KeySymbol::PageDown)
+            || (matches!(key, KeySymbol::Char('c' | 'C')) && modifiers == KeyModifiers::CTRL);
+        if !self.evals.is_empty() && !while_running {
+            return;
+        }
         match key {
             KeySymbol::Enter => self.handle_enter(),
             KeySymbol::Backspace => {
@@ -349,7 +350,7 @@ impl CommandHubApplet {
             let (text, fg) = match &entry.output {
                 Output::Text(text) => (text.as_str(), OUTPUT),
                 Output::Error(err) => (err.as_str(), ERROR),
-                Output::Running(_) => ("running...", RUNNING),
+                Output::Running(_) => ("", OUTPUT),
             };
             if !text.is_empty() {
                 lines.extend(wrap(text, width).map(|text| Line {
@@ -517,18 +518,20 @@ impl StandardApplet for CommandHubApplet {
             fill_row(&mut grid, row, BG);
         }
 
-        // the prompt, scrolled sideways to keep the cursor in view
+        // the prompt, scrolled sideways to keep the cursor in view; none while running, like a shell
         let prompt_row = height - 1;
-        fill_row(&mut grid, prompt_row, BAR_BG);
-        let start = put(&mut grid, prompt_row, 0, PROMPT, ACCENT);
-        let room = width.saturating_sub(start).max(1);
-        let skip = self.cursor.saturating_sub(room - 1);
-        let visible: String = self.current_prompt.chars().skip(skip).collect();
-        put(&mut grid, prompt_row, start, &visible, COMMAND);
-        if let Some(cell) = (start + self.cursor - skip < width)
-            .then(|| grid.get_char_mut(prompt_row, start + self.cursor - skip))
-        {
-            cell.set_fg(BAR_BG).set_bg(CURSOR);
+        if self.evals.is_empty() {
+            fill_row(&mut grid, prompt_row, BAR_BG);
+            let start = put(&mut grid, prompt_row, 0, PROMPT, ACCENT);
+            let room = width.saturating_sub(start).max(1);
+            let skip = self.cursor.saturating_sub(room - 1);
+            let visible: String = self.current_prompt.chars().skip(skip).collect();
+            put(&mut grid, prompt_row, start, &visible, COMMAND);
+            if let Some(cell) = (start + self.cursor - skip < width)
+                .then(|| grid.get_char_mut(prompt_row, start + self.cursor - skip))
+            {
+                cell.set_fg(BAR_BG).set_bg(CURSOR);
+            }
         }
 
         if height < 2 {
