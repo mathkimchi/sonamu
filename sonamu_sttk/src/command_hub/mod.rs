@@ -29,18 +29,21 @@ const COMMANDS: [Signature; 3] = [
         name: "clear",
         params: "",
         returns: "nil",
+        effect: command::Effect::Modify,
         doc: "clear the history",
     },
     Signature {
         name: "set_title",
         params: "title: string",
         returns: "nil",
+        effect: command::Effect::Modify,
         doc: "rename this hub",
     },
     Signature {
         name: "open",
         params: "applet: string, args: {string}?",
         returns: "nil",
+        effect: command::Effect::Spawn,
         doc: "replace this hub with an applet (`\"wl\", {argv}`: a program's window)",
     },
 ];

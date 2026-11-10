@@ -5,7 +5,7 @@
 mod require;
 
 use mlua::{Lua, MetaMethod, MultiValue, UserData, UserDataMethods, Value as LuaValue, VmState};
-use sonamu_command::{self as command, CommandResult, NODE_COMMANDS, NodeUid, Value};
+use sonamu_command::{self as command, CommandResult, Effect, NODE_COMMANDS, NodeUid, Value};
 use sonamu_common::settings::{Key, Keybind};
 use std::{
     cell::RefCell,
@@ -89,6 +89,8 @@ enum Job {
         /// Called after each output (eg wakes the hub's thread)
         notify: Box<dyn Fn() + Send>,
         cancelled: Arc<AtomicBool>,
+        /// Commands above it are refused
+        max: Effect,
     },
     Complete {
         text: String,
@@ -198,6 +200,15 @@ pub fn eval(
     code: String,
     notify: impl Fn() + Send + 'static,
 ) -> (EvalHandle, mpsc::Receiver<Output>) {
+    eval_limited(code, Effect::Spawn, notify)
+}
+
+/// `eval`, refusing commands (and builtins) whose effect is above `max`
+pub fn eval_limited(
+    code: String,
+    max: Effect,
+    notify: impl Fn() + Send + 'static,
+) -> (EvalHandle, mpsc::Receiver<Output>) {
     let (output, outputs) = mpsc::channel();
     let cancelled = Arc::new(AtomicBool::new(false));
     send_job(Job::Eval {
@@ -205,6 +216,7 @@ pub fn eval(
         output,
         notify: Box::new(notify),
         cancelled: Arc::clone(&cancelled),
+        max,
     });
     (EvalHandle(cancelled), outputs)
 }
@@ -230,6 +242,7 @@ struct Current {
     output: mpsc::Sender<Output>,
     notify: Box<dyn Fn() + Send>,
     cancelled: Arc<AtomicBool>,
+    max: Effect,
     /// `sonamu.reset()`: a fresh state after this eval
     reset: bool,
 }
@@ -241,6 +254,24 @@ fn cancelled() -> bool {
                 .as_ref()
                 .is_some_and(|current| current.cancelled.load(Ordering::Relaxed))
         })
+}
+
+/// The running eval's limit; bindings, hooks and completion have none
+fn max_effect() -> Effect {
+    CURRENT.with_borrow(|current| {
+        current
+            .as_ref()
+            .map_or(Effect::Spawn, |current| current.max)
+    })
+}
+
+/// Refuses `name` if `effect` is above the running eval's limit
+fn allow(effect: Effect, name: &str) -> mlua::Result<()> {
+    let max = max_effect();
+    if effect > max {
+        return Err(mlua::Error::runtime(effect.above(name, max)));
+    }
+    Ok(())
 }
 
 fn send(output: Output) {
@@ -262,7 +293,7 @@ fn run(jobs: &mpsc::Receiver<Job>) {
         if let Err(err) = add_type_tables(&lua) {
             message(err.to_string(), true);
         }
-        let (code, output, notify, cancelled) = match job {
+        let (code, output, notify, cancelled, max) = match job {
             Job::Call(call) => {
                 if let Err(err) = run_call(&lua, call) {
                     message(err, true);
@@ -274,7 +305,8 @@ fn run(jobs: &mpsc::Receiver<Job>) {
                 output,
                 notify,
                 cancelled,
-            } => (code, output, notify, cancelled),
+                max,
+            } => (code, output, notify, cancelled, max),
             Job::Complete {
                 text,
                 reply,
@@ -289,6 +321,7 @@ fn run(jobs: &mpsc::Receiver<Job>) {
             output,
             notify,
             cancelled,
+            max,
             reset: false,
         }));
         let result = run_code(&lua, &code, require::EVAL_CHUNK);
@@ -472,6 +505,7 @@ fn new_lua() -> mlua::Result<Lua> {
     sonamu.set(
         "reset",
         lua.create_function(|_, ()| {
+            allow(Effect::Destructive, "sonamu.reset")?;
             CURRENT.with_borrow_mut(|current| {
                 if let Some(current) = current {
                     current.reset = true;
@@ -507,6 +541,7 @@ fn add_clipboard(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
     clipboard.set(
         "copy",
         lua.create_function(move |_, (text, options): (String, Option<mlua::Table>)| {
+            allow(Effect::Modify, "clipboard.copy")?;
             Ok(if primary(options)? {
                 sonamu_common::clipboard::copy_primary(text)
             } else {
@@ -542,6 +577,7 @@ fn add_process(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
                 Option<String>,
                 Option<mlua::Function>,
             )| {
+                allow(Effect::Spawn, "process.output")?;
                 let args = args.unwrap_or_default();
                 let Some(callback) = callback else {
                     return output(&program, &args, dir.as_deref(), &cancelled)
@@ -633,6 +669,8 @@ fn add_keymap_and_events(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
                 mlua::Function,
                 Option<mlua::Table>,
             )| {
+                // it runs later without a limit
+                allow(Effect::Spawn, "keymap.set")?;
                 let (keybind, applet_type) = keymap_key(mods, &key, options.as_ref())?;
                 let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
                 lua.named_registry_value::<mlua::Table>(BINDINGS_KEY)?
@@ -653,6 +691,7 @@ fn add_keymap_and_events(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
         "unset",
         lua.create_function(
             |_, (mods, key, options): (Vec<String>, LuaValue, Option<mlua::Table>)| {
+                allow(Effect::Modify, "keymap.unset")?;
                 let (keybind, applet_type) = keymap_key(mods, &key, options.as_ref())?;
                 let mut bindings = BINDINGS.lock().unwrap_or_else(PoisonError::into_inner);
                 let count = bindings.len();
@@ -667,6 +706,8 @@ fn add_keymap_and_events(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
     events.set(
         "on",
         lua.create_function(|lua, (event, function): (String, mlua::Function)| {
+            // it runs later without a limit
+            allow(Effect::Spawn, "events.on")?;
             let hooks: mlua::Table = lua.named_registry_value(HOOKS_KEY)?;
             let functions =
                 if let Some(functions) = hooks.get::<Option<mlua::Table>>(event.as_str())? {
@@ -710,6 +751,8 @@ Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) togg
       (also <type>.from_node(n), eg file_manager.from_node(n): typed in sonamu.definitions())
       spawn(program, {args}?) (in its tree's directory) quit()
       any other method is a command of its applet, eg hub:clear()
+Effects (`sonamu-msg eval --max <effect>` refuses higher): read < modify < destructive (close, quit, reset) < spawn
+      (processes, keymap.set, events.on); applet commands show theirs in [ ]
 Super+Esc: the buffer line (Esc leaves). There and in the hub: Tab completes, Up/Down recalls, Shift+Enter adds a line, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+Shift+C copies the last output, Ctrl+C cancels.
 Super+? lists every keybind.";
 
@@ -800,8 +843,12 @@ fn help() -> String {
         for signature in signatures {
             let _ = write!(
                 help,
-                "\n  {}({}): {}  {}",
-                signature.name, signature.params, signature.returns, signature.doc
+                "\n  {}({}): {}  [{}] {}",
+                signature.name,
+                signature.params,
+                signature.returns,
+                signature.effect.name(),
+                signature.doc
             );
         }
     }
@@ -867,7 +914,7 @@ fn tree_function(lua: &Lua, name: &'static str) -> mlua::Result<mlua::Function> 
 
 fn call(lua: &Lua, uid: Option<NodeUid>, name: &str, args: &MultiValue) -> mlua::Result<LuaValue> {
     let args = args.iter().map(from_lua).collect::<mlua::Result<_>>()?;
-    let result: CommandResult = command::call(uid, name, args, &cancelled);
+    let result: CommandResult = command::call_limited(uid, name, args, max_effect(), &cancelled);
     to_lua(lua, result.map_err(mlua::Error::runtime)?)
 }
 
@@ -1205,6 +1252,7 @@ mod tests {
                 name: "set_title",
                 params: "title: string",
                 returns: "nil",
+                effect: Effect::Modify,
                 doc: "",
             }],
         );
@@ -1316,6 +1364,16 @@ mod tests {
     }
 
     #[test]
+    fn limited_evals() {
+        let (_handle, outputs) =
+            eval_limited("process.output('true')".to_string(), Effect::Read, || {});
+        let Ok(Output::Done(Err(err))) = outputs.recv() else {
+            panic!("refused");
+        };
+        assert!(err.contains("above this eval's limit"), "{err}");
+    }
+
+    #[test]
     fn interrupt_a_binding() {
         assert!(
             eval_all("keymap.set({'logo'}, 'l', function() while true do end end)")
@@ -1387,6 +1445,7 @@ mod tests {
                 name: "set_title",
                 params: "title: string",
                 returns: "nil",
+                effect: Effect::Modify,
                 doc: "",
             }],
         );

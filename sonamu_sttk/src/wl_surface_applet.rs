@@ -29,12 +29,14 @@ pub const COMMANDS: [Signature; 2] = [
         name: "app_id",
         params: "",
         returns: "string?",
+        effect: command::Effect::Read,
         doc: "its client's app id",
     },
     Signature {
         name: "pid",
         params: "",
         returns: "number?",
+        effect: command::Effect::Read,
         doc: "its client's process",
     },
 ];

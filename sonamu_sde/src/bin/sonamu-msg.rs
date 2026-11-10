@@ -1,11 +1,15 @@
 //! Talks to the running Sonamu (fails if it isn't running, so eg xdg-open can try another):
 //! - `sonamu-msg open file_manager ~/Documents` opens an applet (see `assets/sonamu-file-manager.desktop`)
 //! - `sonamu-msg eval '<luau>'` (`-`: from stdin) runs Luau like the buffer line: `print`s to stderr, the result as
-//!   JSON on stdout (one value as is, several as an array), an error to stderr with exit code 1
+//!   JSON on stdout (one value as is, several as an array), an error to stderr with exit code 1;
+//!   `--max read|modify|destructive|spawn` refuses commands above that effect (eg for an agent)
 //! - `sonamu-msg subscribe [event...]` prints `events.on` events (all if none named) as JSON lines,
 //!   `{"event": .., "args": [..]}`, until killed
 
-use sonamu_common::msg::{EvalReply, Message, SOCKET_ENV};
+use sonamu_common::{
+    command::Effect,
+    msg::{EvalReply, Message, SOCKET_ENV},
+};
 use std::{
     io::{BufRead, BufReader, Read, Write},
     os::unix::net::UnixStream,
@@ -13,7 +17,7 @@ use std::{
     process::ExitCode,
 };
 
-const USAGE: &str = "usage: sonamu-msg open <applet> [args...] | sonamu-msg eval <luau | -> | \
+const USAGE: &str = "usage: sonamu-msg open <applet> [args...] | sonamu-msg eval [--max <read|modify|destructive|spawn>] <luau | -> | \
                      sonamu-msg subscribe [event...]";
 
 fn main() -> ExitCode {
@@ -24,7 +28,21 @@ fn main() -> ExitCode {
             args: args.map(absolute_if_path).collect(),
         },
         (Some("subscribe"), first) => Message::Subscribe(first.into_iter().chain(args).collect()),
-        (Some("eval"), Some(code)) if args.next().is_none() => {
+        (Some("eval"), Some(first)) => {
+            let (max, code) = if first == "--max" {
+                let max = args.next().as_deref().and_then(Effect::from_name);
+                let (Some(max), Some(code)) = (max, args.next()) else {
+                    eprintln!("{USAGE}");
+                    return ExitCode::FAILURE;
+                };
+                (max, code)
+            } else {
+                (Effect::Spawn, first)
+            };
+            if args.next().is_some() {
+                eprintln!("{USAGE}");
+                return ExitCode::FAILURE;
+            }
             let code = if code == "-" {
                 let mut code = String::new();
                 if let Err(err) = std::io::stdin().read_to_string(&mut code) {
@@ -35,7 +53,7 @@ fn main() -> ExitCode {
             } else {
                 code
             };
-            Message::Eval(code)
+            Message::Eval { code, max }
         }
         _ => {
             eprintln!("{USAGE}");
@@ -43,7 +61,7 @@ fn main() -> ExitCode {
         }
     };
     let result = send(&message).and_then(|stream| match message {
-        Message::Eval(_) => print_replies(stream),
+        Message::Eval { .. } => print_replies(stream),
         Message::Subscribe(_) => print_events(stream),
         Message::Open { .. } => Ok(true),
     });

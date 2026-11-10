@@ -432,17 +432,29 @@ impl NodeHolder {
             uid,
             name,
             args,
+            max,
             reply,
         }: NodeCall,
     ) -> Option<NodeRequest> {
         let Some(uid) = uid else {
-            let _ = reply.send(self.tree_command(&name, &args));
+            let effect = command::tree_effect(&name);
+            let _ = reply.send(if effect > max {
+                Err(effect.above(&name, max))
+            } else {
+                self.tree_command(&name, &args)
+            });
             return None;
         };
         let Some(id) = self.tree.node_by_uid(uid) else {
             let _ = reply.send(Err(command::gone()));
             return None;
         };
+        let effect = command::node_effect(&name)
+            .unwrap_or_else(|| command::applet_effect(&self.tree.applet_type(id), &name));
+        if effect > max {
+            let _ = reply.send(Err(effect.above(&name, max)));
+            return None;
+        }
         let (result, request) = match self.node_command(id, &name, &args) {
             Some(Ok((value, request))) => (Ok(value), request),
             Some(Err(err)) => (Err(err), None),

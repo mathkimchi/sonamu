@@ -91,18 +91,21 @@ const COMMANDS: [Signature; 3] = [
         name: "root",
         params: "",
         returns: "string",
+        effect: command::Effect::Read,
         doc: "its directory",
     },
     Signature {
         name: "selected",
         params: "",
         returns: "string?",
+        effect: command::Effect::Read,
         doc: "the selected file or directory",
     },
     Signature {
         name: "open",
         params: "path: string",
         returns: "nil",
+        effect: command::Effect::Modify,
         doc: "show a file's document (opening it)",
     },
 ];

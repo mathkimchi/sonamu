@@ -47,8 +47,8 @@ impl MsgSocket {
                                 .root_client
                                 .send_event(StandardEvent::Open(OpenApplet { applet, args })),
                             // answered from its own thread, so the loop doesn't wait for it
-                            Ok(Message::Eval(code)) => {
-                                std::thread::spawn(move || answer_eval(stream, code));
+                            Ok(Message::Eval { code, max }) => {
+                                std::thread::spawn(move || answer_eval(stream, code, max));
                             }
                             Ok(Message::Subscribe(events)) => {
                                 std::thread::spawn(move || answer_subscribe(stream, &events));
@@ -74,9 +74,9 @@ impl Drop for MsgSocket {
 }
 
 /// Writes the eval's outputs back as `EvalReply` lines; cancels it if the sender hangs up
-fn answer_eval(mut stream: UnixStream, code: String) {
+fn answer_eval(mut stream: UnixStream, code: String, max: command::Effect) {
     const POLL: Duration = Duration::from_millis(100);
-    let (handle, outputs) = sonamu_script::eval(code, || {});
+    let (handle, outputs) = sonamu_script::eval_limited(code, max, || {});
     loop {
         let reply = match outputs.recv_timeout(POLL) {
             Ok(sonamu_script::Output::Print(line)) => EvalReply::Print(line),
@@ -165,7 +165,13 @@ mod tests {
     #[test]
     fn eval_answers_prints_then_the_result() {
         let (client, server) = UnixStream::pair().unwrap();
-        std::thread::spawn(move || answer_eval(server, "print('a') return 1 + 1".to_string()));
+        std::thread::spawn(move || {
+            answer_eval(
+                server,
+                "print('a') return 1 + 1".to_string(),
+                command::Effect::Read,
+            )
+        });
         let replies: Vec<EvalReply> = BufReader::new(client)
             .lines()
             .map(Result::unwrap)

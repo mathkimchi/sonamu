@@ -13,7 +13,11 @@ pub enum Message {
     /// Opens the applet registered under `applet` with `args` beside the focus (`StandardEvent::Open`)
     Open { applet: String, args: Vec<String> },
     /// Runs Luau on the script thread like the buffer line; answered with `EvalReply` lines, the last one `Done`
-    Eval(String),
+    Eval {
+        code: String,
+        /// Commands above it are refused (`sonamu_script::eval_limited`); an old sender's eval has none
+        max: crate::command::Effect,
+    },
     /// Streams these `events.on` events (all if empty) back as `EventLine`s until the connection closes
     Subscribe(Vec<String>),
 }
@@ -42,7 +46,7 @@ impl Message {
                 .into_iter()
                 .chain(args.iter().map(String::as_str))
                 .collect(),
-            Self::Eval(code) => vec!["eval", code],
+            Self::Eval { code, max } => vec!["eval", code, max.name()],
             Self::Subscribe(events) => std::iter::once("subscribe")
                 .chain(events.iter().map(String::as_str))
                 .collect(),
@@ -64,7 +68,13 @@ impl Message {
                 applet: fields.next()?,
                 args: fields.collect(),
             }),
-            "eval" => Some(Self::Eval(fields.next()?)),
+            "eval" => Some(Self::Eval {
+                code: fields.next()?,
+                max: match fields.next() {
+                    Some(max) => crate::command::Effect::from_name(&max)?,
+                    None => crate::command::Effect::Spawn,
+                },
+            }),
             "subscribe" => Some(Self::Subscribe(fields.collect())),
             _ => None,
         }
@@ -93,7 +103,10 @@ mod tests {
             args: vec!["/tmp".to_owned(), String::new()],
         };
         assert_eq!(Message::decode(&message.encode()), Some(message));
-        let eval = Message::Eval("print(1)\nreturn 2".to_owned());
+        let eval = Message::Eval {
+            code: "print(1)\nreturn 2".to_owned(),
+            max: crate::command::Effect::Read,
+        };
         assert_eq!(Message::decode(&eval.encode()), Some(eval));
         assert_eq!(Message::decode(b"open"), None);
         assert_eq!(Message::decode(b"nope\0"), None);

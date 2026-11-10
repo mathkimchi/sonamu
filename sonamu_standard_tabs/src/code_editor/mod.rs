@@ -69,18 +69,21 @@ const COMMANDS: [Signature; 3] = [
         name: "path",
         params: "",
         returns: "string",
+        effect: command::Effect::Read,
         doc: "the file it edits",
     },
     Signature {
         name: "text",
         params: "",
         returns: "string",
+        effect: command::Effect::Read,
         doc: "what is in it now",
     },
     Signature {
         name: "save",
         params: "",
         returns: "nil",
+        effect: command::Effect::Modify,
         doc: "write it to its file",
     },
 ];

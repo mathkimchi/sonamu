@@ -20,7 +20,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
 ## Gaps (see COMMANDS.md To do for the full list)
 
 - Clipboard: a copy key in the code editor once it has a selection (not a commands gap).
-- Effect levels on commands (read / modify / destructive / spawn) before an MCP bridge; `process.*` runs anything.
 - `docs/usage.md`: mention Super+Esc and the buffer line (agents here may not edit `docs/`; ask the user).
 
 ## Conventions kept

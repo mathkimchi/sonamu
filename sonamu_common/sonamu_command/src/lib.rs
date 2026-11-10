@@ -86,11 +86,51 @@ impl Value {
 
 pub type CommandResult = Result<Value, String>;
 
+/// What a command may do, least first; an eval can be limited to a level (eg a socket eval for an agent)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Effect {
+    /// Only asks
+    Read,
+    /// Changes the tree or an applet, undoably (focus, add, move, rename)
+    Modify,
+    /// Loses something (close, quit)
+    Destructive,
+    /// Runs a program, which can do anything
+    Spawn,
+}
+impl Effect {
+    pub const ALL: [Self; 4] = [Self::Read, Self::Modify, Self::Destructive, Self::Spawn];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Modify => "modify",
+            Self::Destructive => "destructive",
+            Self::Spawn => "spawn",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|effect| effect.name() == name)
+    }
+
+    /// The error for a command of this effect above `max`
+    pub fn above(self, name: &str, max: Self) -> String {
+        format!(
+            "`{name}` is {}, above this eval's limit ({})",
+            self.name(),
+            max.name()
+        )
+    }
+}
+
 /// A command for a node (`uid`), or for the world itself (`None`)
 pub struct NodeCall {
     pub uid: Option<NodeUid>,
     pub name: String,
     pub args: Vec<Value>,
+    /// The caller's limit: the world refuses commands above it
+    pub max: Effect,
     pub reply: mpsc::Sender<CommandResult>,
 }
 
@@ -127,6 +167,17 @@ pub fn call(
     args: Vec<Value>,
     cancelled: &dyn Fn() -> bool,
 ) -> CommandResult {
+    call_limited(uid, name, args, Effect::Spawn, cancelled)
+}
+
+/// `call`, refused if the command's effect is above `max`
+pub fn call_limited(
+    uid: Option<NodeUid>,
+    name: &str,
+    args: Vec<Value>,
+    max: Effect,
+    cancelled: &dyn Fn() -> bool,
+) -> CommandResult {
     let world = match uid {
         Some(uid) => WORLDS
             .lock()
@@ -145,6 +196,7 @@ pub fn call(
             uid,
             name: name.to_string(),
             args,
+            max,
             reply,
         })
         .map_err(|_| gone())?;
@@ -175,6 +227,7 @@ pub fn send(uid: NodeUid, name: &str, args: Vec<Value>) {
             uid: Some(uid),
             name: name.to_string(),
             args,
+            max: Effect::Spawn,
             reply,
         });
     }
@@ -288,6 +341,39 @@ pub const NODE_COMMANDS: [&str; 12] = [
     "quit",
 ];
 
+/// The effect of a node command (`NODE_COMMANDS`), `None` for others
+pub fn node_effect(name: &str) -> Option<Effect> {
+    Some(match name {
+        "parent" | "children" | "type" | "title" => Effect::Read,
+        "focus" | "add_child" | "swap_sibling" | "toggle_half" | "wrap_project" => Effect::Modify,
+        "close" | "quit" => Effect::Destructive,
+        "spawn" => Effect::Spawn,
+        _ => return None,
+    })
+}
+
+/// The effect of a command of the world itself (`call(None, ..)`); unknown ones are `Destructive`
+pub fn tree_effect(name: &str) -> Effect {
+    match name {
+        "focus" | "root" => Effect::Read,
+        "open" | "reload_settings" => Effect::Modify,
+        "spawn" => Effect::Spawn,
+        _ => Effect::Destructive,
+    }
+}
+
+/// The effect of an applet's command: as declared; internal ones (`INNER_FOCUS`) read; undeclared ones are
+/// `Destructive`
+pub fn applet_effect(applet_type: &str, name: &str) -> Effect {
+    if name.starts_with("__") {
+        return Effect::Read;
+    }
+    signatures(applet_type)
+        .into_iter()
+        .find(|signature| signature.name == name)
+        .map_or(Effect::Destructive, |signature| signature.effect)
+}
+
 /// An applet command, as declared by its spawner (`AppletSpawnerTrait::commands`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Signature {
@@ -296,6 +382,7 @@ pub struct Signature {
     pub params: &'static str,
     /// Luau type, eg `"nil"`
     pub returns: &'static str,
+    pub effect: Effect,
     pub doc: &'static str,
 }
 
@@ -410,6 +497,7 @@ mod tests {
                 name: "open",
                 params: "path: string, args: {string}?",
                 returns: "nil",
+                effect: Effect::Modify,
                 doc: "",
             }],
         );
