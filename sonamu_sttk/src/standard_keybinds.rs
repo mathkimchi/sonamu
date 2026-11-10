@@ -1,10 +1,7 @@
 use sonamu_common::{sap::packets::StandardRequest, settings};
 use sonamu_ui::ui_event::{KeyModifiers, KeyTrait, UIEvent};
 
-use crate::{
-    command_hub::CommandHubApplet,
-    nodular_applet::{AppletContext, NodeRequest, project_applet::ProjectApplet},
-};
+use crate::nodular_applet::{AppletContext, NodeRequest, project_applet::ProjectApplet};
 
 /// Tried in order when neither the settings nor `$TERMINAL` give an installed terminal
 const TERMINALS: [&str; 8] = [
@@ -76,7 +73,6 @@ fn installed(program: &str) -> bool {
 /// - `Ctrl+Shift+Q` - Quit
 /// - `Super+W` - Close tab
 /// - `Super+T` / `Super+N` - Start the terminal / browser
-/// - `Ctrl+Shift+Plus` - Add child
 /// - `Super+P` - Put the node in a project
 /// - `Super+F` - Toggle half width
 /// - `Alt+Shift+W` / `Alt+Shift+S` - swap with the previous / next sibling
@@ -153,18 +149,6 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
     {
         // Super+T / Super+N -> start the terminal / browser
         Some(NodeRequest::Run(program))
-    } else if let UIEvent::Key {
-        symbol: Some(key),
-        modifiers: KeyModifiers::CTRL_SHIFT,
-        pressed: true,
-        ..
-    } = &ui_event
-        && key.to_char() == Some('+')
-    {
-        // Ctrl+Shift+Plus -> spawn CommandHub as child
-        Some(NodeRequest::AddChild(
-            CommandHubApplet::get_boxed_initiator(),
-        ))
     } else if let UIEvent::Key {
         symbol: Some(key),
         modifiers,

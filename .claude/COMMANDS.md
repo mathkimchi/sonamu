@@ -33,7 +33,7 @@ Embedded language: Luau via `mlua`. Other languages: over the socket.
 - `command_hub/repl.rs`: `Repl` (prompt, history, recall, evals, completion, paste, `lines`, `draw_prompt`), shared by
   the hub and the buffer line; owners pass a `Waker` and call `wake`. Hub keeps scrolling, its commands and its window.
 - The hub is no longer in the treeview's New menu or the project overview (`NewApplet::CommandHub`, `n` row gone);
-  still `command_hub` (`sonamu.open`, `n:add_child`) and Ctrl+Shift++.
+  still `command_hub` (`sonamu.open`, `n:add_child`); Ctrl+Shift++ is gone too.
 
 Try in the buffer line (Super+Esc) or a hub:
 

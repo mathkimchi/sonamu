@@ -87,10 +87,10 @@ Applets have no traversal of their own.
   Space (or clicking its `▾`/`▸`) collapses/expands all its children, inner and own (the holder owning the row keeps
   the flag, unsaved; `NodeTree::applet_treeview`/`get_treeview_of` leave them out); Enter focuses the zoom-out view's center. Focus
   ending at a node with a main sends it `Focus([])` (`NodeTree::selected`), eg a project shows its overview (#123).
-- The standard keybinds (Ctrl+W, Ctrl+Shift++, Super+P) act on the selected node.
+- The standard keybinds (Ctrl+W, Super+P) act on the selected node.
   Ctrl+W asks its main to close (`CloseRequest`, see below) rather than closing it.
   Something new for a node whose applet `holds_children` (projects) goes inside it, at its root (#83):
-  Ctrl+Shift++ / Super+T / Super+N (the keybind is redone inside it), New child ›, a drop onto its row, opened
+  Super+T / Super+N (the keybind is redone inside it), New child ›, a drop onto its row, opened
   applets and wl windows (`NodeHolder`). Other applets' nodes get it as a child.
   The flag is on the initializer (`NodularAppletInitializer::holding_children`; restored/hibernating projects by
   spawner name), seeded into the shared `Treeview` at spawn: no race before the first publish (fresh-start help bug).

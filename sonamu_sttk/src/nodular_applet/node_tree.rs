@@ -1564,7 +1564,7 @@ impl NodeTree {
             return;
         };
         if let Some(request) = standard_keybind_request(&ui_event) {
-            // on the node itself, eg Ctrl+Shift++ adds a child to it
+            // on the node itself, eg Super+P wraps it
             self.keybind_request = Some((id, request));
             return;
         }
