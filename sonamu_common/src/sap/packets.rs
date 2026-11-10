@@ -1,5 +1,5 @@
 use crate::{
-    command::{CommandResult, Value},
+    command::{CommandResult, NodeUid, Value},
     sap::{detached::DetachedTree, session::SavedApplet},
     settings::Settings,
     utils::tree::world_tree::{WorldTree, WorldTreePath},
@@ -211,6 +211,8 @@ pub enum StandardEvent {
     /// Show this swipe between elements of the client's treeview instead of its focus (#141), or stop (`None`).
     /// Only the holder of both elements' world draws it; others pass it in or ignore it.
     Swipe(Option<SwipeView>),
+    /// Its node's uid (`AppletContext::uid`), when the node is made or moves into a world
+    NodeUid(NodeUid),
     /// Run the applet's command (`StandardApplet::command`) and answer on `reply`
     Command {
         name: String,

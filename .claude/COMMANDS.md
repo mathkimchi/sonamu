@@ -53,7 +53,10 @@ Deviations from the decisions below:
 - Type tag: derived when asked (`NodeTree::applet_type`: wl surface, else saved/hibernated spawner name, else
   `container`/`applet`), not stored.
 - `cast` takes the type name (`n:cast("file_manager")`), returns the same `Node`; no per-type handles.
-- No `split` (splits no longer exist). `parent()` stops at its world's root (nil there, even inside a project).
+- No `split` (splits no longer exist). `parent()` of a project's inner root is the project node's parent (the two
+  are one row): mains get `StandardEvent::NodeUid` (`NodeTree::register` and wherever a main is replaced; kept in
+  `AppletContext::uid`), and `ProjectApplet::handle_node_call` asks its own node's world from a thread. The root
+  tree's root has no parent (nil).
 - `hub:run_output` blocks the hub's thread while the program runs; `process.output` (script thread, Ctrl+C kills it) doesn't.
 
 - Socket: `Message::Eval(code)`; the runner answers from a thread (`msg_socket::answer_eval`) with JSON lines

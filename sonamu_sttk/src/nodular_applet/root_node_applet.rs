@@ -729,7 +729,7 @@ impl RootNodeApplet {
             // it starts them
             StandardEvent::Swipe(_) => {}
             // the root's node isn't in a world
-            StandardEvent::Command { .. } => {}
+            StandardEvent::Command { .. } | StandardEvent::NodeUid(_) => {}
             StandardEvent::UIEvent(_)
             | StandardEvent::FocusChanged(..)
             | StandardEvent::Highlighted(..) => {

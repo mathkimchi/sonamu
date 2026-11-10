@@ -872,7 +872,8 @@ impl StandardApplet for ProjectApplet {
             | StandardEvent::Focus(_)
             | StandardEvent::ToggleCollapsed(_)
             | StandardEvent::NodeAction(..)
-            | StandardEvent::Command { .. } => {}
+            | StandardEvent::Command { .. }
+            | StandardEvent::NodeUid(_) => {}
             // only the root gets these
             StandardEvent::Capturing(_) | StandardEvent::Screens(_) => {}
             StandardEvent::Swipe(view) => self.holder.tree.set_swipe(view),
@@ -1064,6 +1065,20 @@ impl StandardApplet for ProjectApplet {
 
     /// From a main of its contents
     fn handle_node_call(&mut self, call: NodeCall) {
+        // its inner root and its node are one row, so the root's parent is its node's: asked of its own world, on
+        // a thread, since that world may be busy
+        let tree = &self.holder.tree;
+        if call.name == "parent"
+            && call.uid == Some(tree.uid(tree.root()))
+            && let Some(own) = self.hook.uid()
+        {
+            std::thread::spawn(move || {
+                let _ = call
+                    .reply
+                    .send(command::call(Some(own), "parent", Vec::new(), &|| false));
+            });
+            return;
+        }
         if let Some(request) = self.holder.handle_node_call(call) {
             self.hook.request(request);
         }

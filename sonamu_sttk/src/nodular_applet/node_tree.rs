@@ -343,8 +343,13 @@ impl NodeTree {
         self.root
     }
 
+    /// Its commands come to this world; its main hears its uid
     fn register(&self, id: NodeId) {
-        command::register(self.nodes[id].uid, self.world.clone());
+        let node = &self.nodes[id];
+        command::register(node.uid, self.world.clone());
+        if let Some(main) = &node.main {
+            main.send_event(StandardEvent::NodeUid(node.uid));
+        }
     }
 
     pub fn uid(&self, id: NodeId) -> NodeUid {
@@ -549,6 +554,7 @@ impl NodeTree {
         let main = (self.spawn_client)(id, WlSurfaceApplet::get_boxed_initiator(surface));
         let node = &mut self.nodes[id];
         node.awaiting = None;
+        main.send_event(StandardEvent::NodeUid(node.uid));
         node.main = Some(main);
         // so the new applet gets its size
         node.size = None;
@@ -1003,6 +1009,7 @@ impl NodeTree {
         };
         let main = (self.spawn_client)(id, session::hibernate(stand_in.clone()));
         let node = &mut self.nodes[id];
+        main.send_event(StandardEvent::NodeUid(node.uid));
         node.main = Some(main);
         node.hibernated = Some(stand_in);
         node.inactive = true;
@@ -1418,6 +1425,7 @@ impl NodeTree {
     ) {
         let main = (self.spawn_client)(id, initializer);
         let node = &mut self.nodes[id];
+        main.send_event(StandardEvent::NodeUid(node.uid));
         node.main = Some(main);
         node.awaiting = awaiting;
         node.inactive = false;

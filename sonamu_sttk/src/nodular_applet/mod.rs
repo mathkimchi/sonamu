@@ -2,7 +2,7 @@
 
 use calloop::{EventLoop, LoopHandle, LoopSignal, channel::Sender};
 use sonamu_common::{
-    command::{self, CommandResult, NodeCall, Signature, Value, World},
+    command::{self, CommandResult, NodeCall, NodeUid, Signature, Value, World},
     sap::{
         client_handle::ClientHandle,
         detached::{DetachedClient, DetachedTree},
@@ -336,6 +336,8 @@ pub struct AppletContext {
     /// The applet's own loop, which embedded applets' requests are handled on
     event_loop: LoopHandle<'static, AppletState>,
     next_embedded_id: Rc<Cell<u64>>,
+    /// Its node's, once told (`StandardEvent::NodeUid`)
+    uid: Rc<Cell<Option<NodeUid>>>,
 }
 impl AppletContext {
     /// Runs an applet that this applet holds itself, in its inner tree.
@@ -392,6 +394,11 @@ impl AppletContext {
         let id = self.next_embedded_id.get();
         self.next_embedded_id.set(id + 1);
         EmbeddedId(id)
+    }
+
+    /// Its node's uid (for commands), once its holder told it
+    pub fn uid(&self) -> Option<NodeUid> {
+        self.uid.get()
     }
 
     pub fn request(&self, request: NodeRequest) {
@@ -454,6 +461,8 @@ pub struct AppletState {
     treeview: StatePublisher<Treeview>,
     request_sender: Sender<NodeRequest>,
     loop_signal: LoopSignal,
+    /// Shared with its `AppletContext`
+    uid: Rc<Cell<Option<NodeUid>>>,
 }
 
 impl AppletState {
@@ -500,6 +509,7 @@ impl AppletState {
                 }
             }
             StandardEvent::Deactivate => self.applet.deactivate(),
+            StandardEvent::NodeUid(uid) => self.uid.set(Some(uid)),
             StandardEvent::Command { name, args, reply } => {
                 let _ = reply.send(self.applet.command(&name, args));
             }
@@ -594,6 +604,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
             })
             .unwrap();
 
+        let uid = Rc::default();
         let context = AppletContext {
             request_sender: request_sender.clone(),
             damage_sender: damage_tx,
@@ -601,6 +612,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
             applet_spawners: self.applet_spawners,
             event_loop: event_loop.handle(),
             next_embedded_id: Rc::default(),
+            uid: Rc::clone(&uid),
         };
         let holds_children = self.initializer.holds_children;
         let mut state = AppletState {
@@ -611,6 +623,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
             treeview: StatePublisher::new(treeview),
             request_sender,
             loop_signal: event_loop.get_signal(),
+            uid,
         };
         state.settings_changed(&settings::get());
 

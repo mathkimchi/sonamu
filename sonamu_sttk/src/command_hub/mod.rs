@@ -249,7 +249,8 @@ impl StandardApplet for CommandHubApplet {
             | StandardEvent::NodeAction(..)
             | StandardEvent::Focus(_)
             | StandardEvent::ToggleCollapsed(_)
-            | StandardEvent::Command { .. } => {}
+            | StandardEvent::Command { .. }
+            | StandardEvent::NodeUid(_) => {}
             // doesn't show wl surfaces (only the root gets these)
             StandardEvent::WlSurfaceRegistered(_)
             | StandardEvent::Capturing(_)
