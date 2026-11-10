@@ -117,6 +117,8 @@ Deviations from the decisions below:
   - `script::eval(code) -> (EvalHandle, Receiver<Output>)`; `EvalHandle::cancel()` sets a flag checked by the
     interrupt callback.
   - No timeouts in v0: Ctrl+C in the hub cancels its eval; a closed `sonamu-msg` connection cancels its eval.
+  - Ctrl+C (hub or buffer line) also quits whatever runs, like Emacs' `C-g` (`sonamu_script::interrupt`: a static flag,
+    cleared when the next job starts), so a stuck `init.luau`/binding/hook can be stopped. No deadlines.
   - `sonamu.reset()`: a fresh environment.
 - Keybinds stay hardcoded but issue `NodeCall`s (Rust handlers, not Lua), so a stuck script can't block them.
 - Hub: Luau only, calls `script::eval` directly.
@@ -161,8 +163,6 @@ Untested:
 - `sonamu.definitions()` not checked with luau-lsp.
 
 Gaps:
-- `Job::Call`s (`init.luau`, bindings, hooks) have no cancel flag: an infinite loop there hangs the script thread for
-  good (buffer line, hubs, socket, completion; `sonamu.reset()` queues behind it).
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or
   `process.output` delays the buffer line and Luau keybinds.
 - Errors and `print`s of `init.luau`, bindings and hooks only go to stderr (nothing in the UI).

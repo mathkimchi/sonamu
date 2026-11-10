@@ -32,6 +32,14 @@ impl EvalHandle {
     }
 }
 
+/// Set by `interrupt`, cleared when the next job starts
+static QUIT: AtomicBool = AtomicBool::new(false);
+
+/// Cancels whatever runs on the script thread, like Emacs' `C-g` (eg a stuck `keymap.set` function)
+pub fn interrupt() {
+    QUIT.store(true, Ordering::Relaxed);
+}
+
 enum Job {
     Eval {
         code: String,
@@ -147,11 +155,12 @@ struct Current {
 }
 
 fn cancelled() -> bool {
-    CURRENT.with_borrow(|current| {
-        current
-            .as_ref()
-            .is_some_and(|current| current.cancelled.load(Ordering::Relaxed))
-    })
+    QUIT.load(Ordering::Relaxed)
+        || CURRENT.with_borrow(|current| {
+            current
+                .as_ref()
+                .is_some_and(|current| current.cancelled.load(Ordering::Relaxed))
+        })
 }
 
 fn send(output: Output) {
@@ -169,6 +178,7 @@ fn send(output: Output) {
 fn run(jobs: &mpsc::Receiver<Job>) {
     let mut lua = new_lua().expect("the script state");
     for job in jobs {
+        QUIT.store(false, Ordering::Relaxed);
         let (code, output, notify, cancelled) = match job {
             Job::Call(call) => {
                 if let Err(err) = run_call(&lua, call) {
@@ -922,6 +932,24 @@ mod tests {
             panic!("done");
         };
         assert!(result.unwrap_err().contains("cancelled"));
+    }
+
+    #[test]
+    fn interrupt_a_binding() {
+        assert!(
+            eval_all("keymap.set({'logo'}, 'l', function() while true do end end)")
+                .1
+                .is_ok()
+        );
+        run_binding(binding(Some('l'), 0, [false, false, false, true]).unwrap());
+        // queued behind the binding
+        let (_handle, outputs) = eval("1".to_string(), || {});
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        interrupt();
+        assert!(matches!(
+            outputs.recv_timeout(std::time::Duration::from_secs(5)),
+            Ok(Output::Done(Ok(_)))
+        ));
     }
 
     /// A world answering each call with its name and args, with `uid` as its root

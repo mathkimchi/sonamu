@@ -19,12 +19,6 @@ Everything below is committed on `dev` (`b2b9bed` plan … `292682d`).
 
 ## Fix first (by risk)
 
-1. **Uncancellable `Job::Call`s.** `init.luau`, `keymap.set` fns and `events.on` hooks run with `CURRENT = None`, so
-   `cancelled()` is always false: a loop hangs the script thread forever.
-   - Give `Job::Call` a `Current` with its own `cancelled` flag, and a deadline checked in the interrupt (eg 2 s for
-     bindings/hooks, longer for init). Or a global "cancel whatever runs" flag that the buffer line's Ctrl+C sets
-     (it can't today: its own eval is queued behind the stuck job).
-   - Test: a binding with `while true do end`, then an eval must still answer.
 2. **Unmodified bindings steal buffer-line typing.** `AppletRunner::handle_ui_event` matches settings keybinds and
    `sonamu_script::binding` before the root sees the key. Skip bindings without mods (or all but media keys) while
    `root_node_applet::BUFFER_MODE` is set. That static is in sttk, which sar doesn't depend on: move it to

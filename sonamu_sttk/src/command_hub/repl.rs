@@ -124,6 +124,8 @@ impl Repl {
                 for eval in &self.evals {
                     eval.handle.cancel();
                 }
+                // also whatever runs before them (eg a stuck binding)
+                sonamu_script::interrupt();
             }
             // Ctrl/Alt/Super combinations aren't text
             KeySymbol::Char(key_char)
