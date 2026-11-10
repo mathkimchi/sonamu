@@ -42,7 +42,7 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 
 ## What each setting drives
 
-- `palette.bg`: the command hub's and buffer line's background (`command_hub::{bg, bar_bg}`: `with_opacity`, bars
+- `palette.bg`: the command hub's, buffer line's and help's (Super+?) background (`command_hub::{bg, bar_bg}`: `with_opacity`, bars
   15% toward `fg`). It was once the root's opaque background, but that hid background layer surfaces (DMS's wallpaper) behind transparent windows and gaps.
 - `palette.fg`: treeview and project overview text.
 - `palette.accent`: border and treeview marker when focus is on a node itself (traversing).
@@ -76,7 +76,8 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
   `buffer_mode` draws it over the panes only while in it. The example config uses `always`.
 - Command hub and buffer line: text `fg`, prompts `accent`, hints and the hub's header note `inactive`, the cursor
   `fg`; errors keep their red.
-- Not themed yet: help and the other applets keep their own constants.
+- Help: title and text `fg`, section titles `accent`, keys `border.focused`, header note `inactive`.
+- Not themed yet: the project overview's background and the other applets keep their own constants.
 
 ## Rendering changes
 

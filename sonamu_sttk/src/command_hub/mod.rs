@@ -55,11 +55,10 @@ const COMMANDS: [Signature; 4] = [
 const SCROLL_STEP: usize = 3;
 pub(crate) const PROMPT: &str = "> ";
 
-// The help applet uses these too
+/// The project overview's background
 pub(crate) const BG: Color = with_opacity(Color([0x0D, 0x0D, 0x16, 0]));
-pub(crate) const BAR_BG: Color = with_opacity(Color([0x26, 0x2A, 0x32, 0]));
 
-/// The hub's and buffer line's background: the palette's, translucent like the treeview
+/// The hub's, buffer line's and help's background: the palette's, translucent like the treeview
 pub(crate) const fn bg(palette: &Palette) -> Color {
     with_opacity(palette.bg)
 }
@@ -74,12 +73,7 @@ pub(crate) fn bar_bg(palette: &Palette) -> Color {
     };
     with_opacity(Color([mix(0), mix(1), mix(2), 0]))
 }
-pub(crate) const ACCENT: Color = Color([0x5F, 0xD7, 0x87, 0xFF]);
-pub(crate) const OUTPUT: Color = Color([0xC8, 0xCC, 0xD4, 0xFF]);
-pub(crate) const DIM: Color = Color([0x8A, 0x93, 0xA6, 0xFF]);
 pub(crate) const ERROR: Color = Color([0xFF, 0x6A, 0x6A, 0xFF]);
-pub(crate) const RUNNING: Color = Color([0xE5, 0xC0, 0x7A, 0xFF]);
-pub(crate) const CURSOR: Color = Color([0xDB, 0xDB, 0xDB, 0xFF]);
 
 /// Technically, this is a standard app, but it is so essential
 /// that I am considering it a tool for sttk.

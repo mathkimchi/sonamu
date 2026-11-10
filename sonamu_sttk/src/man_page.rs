@@ -1,13 +1,18 @@
 //! The basic usage manual (`docs/usage.md`). Super+? opens it where a new wl surface would go (the root does that); Esc or q closes it.
 
 use crate::{
-    command_hub::{ACCENT, BAR_BG, BG, CURSOR, DIM, OUTPUT, RUNNING, fill_row, put},
+    command_hub::{bar_bg, bg, fill_row, put},
     nodular_applet::{
         AppletContext, AppletSpawner, AppletSpawnerTrait, NodularAppletInitializer, StandardApplet,
     },
     standard_keybinds::handle_standard_keybinds,
 };
-use sonamu_common::{sap::packets::StandardEvent, utils::tree::world_tree::WorldTree};
+use sonamu_common::{
+    sap::packets::StandardEvent,
+    settings::{self, Settings},
+    utils::tree::world_tree::WorldTree,
+};
+use sonamu_ui::color::Color;
 use sonamu_ui::{
     display_units::DisplayContainerSize,
     ui_element::{CharGrid, UITree},
@@ -93,15 +98,21 @@ pub struct ManPageApplet {
     /// Rows scrolled past
     scroll: usize,
     size: DisplayContainerSize,
+    /// The palette, and keys in `border.focused` (`settings_changed`)
+    palette: settings::Palette,
+    key_color: Color,
     hook: AppletContext,
 }
 impl ManPageApplet {
     #[must_use]
     pub fn get_boxed_initiator() -> NodularAppletInitializer {
         NodularAppletInitializer::new(|hook: AppletContext| {
+            let settings = settings::get();
             Box::new(Self {
                 scroll: 0,
                 size: DisplayContainerSize::new(800, 600),
+                palette: settings.palette,
+                key_color: settings.border.focused,
                 hook,
             })
         })
@@ -190,6 +201,11 @@ impl ManPageApplet {
     }
 }
 impl StandardApplet for ManPageApplet {
+    fn settings_changed(&mut self, settings: &Settings) {
+        self.palette = settings.palette.clone();
+        self.key_color = settings.border.focused;
+    }
+
     fn handle_standard_event(&mut self, standard_event: StandardEvent) {
         let StandardEvent::UIEvent(ui_event) = standard_event else {
             return;
@@ -233,25 +249,25 @@ impl StandardApplet for ManPageApplet {
             return grid.element().into();
         }
         for row in 0..height {
-            fill_row(&mut grid, row, BG);
+            fill_row(&mut grid, row, bg(&self.palette));
         }
 
-        fill_row(&mut grid, 0, BAR_BG);
-        let title_end = put(&mut grid, 0, 1, "Basic Usage", CURSOR);
+        fill_row(&mut grid, 0, bar_bg(&self.palette));
+        let title_end = put(&mut grid, 0, 1, "Basic Usage", self.palette.fg);
         let note = "Esc closes, Up/Down scroll ";
         if let Some(column) = width
             .checked_sub(note.len())
             .filter(|&column| column > title_end + 1)
         {
-            put(&mut grid, 0, column, note, DIM);
+            put(&mut grid, 0, column, note, self.palette.inactive);
         }
 
         for (row, line) in (1..height).zip(Self::rows(width).iter().skip(self.scroll)) {
             if line.section {
-                put(&mut grid, row, 1, &line.text, ACCENT);
+                put(&mut grid, row, 1, &line.text, self.palette.accent);
             } else {
-                put(&mut grid, row, 0, &line.text, OUTPUT);
-                put(&mut grid, row, 2, line.keys, RUNNING);
+                put(&mut grid, row, 0, &line.text, self.palette.fg);
+                put(&mut grid, row, 2, line.keys, self.key_color);
             }
         }
 

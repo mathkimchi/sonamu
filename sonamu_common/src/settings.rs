@@ -219,7 +219,7 @@ pub enum TreeviewFloating {
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[schemars(transform = optional_fields)]
 pub struct Palette {
-    /// The command hub's and buffer line's background (translucent; their bars a bit toward `fg`). Not behind the
+    /// The command hub's, buffer line's and help's background (translucent; their bars a bit toward `fg`). Not behind the
     /// panes: the background layer (eg a wallpaper) is there
     #[schemars(with = "ColorSchema")]
     pub bg: Color,
