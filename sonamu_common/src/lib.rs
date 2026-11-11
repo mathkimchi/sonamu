@@ -18,10 +18,15 @@ pub const WAYLAND_DISPLAY_ENV: &str = "SONAMU_WAYLAND_DISPLAY";
 /// `keymap.set` bindings that would take typing (keys with a symbol, without Super)
 pub static BUFFER_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Connects the process to Sonamu if it's a wl client
+/// Connects the process to Sonamu if it's a wl client.
+/// Run from the dev shell, leaves out its `LD_LIBRARY_PATH`, which overrides clients' own libraries (#153: Signal
+/// got the shell's OpenSSL instead of its BoringSSL).
 pub fn connect_wl_client(command: &mut std::process::Command) -> &mut std::process::Command {
     if let Some(socket) = std::env::var_os(WAYLAND_DISPLAY_ENV) {
         command.env("WAYLAND_DISPLAY", socket);
+    }
+    if std::env::var_os("IN_NIX_SHELL").is_some() {
+        command.env_remove("LD_LIBRARY_PATH");
     }
     command
 }

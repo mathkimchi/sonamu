@@ -32,3 +32,6 @@ Found while debugging #60; nothing here is in the repo's code.
 - 2026-11-10: in a fresh headless sway, `wtype` Escape never reached Sonamu (plain or with Super) and `6` was dropped
   from typed text, while letters did arrive; drive Luau features over `sonamu-msg eval` instead (`SONAMU_SOCKET` is
   `$XDG_RUNTIME_DIR/sonamu-<its wl socket>.sock`; stale ones from old runs stay in the dir).
+- Clients launched from a Sonamu run in the dev shell (`IN_NIX_SHELL`) don't get its `LD_LIBRARY_PATH`
+  (`connect_wl_client`, #153): it beat Signal's RUNPATH (BoringSSL), so test apps from a shell without it too.
+  Run test apps through the settings' `startup` (with `SONAMU_CONFIG`) to launch them as Sonamu does.
