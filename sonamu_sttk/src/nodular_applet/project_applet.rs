@@ -42,13 +42,14 @@ use std::{
 /// Its name until it is renamed: its inner tree root's label
 const LABEL: &str = "Project";
 
-// The overview's rows (`overview_rows`): the name, its directory, its icon, a hint, its contents, then `NEW_ROWS`
+// The overview's rows (`overview_rows`): the name, its directory, its icon, a hint, then `NEW_ROWS`
+// (its contents are in the zoom-out view below, #154)
 const DIRECTORY_ROW: usize = 1;
 const ICON_ROW: usize = 2;
 /// The only row a click does nothing on
 const HINT_ROW: usize = 3;
-/// Rows before its contents (or the directory or icon options, while setting one)
-const CONTENTS_ROW: usize = 4;
+/// Rows before `NEW_ROWS` (or the directory or icon options, while setting one)
+const OPTIONS_ROW: usize = 4;
 /// The icons the picker lists (any typed character works too)
 const ICONS: [(char, &str); 20] = [
     (PROJECT_ICON, "briefcase"),
@@ -236,7 +237,7 @@ impl DirectoryInput {
 /// Closing it (`CloseRequest`, eg Ctrl+W on its node) gives its contents back to its node, which they replace.
 ///
 /// While focus is at its inner root, it shows an overview instead of its panes: its name (`r` renames it), its directory (`d` sets it),
-/// its contents (click to select) and rows that add to it (`NEW_ROWS`: a project, terminal or browser).
+/// and rows that add to it (`NEW_ROWS`: a project, terminal or browser).
 pub struct ProjectApplet {
     holder: NodeHolder,
     hook: AppletContext,
@@ -393,8 +394,7 @@ impl ProjectApplet {
         if self.setting_directory.is_some() || self.picking_icon.is_some() {
             return None;
         }
-        let tree = &self.holder.tree;
-        let rows = CONTENTS_ROW + tree.children(tree.root()).len() + NEW_ROWS.len();
+        let rows = OPTIONS_ROW + NEW_ROWS.len();
         Some(PAD + rows as f32 * row_height() + PAD)
     }
 
@@ -589,18 +589,16 @@ impl ProjectApplet {
         if !pressed {
             return;
         }
-        let root = self.holder.tree.root();
-        let contents = self.holder.tree.children(root).len();
         match overview_rows().row_at(y) {
             None => {}
-            Some(row) if row >= CONTENTS_ROW && self.picking_icon.is_some() => {
-                if let Some(&(icon, _)) = ICONS.get(row - CONTENTS_ROW) {
+            Some(row) if row >= OPTIONS_ROW && self.picking_icon.is_some() => {
+                if let Some(&(icon, _)) = ICONS.get(row - OPTIONS_ROW) {
                     self.set_icon(Some(icon.to_string()));
                 }
             }
-            Some(row) if row >= CONTENTS_ROW && self.setting_directory.is_some() => {
+            Some(row) if row >= OPTIONS_ROW && self.setting_directory.is_some() => {
                 if let Some(input) = &mut self.setting_directory
-                    && let Some(option) = input.options.get(row - CONTENTS_ROW).cloned()
+                    && let Some(option) = input.options.get(row - OPTIONS_ROW).cloned()
                 {
                     input.set(option);
                 }
@@ -612,14 +610,9 @@ impl ProjectApplet {
             }
             Some(DIRECTORY_ROW) => self.start_setting_directory(),
             Some(ICON_ROW) => self.start_picking_icon(),
-            Some(row) if (CONTENTS_ROW..CONTENTS_ROW + contents).contains(&row) => {
-                let id = self.holder.tree.children(root)[row - CONTENTS_ROW];
-                self.holder.tree.focus(id, false);
-            }
-            Some(row) if row >= CONTENTS_ROW + contents => {
-                let index = row - CONTENTS_ROW - contents;
-                if index < NEW_ROWS.len() {
-                    self.add_new(index);
+            Some(row) if row >= OPTIONS_ROW => {
+                if row - OPTIONS_ROW < NEW_ROWS.len() {
+                    self.add_new(row - OPTIONS_ROW);
                 }
             }
             Some(_) => {}
@@ -683,9 +676,8 @@ impl ProjectApplet {
         true
     }
 
-    /// The rows under the hint: the icons or directories to pick from, else the contents and what can be added
+    /// The rows under the hint: the icons or directories to pick from, else what can be added
     fn overview_options(&self) -> Vec<(String, Color)> {
-        let tree = &self.holder.tree;
         let text = settings::get().palette.fg;
         match (&self.setting_directory, self.picking_icon) {
             (_, Some(selected)) => (0..)
@@ -711,11 +703,9 @@ impl ProjectApplet {
                     }
                 })
                 .collect(),
-            (None, None) => (1..)
-                .zip(tree.children(tree.root()))
-                .map(|(index, &id)| (format!("{index}  {}", tree.label(id)), text))
-                .chain(NEW_ROWS.map(|(label, _, _)| (label.to_string(), text)))
-                .collect(),
+            (None, None) => NEW_ROWS
+                .map(|(label, _, _)| (label.to_string(), text))
+                .into(),
         }
     }
 

@@ -6,11 +6,11 @@
   on the project itself rather than on something in it. That is also the state right after Super+P, so a freshly
   focus path ending at the project node shows it too (#145: no separate selected state).
 - It replaces the panes there (they were the last child's pane before). Rows, from the top: name, directory, key hint,
-  `1  <label>` per child of the inner root, then `NEW_ROWS` (project `p`, terminal `t`, browser `b`; no command hub since the buffer line). Rows are a fixed height so the project hit-tests clicks itself.
+  then `NEW_ROWS` (#154: no row per child, the zoom-out view shows them; project `p`, terminal `t`, browser `b`; no command hub since the buffer line). Rows are a fixed height so the project hit-tests clicks itself.
 - `p` (#81) adds an empty project (`ProjectApplet::empty`, no contents, this project's directory) to the inner
   root and focuses inside it, so its own overview shows, ready to rename and fill.
-- Icon: a row after the directory (so the hint is row 3, contents from `CONTENTS_ROW` 4). `i` or a click on it opens a
-  picker listing `ICONS` (Nerd Font) where the contents were: Up/Down + Enter or a click picks one, any typed
+- Icon: a row after the directory (so the hint is row 3, `NEW_ROWS` from `OPTIONS_ROW` 4). `i` or a click on it opens a
+  picker listing `ICONS` (Nerd Font) where `NEW_ROWS` were: Up/Down + Enter or a click picks one, any typed
   character (eg an emoji) is used as is, Backspace goes back to the default (`PROJECT_ICON`), Esc cancels. Also shown
   before the name. Saved as `SavedTree::icon` on the inner root (like `label`), and the treeview's `icon` reads it
   from the published `project` spawner's `inner`.
@@ -53,7 +53,7 @@
 ## Issues found
 
 - `StandardEvent::FocusChanged`/`Highlighted` are never sent by anything.
-- `1-9: select` in the hint: `9` is the last child and digits only reach 8 children; beyond that only clicks/`w`/`s`.
+- `1-9: select` in the hint: `9` is the last child and digits only reach 8 children; beyond that only zoom-out clicks/`w`/`s`.
 - Fixed 2026-11-05: no pointer cursor on the clickable rows (all but the hint have one now, across the row's width,
   like the click).
 

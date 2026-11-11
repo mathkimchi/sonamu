@@ -120,7 +120,7 @@ published treeviews.
   (no main, labeled with the project's name, `Project` until renamed), and the project node still has its own children
   in the outer world.
   - While focus is at its inner root, it shows an overview instead of its panes (`.claude/PROJECT_UI.md`): its name
-    (`r` or click renames it), its contents (click selects one; its zoom-out view below) and rows adding an empty project (`p`), terminal (`t`) or browser (`b`) to it.
+    (`r` or click renames it), rows adding an empty project (`p`), terminal (`t`) or browser (`b`) to it, and its zoom-out view below (no separate contents rows, #154).
   - Made by `NodeRequest::Wrap(ProjectApplet::wrapper())` (Super+P, hub `project`): the holder replaces the node's
     subtree with a node whose applet is made from it.
   - Undone by closing it: on `CloseRequest` (Ctrl+W on its node, or on its inner root) it detaches its contents and
