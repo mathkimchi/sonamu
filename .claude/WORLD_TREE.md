@@ -152,7 +152,7 @@ published treeviews.
   a project grows its zoom area from all of it to below its rows (`zoom_view`), or draws only that while zooming in.
   Moving the center (`set_zoom_center`: arrows, scroll, clicks) pans: `zoom_pan` starts off by where the old center
   was minus where it is now (`zoom_position`, unscaled, so the area's size cancels; a pan underway carries on) and
-  springs to 0. `zoom_animating` covers both, for holders' redraws.
+  springs to 0; a lateral one (same row) leaves the rows above and the box still. `zoom_animating` covers both, for holders' redraws.
   Titles (`NodeTree::title`: icon and label, no treeview marks) sit above each pane at full text size once zoomed out,
   in room the rows get for them (`row_height`, unscaled, so the step between rows depends on the scale; a pan keeps
   its vertical offset as px in the row plus rows).

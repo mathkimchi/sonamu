@@ -158,8 +158,9 @@ pub struct NodeTree {
     /// Whether focus was at a node without a main (zoomed out) at the last `update_layout`; `None` before it
     was_zoomed: Option<bool>,
     /// The zoom-out view springing to its moved center: since when, and from how far off: px (before scaling) and
-    /// rows down (rows are further apart than their views when zoomed out, by their titles)
-    zoom_pan: Option<(Instant, [f32; 2], f32)>,
+    /// rows down (rows are further apart than their views when zoomed out, by their titles); lateral (to a node
+    /// in the same row): the rows above stay
+    zoom_pan: Option<(Instant, [f32; 2], f32, bool)>,
 }
 
 impl Drop for NodeTree {
@@ -2114,11 +2115,11 @@ impl NodeTree {
     }
 
     /// How far off its center the zoom-out view still is while panning to it (like `zoom_pan`)
-    fn zoom_pan_offset(&self) -> ([f32; 2], f32) {
+    fn zoom_pan_offset(&self) -> ([f32; 2], f32, bool) {
         self.zoom_pan
-            .map_or(([0.0; 2], 0.0), |(started, offset, rows)| {
+            .map_or(([0.0; 2], 0.0, false), |(started, offset, rows, lateral)| {
                 let left = 1.0 - swipe::spring_progress(started).unwrap_or(1.0);
-                (offset.map(|value| value * left), rows * left)
+                (offset.map(|value| value * left), rows * left, lateral)
             })
     }
 
@@ -2186,7 +2187,7 @@ impl NodeTree {
         // the view pans from where the old center was, carrying on a pan underway
         let old = self.zoom_center();
         let before = old.and_then(|old| self.zoom_position(old));
-        let (carried, carried_rows) = self.zoom_pan_offset();
+        let (carried, carried_rows, carried_lateral) = self.zoom_pan_offset();
         let focused = self.focused_node();
         self.last_focus = id;
         let mut child = id;
@@ -2201,7 +2202,8 @@ impl NodeTree {
         {
             let offset = [0, 1].map(|axis| (before[axis] - after[axis]) as f32 + carried[axis]);
             let rows = (before_row - after_row) as f32 + carried_rows;
-            self.zoom_pan = Some((Instant::now(), offset, rows));
+            let lateral = before_row == after_row && (carried_lateral || self.zoom_pan.is_none());
+            self.zoom_pan = Some((Instant::now(), offset, rows, lateral));
         }
         self.damaged = true;
     }
@@ -2432,21 +2434,24 @@ impl NodeTree {
         // rows have room for their titles above them, which aren't scaled
         let step = step as f32 + ui::row_height() * zoomed / scale;
         // the center view's middle at the middle of `size`, from its top left; off by the pan left
-        let (pan, pan_rows) = self.zoom_pan_offset();
+        let (pan, pan_rows, lateral) = self.zoom_pan_offset();
         let pan = [pan[0], pan[1] + pan_rows * step];
-        let [x, y] = [
+        let [[x, x_still], [y, _]] = [
             [size.width as f32, width, pan[0]],
             [size.height as f32, height, pan[1]],
         ]
         .map(|[size, length, pan]| {
-            ((size / full_scale / 2.0 - length / 2.0) * full_scale * zoomed / scale + pan).round()
-                as i32
+            let still = (size / full_scale / 2.0 - length / 2.0) * full_scale * zoomed / scale;
+            [(still + pan).round() as i32, still.round() as i32]
         });
+        // a lateral pan leaves the rows above the center's and the box alone
+        let x_above = if lateral { x_still } else { x };
         let panes = rows
             .iter()
             .enumerate()
             .flat_map(|(index, panes)| {
                 let y = y + ((index as f32 - center_row as f32) * step).round() as i32;
+                let x = if index < center_row { x_above } else { x };
                 panes.iter().map(move |pane| {
                     let rect = [
                         pane.rect[0] + x,
@@ -2468,7 +2473,7 @@ impl NodeTree {
             panes,
             center,
             scale,
-            column: [x as f32, top, width, column_height],
+            column: [x_above as f32, top, width, column_height],
         })
     }
 
