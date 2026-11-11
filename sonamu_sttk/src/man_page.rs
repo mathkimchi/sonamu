@@ -238,7 +238,7 @@ impl StandardApplet for ManPageApplet {
                 self.size = size;
                 self.scroll = self.scroll.min(self.max_scroll());
             }
-            UIEvent::Key { .. } | UIEvent::Swipe { .. } => {}
+            UIEvent::Key { .. } | UIEvent::Swipe { .. } | UIEvent::Pinch(_) => {}
         }
     }
 

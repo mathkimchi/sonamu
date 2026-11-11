@@ -218,7 +218,7 @@ impl StandardApplet for CommandHubApplet {
                         self.scroll_by(if delta[1] > 0.0 { -step } else { step });
                     }
                     UIEvent::WindowResized(size) => self.size = size,
-                    UIEvent::Key { .. } | UIEvent::Swipe { .. } => return,
+                    UIEvent::Key { .. } | UIEvent::Swipe { .. } | UIEvent::Pinch(_) => return,
                 }
 
                 self.hook.damage_window();

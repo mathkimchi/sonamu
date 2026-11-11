@@ -297,6 +297,12 @@ impl AppletRunner {
             return;
         }
 
+        // pinches go straight to wl clients (#152)
+        if let UIEvent::Pinch(phase) = event {
+            self.pinch(phase);
+            return;
+        }
+
         if let UIEvent::Mouse(mouse_event) = &mut event {
             self.pointer_position = mouse_event.position;
             // what's plucked follows the pointer

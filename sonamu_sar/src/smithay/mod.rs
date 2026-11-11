@@ -26,7 +26,8 @@ use smithay::{
         dnd::{DnDGrab, DndGrabHandler, DndTarget, GrabType, Source},
         keyboard::FilterResult,
         pointer::{
-            AxisFrame, ButtonEvent, CursorImageStatus, CursorImageSurfaceData, Focus, MotionEvent,
+            AxisFrame, ButtonEvent, CursorImageStatus, CursorImageSurfaceData, Focus,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent, MotionEvent,
             PointerHandle, RelativeMotionEvent,
         },
         tablet::TabletSeatHandler,
@@ -61,6 +62,7 @@ use smithay::{
             PointerConstraint, PointerConstraintsHandler, PointerConstraintsState,
             with_pointer_constraint,
         },
+        pointer_gestures::PointerGesturesState,
         presentation::{PresentationFeedbackCachedState, PresentationState, Refresh},
         relative_pointer::RelativePointerManagerState,
         security_context::SecurityContext,
@@ -101,7 +103,7 @@ use sonamu_ui::{
     DisplayInfo, ImeEvent, PointerGrab,
     display_units::{DisplayAreaPx, DisplayContainerSize},
     ui_element::{Cursor, Style, UIElement, UITree},
-    ui_event::{MouseEvent, MouseEventKind},
+    ui_event::{MouseEvent, MouseEventKind, PinchPhase},
     winit_backend::drm::{REPEAT_DELAY, REPEAT_INTERVAL},
 };
 use std::{collections::HashMap, os::fd::OwnedFd, sync::Arc, time::Duration};
@@ -162,6 +164,7 @@ pub struct SmithayState {
     _text_input_state: TextInputManagerState,
     _pointer_constraints_state: PointerConstraintsState,
     _relative_pointer_state: RelativePointerManagerState,
+    _pointer_gestures_state: PointerGesturesState,
     capture: capture::CaptureState,
     dmabuf: dmabuf::DmabufImport,
     /// For waiting on clients' GPU work before applying their commits
@@ -778,6 +781,8 @@ impl SmithayState {
             PointerConstraintsState::new::<AppletRunner>(&display_handle);
         let relative_pointer_state =
             RelativePointerManagerState::new::<AppletRunner>(&display_handle);
+        // pinches (#152) go to the surface under the pointer
+        let pointer_gestures_state = PointerGesturesState::new::<AppletRunner>(&display_handle);
         let capture = capture::CaptureState::new(&display_handle);
         let clock = Clock::<Monotonic>::new();
         let presentation_state =
@@ -815,6 +820,7 @@ impl SmithayState {
             _text_input_state: text_input_state,
             _pointer_constraints_state: pointer_constraints_state,
             _relative_pointer_state: relative_pointer_state,
+            _pointer_gestures_state: pointer_gestures_state,
             capture,
             dmabuf: dmabuf::DmabufImport::default(),
             event_handle: event_handle.clone(),
@@ -2380,6 +2386,46 @@ impl AppletRunner {
                 time: self.smithay_state.now_input_time(),
             },
         );
+        pointer.frame(self);
+    }
+
+    /// A touchpad pinch, sent to the pointer's focus (#152)
+    pub(crate) fn pinch(&mut self, phase: PinchPhase) {
+        let pointer = self.smithay_state.seat.get_pointer().unwrap();
+        let time = self.smithay_state.now_input_time();
+        match phase {
+            PinchPhase::Begin { fingers } => pointer.gesture_pinch_begin(
+                self,
+                &GesturePinchBeginEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                    fingers,
+                },
+            ),
+            PinchPhase::Update {
+                delta: [dx, dy],
+                scale,
+                rotation,
+            } => pointer.gesture_pinch_update(
+                self,
+                &GesturePinchUpdateEvent {
+                    time,
+                    // physical px to logical
+                    delta: Point::<f64, Physical>::from((dx, dy))
+                        .to_logical(self.smithay_state.scale),
+                    scale,
+                    rotation,
+                },
+            ),
+            PinchPhase::End { cancelled } => pointer.gesture_pinch_end(
+                self,
+                &GesturePinchEndEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                    cancelled,
+                },
+            ),
+        }
         pointer.frame(self);
     }
 }

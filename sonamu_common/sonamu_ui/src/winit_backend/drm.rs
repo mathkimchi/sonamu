@@ -7,7 +7,9 @@ use crate::{
     display_units::{DisplayAreaPx, DisplayContainerSize},
     dmabuf,
     ui_element::{Cursor, CursorIcon, PrimitiveScene, RoundRect, UIPrimitiveElement},
-    ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, SwipePhase, UIEvent},
+    ui_event::{
+        KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, PinchPhase, SwipePhase, UIEvent,
+    },
     winit_backend::{
         CapturedFrame, DisplayInfo, DisplayNotification, DisplayProxy, DisplayRequest, Gpu,
         PointerGrab, UIDisplay, WgpuData,
@@ -28,8 +30,9 @@ use smithay::{
         drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, GbmBufferedSurface},
         input::{
             AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event as _,
-            GestureBeginEvent as _, GestureEndEvent as _, GestureSwipeUpdateEvent as _, InputEvent,
-            KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
+            GestureBeginEvent as _, GestureEndEvent as _, GesturePinchUpdateEvent as _,
+            GestureSwipeUpdateEvent as _, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent,
+            PointerButtonEvent, PointerMotionEvent,
         },
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
@@ -837,6 +840,12 @@ impl DrmDisplay {
                     event.time().millis(),
                 );
             }
+            event => self.handle_gesture(event),
+        }
+    }
+
+    fn handle_gesture(&mut self, event: InputEvent<LibinputInputBackend>) {
+        match event {
             InputEvent::GestureSwipeBegin { event } => {
                 self.swipe = Some(event.fingers());
                 self.send(UIEvent::Swipe {
@@ -864,6 +873,24 @@ impl DrmDisplay {
                         cancelled: event.cancelled(),
                     },
                 });
+            }
+            InputEvent::GesturePinchBegin { event } => {
+                self.send(UIEvent::Pinch(PinchPhase::Begin {
+                    fingers: event.fingers(),
+                }));
+            }
+            InputEvent::GesturePinchUpdate { event } => {
+                let delta = event.delta();
+                self.send(UIEvent::Pinch(PinchPhase::Update {
+                    delta: [delta.x, delta.y],
+                    scale: event.scale(),
+                    rotation: event.rotation(),
+                }));
+            }
+            InputEvent::GesturePinchEnd { event } => {
+                self.send(UIEvent::Pinch(PinchPhase::End {
+                    cancelled: event.cancelled(),
+                }));
             }
             _ => {}
         }

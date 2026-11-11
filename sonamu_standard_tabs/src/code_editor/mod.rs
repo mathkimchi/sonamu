@@ -331,7 +331,8 @@ impl StandardApplet for CodeEditorApplet {
                         self.handle_keypress(key, modifiers);
                     }
                     sonamu_ui::ui_event::UIEvent::Key { .. }
-                    | sonamu_ui::ui_event::UIEvent::Swipe { .. } => {}
+                    | sonamu_ui::ui_event::UIEvent::Swipe { .. }
+                    | sonamu_ui::ui_event::UIEvent::Pinch(_) => {}
                     sonamu_ui::ui_event::UIEvent::WindowResized(display_container_size) => {
                         let (_width, height) =
                             CharGrid::largest_fittable_size(display_container_size);

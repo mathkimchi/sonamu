@@ -24,6 +24,8 @@ pub enum UIEvent {
         fingers: u32,
         phase: SwipePhase,
     },
+    /// A touchpad pinch (#152), forwarded to the wl client under the pointer
+    Pinch(PinchPhase),
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SwipePhase {
@@ -31,6 +33,23 @@ pub enum SwipePhase {
     /// How far the fingers moved since the last one (`[x, y]`, in px)
     Update([f64; 2]),
     /// The fingers lifted, or the swipe was cancelled (eg a finger was added)
+    End {
+        cancelled: bool,
+    },
+}
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PinchPhase {
+    Begin {
+        fingers: u32,
+    },
+    Update {
+        /// How far the fingers' center moved since the last one (`[x, y]`, in px)
+        delta: [f64; 2],
+        /// Since `Begin`
+        scale: f64,
+        /// Degrees clockwise since the last one
+        rotation: f64,
+    },
     End {
         cancelled: bool,
     },
