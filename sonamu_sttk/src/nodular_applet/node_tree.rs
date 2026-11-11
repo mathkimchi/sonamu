@@ -2315,13 +2315,13 @@ impl NodeTree {
     }
 
     /// Where the node's pane is in the zoom-out view: in its row's view (px, before scaling), and that row's offset from
-    /// the center's
+    /// the center's. A pane shows the node it displays, eg a container's child.
     fn zoom_position(&self, id: NodeId) -> Option<([i32; 2], i32)> {
         let ZoomRows {
             rows, center_row, ..
         } = self.zoom_rows()?;
         rows.iter().enumerate().find_map(|(index, panes)| {
-            let pane = panes.iter().find(|pane| pane.node == id)?;
+            let pane = panes.iter().find(|pane| self.contains(id, pane.node))?;
             Some((
                 [pane.rect[0], pane.rect[1]],
                 index as i32 - center_row as i32,
