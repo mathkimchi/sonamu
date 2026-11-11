@@ -18,17 +18,21 @@ It also enables you to traverse at different depths, which enables speed and pre
 
 ![Fetch Screenshot](examples/screenshots/20261027_13h58m51s_grim.png)
 
-![Homework Example](examples/screenshots/20261027_14h03m33s_grim.png)
+<details>
+  <summary>Click for more</summary>
 
-MVP Video Link:
+  ![Homework Example](examples/screenshots/20261027_14h03m33s_grim.png)
 
-[![Sonamu MVP Video](https://img.youtube.com/vi/73bF5PrCmOE/maxresdefault.jpg)](https://youtu.be/73bF5PrCmOE)
+  MVP Video Link:
 
-Some more screenshots:
+  [![Sonamu MVP Video](https://img.youtube.com/vi/73bF5PrCmOE/maxresdefault.jpg)](https://youtu.be/73bF5PrCmOE)
 
-![Split Pane](examples/screenshots/20261027_14h00m07s_grim.png)
+  Some more screenshots:
 
-![Project View](examples/screenshots/20261027_14h00m39s_grim.png)
+  ![Split Pane](examples/screenshots/20261027_14h00m07s_grim.png)
+
+  ![Project View](examples/screenshots/20261027_14h00m39s_grim.png)
+</details>
 
 ## Who is Sonamu for?
 
