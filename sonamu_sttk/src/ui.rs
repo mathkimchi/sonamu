@@ -158,6 +158,20 @@ pub fn scroll_to(scroll: usize, index: usize, shown: usize) -> usize {
     scroll.clamp((index + 1).saturating_sub(shown), index)
 }
 
+/// Rows a mouse scroll of `delta` moves by `step` at a time (positive down); none without a vertical delta, eg a
+/// touchpad's stop or a sideways scroll (#151)
+#[allow(clippy::cast_possible_wrap)]
+pub fn scroll_rows([_, y]: [f64; 2], step: usize) -> isize {
+    let step = step as isize;
+    if y > 0.0 {
+        step
+    } else if y < 0.0 {
+        -step
+    } else {
+        0
+    }
+}
+
 /// The furthest `count` rows can scroll with `shown` rows: until the last one is at the bottom
 pub const fn max_scroll(count: usize, shown: usize) -> usize {
     count.saturating_sub(shown)

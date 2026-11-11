@@ -6,6 +6,7 @@ use crate::{
         AppletContext, AppletSpawner, AppletSpawnerTrait, NodularAppletInitializer, StandardApplet,
     },
     standard_keybinds::handle_standard_keybinds,
+    ui,
 };
 use sonamu_common::{
     sap::packets::StandardEvent,
@@ -230,8 +231,7 @@ impl StandardApplet for ManPageApplet {
             },
             UIEvent::Mouse(mouse_event) => {
                 if let MouseEventKind::Scroll { delta, .. } = mouse_event.kind {
-                    let step = SCROLL_STEP as isize;
-                    self.scroll_by(if delta[1] > 0.0 { step } else { -step });
+                    self.scroll_by(ui::scroll_rows(delta, SCROLL_STEP));
                 }
             }
             UIEvent::WindowResized(size) => {

@@ -8,6 +8,7 @@ use crate::{
         StandardApplet, treeview::with_opacity,
     },
     standard_keybinds::handle_standard_keybinds,
+    ui,
 };
 use repl::Repl;
 use sonamu_common::{
@@ -214,8 +215,7 @@ impl StandardApplet for CommandHubApplet {
                             return;
                         };
                         // positive scrolls down, toward the newest
-                        let step = SCROLL_STEP as isize;
-                        self.scroll_by(if delta[1] > 0.0 { -step } else { step });
+                        self.scroll_by(-ui::scroll_rows(delta, SCROLL_STEP));
                     }
                     UIEvent::WindowResized(size) => self.size = size,
                     UIEvent::Key { .. } | UIEvent::Swipe { .. } | UIEvent::Pinch(_) => return,

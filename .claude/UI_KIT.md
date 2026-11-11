@@ -18,8 +18,9 @@ anything clickable.
     `text(element, left, right)` (row-local)
   - clicking: `row_at(y)` (`None` above `top`; may be past the last row, so filter by the count), `within(y)` (0..1
     in the row, eg the treeview's drop zones)
-  - scrolling: `fitting(height)` (rows that fit, at least 1), with free fns `scroll_to(scroll, index, shown)` and
-    `max_scroll(count, shown)`
+  - scrolling: `fitting(height)` (rows that fit, at least 1), with free fns `scroll_to(scroll, index, shown)`,
+    `max_scroll(count, shown)` and `scroll_rows(delta, step)` (a mouse scroll's signed rows; 0 without vertical delta,
+    eg a touchpad's stop: use it for every row scroll)
   - a header is just `Rows::with_height(0.0, h).row(0, ...)`; a list under it starts at `top: h`.
 
 Users: treeview rows and menu, the root's treeview frame / pin button / `notice`, the file manager, the project

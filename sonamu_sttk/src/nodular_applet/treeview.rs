@@ -546,15 +546,10 @@ impl TreeviewPointer {
                 }
             }
             MouseEventKind::Scroll { delta, .. } if in_treeview => {
-                // a touchpad's stop and sideways scrolls have no vertical delta (#151)
-                let scroll = if delta[1] > 0.0 {
-                    self.scroll + SCROLL_STEP
-                } else if delta[1] < 0.0 {
-                    self.scroll.saturating_sub(SCROLL_STEP)
-                } else {
-                    self.scroll
-                }
-                .min(max_scroll(rows.len(), height));
+                let scroll = self
+                    .scroll
+                    .saturating_add_signed(ui::scroll_rows(delta, SCROLL_STEP))
+                    .min(max_scroll(rows.len(), height));
                 damaged |= std::mem::replace(&mut self.scroll, scroll) != scroll;
             }
             MouseEventKind::Button { .. } | MouseEventKind::Scroll { .. } => {}

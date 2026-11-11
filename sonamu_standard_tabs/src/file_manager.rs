@@ -814,13 +814,10 @@ impl FileManagerApplet {
             }
             MouseEventKind::Scroll { delta, .. } => {
                 let max_scroll = ui::max_scroll(self.entries.len(), self.visible_rows());
-                self.scroll = if delta[1] > 0.0 {
-                    (self.scroll + 1).min(max_scroll)
-                } else if delta[1] < 0.0 {
-                    self.scroll.saturating_sub(1)
-                } else {
-                    self.scroll
-                };
+                self.scroll = self
+                    .scroll
+                    .saturating_add_signed(ui::scroll_rows(delta, 1))
+                    .min(max_scroll);
             }
             MouseEventKind::Button { .. } | MouseEventKind::Motion => {}
         }
