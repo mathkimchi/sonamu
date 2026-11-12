@@ -504,7 +504,7 @@ impl AppletRunner {
         if self.magnification > 1.0 {
             content = self.magnified(content);
         }
-        let scene = PrimitiveScene::from_ui_tree(content, self.window_size, |surface_id| {
+        let mut scene = PrimitiveScene::from_ui_tree(content, self.window_size, |surface_id| {
             // NOTE: currently only handles subsurfaces being the wl surfaces
             let wl_surface_id = WlSurfaceId::from_u64(surface_id);
             self.smithay_state
@@ -524,6 +524,7 @@ impl AppletRunner {
             .map(|&(surface_id, area)| (WlSurfaceId::from_u64(surface_id), self.unmagnified(area)))
             .collect();
         self.smithay_state.set_tile_areas(tile_areas.into_iter());
+        scene.cursor_scale = self.magnification;
         self.ui_handle.set_ui_content(scene);
         if self.smithay_state.wants_capture() {
             self.ui_handle.capture();

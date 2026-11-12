@@ -623,6 +623,7 @@ impl DrmDisplay {
             // software cursor
             let mut scene = self.scene.clone();
             let [x, y] = self.pointer.map(|value| value as i32);
+            let scaled = |value: u32| (value as f32 * scene.cursor_scale).round() as i32;
             scene.elements.push(
                 match self
                     .cursor_image
@@ -630,9 +631,9 @@ impl DrmDisplay {
                     .and_then(|(_, image)| image.as_ref())
                 {
                     Some(image) => {
-                        let [w, h] = image.size.map(u32::cast_signed);
-                        let x = x - image.hotspot[0].cast_signed();
-                        let y = y - image.hotspot[1].cast_signed();
+                        let [w, h] = image.size.map(scaled);
+                        let x = x - scaled(image.hotspot[0]);
+                        let y = y - scaled(image.hotspot[1]);
                         (
                             UIPrimitiveElement::Texture(image.texture.clone()),
                             DisplayAreaPx::new(x, y, x + w, y + h),
@@ -650,8 +651,8 @@ impl DrmDisplay {
                         DisplayAreaPx::new(
                             x,
                             y,
-                            x + CURSOR_SIZE[0].cast_signed(),
-                            y + CURSOR_SIZE[1].cast_signed(),
+                            x + scaled(CURSOR_SIZE[0]),
+                            y + scaled(CURSOR_SIZE[1]),
                         ),
                         None,
                     ),

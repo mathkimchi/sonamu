@@ -140,6 +140,8 @@ pub struct PrimitiveScene {
     pub cursors: CursorAreas,
     /// Where each subsurface was laid out, so whoever provides them knows
     pub subsurface_areas: Vec<(u64, DisplayAreaPx)>,
+    /// How big the software cursor is drawn (eg magnified); 1: its own size
+    pub cursor_scale: f32,
 }
 impl PrimitiveScene {
     pub fn new_empty() -> Self {
@@ -147,6 +149,7 @@ impl PrimitiveScene {
             elements: Vec::new(),
             cursors: CursorAreas::default(),
             subsurface_areas: Vec::new(),
+            cursor_scale: 1.0,
         }
     }
 
