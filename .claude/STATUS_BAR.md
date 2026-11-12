@@ -81,6 +81,13 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
   changes. Icons not drawn yet (`icon`, `desktop_entry` kept).
 - Tested in a private bus: `dbus-run-session -- <script>` running Sonamu, `busctl --user call -- ... Notify
   "susssasa{sv}i" app 0 "" summary body 0 0 -1` (`--`, else `-1` reads as an option).
+- Done: 5. `desktop.rs` (`.desktop` apps from the data dirs: `Exec` split, field codes dropped; `score`: prefix >
+  word start > inside > letters in order), `launcher.rs` (popup; Enter/click start via `program_command`, in
+  `terminal() -e` for `Terminal=true`; windows placed like any new one), `icons.rs` (thread; index of the GTK
+  theme (`gtk-icon-theme-name` in gtk-4.0/3.0 `settings.ini`), its `Inherits`, hicolor, pixmaps; nearest 48 px, SVG
+  via resvg; `Icons::get` asks and returns `None` until loaded). Notifications show `app_icon`/image path, else the
+  `desktop-entry` hint's or the app name's icon. Keys: while the launcher is open the root sets
+  `sonamu_common::BUFFER_MODE` (`sync_key_grab`) so every key comes to it (`handle_grabbed_key`).
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work

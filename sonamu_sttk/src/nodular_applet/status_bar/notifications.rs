@@ -29,10 +29,8 @@ pub struct Notification {
     pub id: u32,
     pub app_name: String,
     /// An icon name or path (`app_icon`, else the `image-path` hint)
-    #[expect(dead_code, reason = "drawn once icons are looked up")]
     pub icon: String,
     /// The `desktop-entry` hint (an app's `.desktop` name), for its icon
-    #[expect(dead_code, reason = "drawn once icons are looked up")]
     pub desktop_entry: Option<String>,
     pub summary: String,
     pub body: String,

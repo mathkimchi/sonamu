@@ -2,6 +2,7 @@
 
 use super::{
     Lines, Spans, columns,
+    icons::Icons,
     notifications::{Notification, Store},
 };
 use sonamu_common::settings::{Palette, Settings};
@@ -33,7 +34,7 @@ pub enum Click {
 }
 
 /// `text` cut to `max` columns, with `…` if cut
-fn cut(text: &str, max: usize) -> String {
+pub fn cut(text: &str, max: usize) -> String {
     if columns(text) <= max {
         return text.to_string();
     }
@@ -80,11 +81,31 @@ fn title(notification: &Notification) -> String {
     }
 }
 
-/// `left` and then `right` at the end of the width
-fn justified(left: &str, right: &str) -> String {
-    let left = cut(left, COLUMNS.saturating_sub(columns(right) + 1));
-    let pad = COLUMNS.saturating_sub(columns(&left) + columns(right));
+/// `left` and then `right` at the end of `width` columns
+fn justified_in(width: usize, left: &str, right: &str) -> String {
+    let left = cut(left, width.saturating_sub(columns(right) + 1));
+    let pad = width.saturating_sub(columns(&left) + columns(right));
     format!("{left}{}{right}", " ".repeat(pad))
+}
+
+fn justified(left: &str, right: &str) -> String {
+    justified_in(COLUMNS, left, right)
+}
+
+/// Where a notification's text starts, after its icon
+const TEXT_COLUMN: usize = 3;
+
+/// Its icon: `app_icon` (or the image path), else the icon named like its `.desktop` file or app
+fn app_icon(notification: &Notification, icons: &Icons) -> Option<sonamu_ui::ui_element::Image> {
+    [
+        Some(notification.icon.clone()),
+        notification.desktop_entry.clone(),
+        Some(notification.app_name.to_lowercase()),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|name| !name.is_empty())
+    .and_then(|name| icons.get(&name))
 }
 
 fn listed(store: &Store) -> usize {
@@ -95,7 +116,7 @@ pub fn size(store: &Store) -> [f32; 2] {
     Lines::size(HEADER_LINES + (2 * listed(store)).max(1), COLUMNS)
 }
 
-pub fn draw(settings: &Settings, store: &Store) -> Vec<UITree> {
+pub fn draw(settings: &Settings, store: &Store, icons: &Icons) -> Vec<UITree> {
     let palette = &settings.palette;
     let lines = Lines::new();
     let mut items = vec![lines.text(
@@ -133,15 +154,17 @@ pub fn draw(settings: &Settings, store: &Store) -> Vec<UITree> {
     }
     for (index, notification) in store.list.iter().rev().take(LISTED).enumerate() {
         let line = HEADER_LINES + 2 * index;
+        if let Some(icon) = app_icon(notification, icons) {
+            items.push(lines.icon(line, 0, icon));
+        }
+        let width = COLUMNS - TEXT_COLUMN;
         items.push(lines.text(
             line,
-            0,
-            vec![(justified(&title(notification), CLOSE), palette.fg)],
+            TEXT_COLUMN,
+            vec![(justified_in(width, &title(notification), CLOSE), palette.fg)],
         ));
-        let body = wrap(&notification.body, COLUMNS, 1)
-            .pop()
-            .unwrap_or_default();
-        items.push(lines.text(line + 1, 0, vec![(body, palette.inactive)]));
+        let body = wrap(&notification.body, width, 1).pop().unwrap_or_default();
+        items.push(lines.text(line + 1, TEXT_COLUMN, vec![(body, palette.inactive)]));
     }
     items
 }
@@ -163,11 +186,15 @@ pub fn click(store: &Store, line: usize, column: usize) -> Option<Click> {
     }
 }
 
-/// A popping up one's lines: title, then its body
+/// A popping up one's lines (after its icon): title, then its body
 fn popup_lines(notification: &Notification, palette: &Palette) -> Vec<Spans> {
-    let mut lines = vec![vec![(justified(&title(notification), CLOSE), palette.fg)]];
+    let width = COLUMNS - TEXT_COLUMN;
+    let mut lines = vec![vec![(
+        justified_in(width, &title(notification), CLOSE),
+        palette.fg,
+    )]];
     lines.extend(
-        wrap(&notification.body, COLUMNS, BODY_LINES)
+        wrap(&notification.body, width, BODY_LINES)
             .into_iter()
             .filter(|line| !line.is_empty())
             .map(|line| vec![(line, palette.inactive)]),
@@ -180,13 +207,15 @@ pub fn popup_line_count(notification: &Notification, palette: &Palette) -> usize
     popup_lines(notification, palette).len()
 }
 
-pub fn draw_popup(notification: &Notification, palette: &Palette) -> Vec<UITree> {
+pub fn draw_popup(notification: &Notification, palette: &Palette, icons: &Icons) -> Vec<UITree> {
     let lines = Lines::new();
-    popup_lines(notification, palette)
+    let mut items: Vec<UITree> = popup_lines(notification, palette)
         .into_iter()
         .enumerate()
-        .map(|(index, spans)| lines.text(index, 0, spans))
-        .collect()
+        .map(|(index, spans)| lines.text(index, TEXT_COLUMN, spans))
+        .collect();
+    items.extend(app_icon(notification, icons).map(|icon| lines.icon(0, 0, icon)));
+    items
 }
 
 pub fn click_popup(notification: &Notification, line: usize, column: usize) -> Click {

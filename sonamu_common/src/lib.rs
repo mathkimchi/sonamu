@@ -14,8 +14,8 @@ pub mod utils;
 /// Not `WAYLAND_DISPLAY` itself: see `AppletRunner::run`.
 pub const WAYLAND_DISPLAY_ENV: &str = "SONAMU_WAYLAND_DISPLAY";
 
-/// In the root's buffer mode (Super+Esc): every key goes to its buffer line, and the runner skips settings and
-/// `keymap.set` bindings that would take typing (keys with a symbol, without Super)
+/// In the root's buffer mode (Super+Esc), or while the status bar's launcher is open: every key goes to the root,
+/// and the runner skips settings and `keymap.set` bindings that would take typing (keys with a symbol, without Super)
 pub static BUFFER_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Connects the process to Sonamu if it's a wl client.

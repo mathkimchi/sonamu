@@ -2,6 +2,9 @@
 //! See `.claude/STATUS_BAR.md`.
 
 mod calendar;
+mod desktop;
+mod icons;
+mod launcher;
 mod notification_list;
 mod notifications;
 mod resources;
@@ -10,12 +13,14 @@ mod system;
 use super::treeview::{BTN_LEFT, guide};
 use crate::{command_hub::bar_bg, ui};
 use chrono::{Local, NaiveDate};
+use icons::Icons;
+use launcher::Launcher;
 use notifications::{CloseReason, Notifications};
 use sonamu_common::settings::{Palette, Settings};
 use sonamu_ui::{
     color::Color,
-    ui_element::{Style, UIElement, UITree, font_size},
-    ui_event::{MouseEvent, MouseEventKind},
+    ui_element::{Image, Style, UIElement, UITree, font_size},
+    ui_event::{KeySymbol, MouseEvent, MouseEventKind},
 };
 use std::sync::Arc;
 use system::System;
@@ -68,6 +73,8 @@ fn spans_width(spans: &Spans) -> f32 {
 enum Segment {
     /// `▾`/`▴`: shows or hides the treeview
     Tree,
+    /// Opens the app launcher
+    Launcher,
     /// The date and time; opens the calendar
     Time,
     /// Battery, cpu and memory; opens the resources popup
@@ -94,6 +101,8 @@ enum Popup {
     Calendar(NaiveDate),
     Resources(resources::Sort),
     Notifications,
+    /// `StatusBar::launcher`'s
+    Launcher,
 }
 impl Popup {
     fn segment(self) -> Segment {
@@ -101,6 +110,7 @@ impl Popup {
             Self::Calendar(_) => Segment::Time,
             Self::Resources(_) => Segment::Resources,
             Self::Notifications => Segment::Bell,
+            Self::Launcher => Segment::Launcher,
         }
     }
 }
@@ -156,6 +166,18 @@ impl Lines {
         )
     }
 
+    /// `image` as a square icon at line `index`'s `column` (2 columns wide)
+    #[expect(clippy::cast_precision_loss, reason = "columns")]
+    fn icon(&self, index: usize, column: usize, image: Image) -> UITree {
+        let size = font_size() * 1.1;
+        let left = POPUP_PAD + column as f32 * char_width();
+        let top = self.rows.top_of(index) + (self.rows.height - size) / 2.0;
+        UITree::leaf_styled(
+            UIElement::Image(image),
+            Style::absolute([left, top], [size, size]),
+        )
+    }
+
     /// The popup's size for `lines` lines `columns` wide
     #[expect(clippy::cast_precision_loss, reason = "columns")]
     fn size(lines: usize, columns: usize) -> [f32; 2] {
@@ -183,6 +205,9 @@ pub struct StatusBar {
     popup: Option<Popup>,
     system: System,
     notifications: Notifications,
+    icons: Icons,
+    /// While its popup is open
+    launcher: Option<Launcher>,
     /// What `tick` last saw: the clock's text and the popping up notifications
     shown: (String, Vec<u32>),
 }
@@ -199,7 +224,9 @@ impl StatusBar {
         Self {
             popup: None,
             system: System::start(move || system_changed()),
-            notifications: Notifications::start(changed),
+            notifications: Notifications::start(Arc::clone(&changed)),
+            icons: Icons::start(changed),
+            launcher: None,
             shown: Default::default(),
         }
     }
@@ -227,6 +254,7 @@ impl StatusBar {
                 Segment::Tree,
                 vec![(if state.treeview_shown { "▾" } else { "▴" }.to_string(), fg)],
             ),
+            (Segment::Launcher, vec![(launcher::ICON.to_string(), fg)]),
             (Segment::Time, vec![(Self::time(), fg)]),
         ];
         let right = [
@@ -350,7 +378,10 @@ impl StatusBar {
                 );
                 let area = [(width - GAP - w).max(0.0), y, w, h];
                 y += h + POPUP_NOTIFICATION_GAP;
-                (area, notification_list::draw_popup(notification, palette))
+                (
+                    area,
+                    notification_list::draw_popup(notification, palette, &self.icons),
+                )
             })
             .collect()
     }
@@ -361,9 +392,16 @@ impl StatusBar {
             Popup::Resources(sort) => {
                 resources::draw(settings, &self.system.snapshot.lock().unwrap(), sort)
             }
-            Popup::Notifications => {
-                notification_list::draw(settings, &self.notifications.store.lock().unwrap())
-            }
+            Popup::Notifications => notification_list::draw(
+                settings,
+                &self.notifications.store.lock().unwrap(),
+                &self.icons,
+            ),
+            Popup::Launcher => self
+                .launcher
+                .as_ref()
+                .map(|launcher| launcher.draw(settings, &self.icons))
+                .unwrap_or_default(),
         }
     }
 
@@ -375,6 +413,7 @@ impl StatusBar {
             Popup::Notifications => {
                 notification_list::size(&self.notifications.store.lock().unwrap())
             }
+            Popup::Launcher => Launcher::size(),
         };
         let [left, segment_width] = placed
             .iter()
@@ -391,6 +430,11 @@ impl StatusBar {
 
     fn set_popup(&mut self, popup: Option<Popup>) {
         self.popup = popup;
+        if popup != Some(Popup::Launcher) {
+            self.launcher = None;
+        } else if self.launcher.is_none() {
+            self.launcher = Some(Launcher::open());
+        }
         self.system
             .set_want_processes(matches!(popup, Some(Popup::Resources(_))));
     }
@@ -497,6 +541,7 @@ impl StatusBar {
                 self.set_popup(open(Popup::Resources(resources::Sort::default())));
             }
             Segment::Bell => self.set_popup(open(Popup::Notifications)),
+            Segment::Launcher => self.set_popup(open(Popup::Launcher)),
         }
         response
     }
@@ -544,11 +589,41 @@ impl StatusBar {
                 self.apply_notification_click(click);
                 return true;
             }
+            Popup::Launcher => {
+                let launched = self
+                    .launcher
+                    .as_ref()
+                    .is_some_and(|launcher| launcher.click(line));
+                if launched {
+                    self.set_popup(None);
+                }
+                return launched;
+            }
         };
         if let Some(popup) = popup {
             self.set_popup(Some(popup));
         }
         popup.is_some()
+    }
+
+    /// Whether keys go to the bar (the launcher's search), not the focused applet
+    pub fn wants_keys(&self) -> bool {
+        self.launcher.is_some()
+    }
+
+    /// A pressed key while `wants_keys`; whether it changed anything
+    pub fn handle_key(&mut self, key: KeySymbol) -> bool {
+        let Some(launcher) = &mut self.launcher else {
+            return false;
+        };
+        match launcher.key(key) {
+            launcher::KeyResult::Changed => true,
+            launcher::KeyResult::Close => {
+                self.set_popup(None);
+                true
+            }
+            launcher::KeyResult::Ignored => false,
+        }
     }
 
     /// Whether what changes by itself (the clock's second, which notifications pop up) changed since the last

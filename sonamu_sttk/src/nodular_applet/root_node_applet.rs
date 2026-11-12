@@ -156,8 +156,46 @@ impl RootNodeApplet {
     /// Toggles buffer mode (Super+Esc), where every key goes to the buffer line
     fn set_buffer_mode(&mut self, on: bool) {
         self.buffer_mode = on;
-        sonamu_common::BUFFER_MODE.store(on, Ordering::Relaxed);
+        self.sync_key_grab();
         self.surface.damage();
+    }
+
+    /// Super+Esc, and keys while the status bar's launcher or the buffer line takes them; whether it took the key
+    /// (releases too, so nothing else sees half a key)
+    fn handle_grabbed_key(
+        &mut self,
+        symbol: Option<KeySymbol>,
+        modifiers: KeyModifiers,
+        pressed: bool,
+    ) -> bool {
+        if pressed && matches!(symbol, Some(KeySymbol::Escape)) && modifiers.logo {
+            self.set_buffer_mode(!self.buffer_mode);
+            return true;
+        }
+        if self.status_bar.wants_keys() {
+            if let (true, Some(key)) = (pressed, symbol)
+                && self.status_bar.handle_key(key)
+            {
+                self.surface.damage();
+            }
+            self.sync_key_grab();
+            return true;
+        }
+        if self.buffer_mode {
+            if let (true, Some(key)) = (pressed, symbol) {
+                self.handle_buffer_key(key, modifiers);
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Every key comes to the root in buffer mode and while the status bar's launcher is open
+    fn sync_key_grab(&self) {
+        sonamu_common::BUFFER_MODE.store(
+            self.buffer_mode || self.status_bar.wants_keys(),
+            Ordering::Relaxed,
+        );
     }
 
     /// A key in buffer mode: Esc clears the prompt, or leaves buffer mode if it's empty; others go to the prompt
@@ -743,18 +781,9 @@ impl RootNodeApplet {
             pressed,
             ..
         }) = event
+            && self.handle_grabbed_key(symbol, modifiers, pressed)
         {
-            if pressed && matches!(symbol, Some(KeySymbol::Escape)) && modifiers.logo {
-                self.set_buffer_mode(!self.buffer_mode);
-                return;
-            }
-            // releases too, so nothing else sees half a key
-            if self.buffer_mode {
-                if let (true, Some(key)) = (pressed, symbol) {
-                    self.handle_buffer_key(key, modifiers);
-                }
-                return;
-            }
+            return;
         }
         if let StandardEvent::UIEvent(UIEvent::Swipe { fingers, phase }) = event {
             match fingers {
@@ -899,6 +928,7 @@ impl RootNodeApplet {
             if let Some(action) = response.action {
                 self.apply_bar_action(action);
             }
+            self.sync_key_grab();
             if response.consumed {
                 return;
             }

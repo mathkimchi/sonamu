@@ -20,6 +20,8 @@ slotmap = { workspace = true }
 log = { workspace = true }
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 zbus = "6.2.1"
+image = { workspace = true, features = ["png"] }
+resvg = "0.50.0"
 
 [build-dependencies]
 regex = "1.12"
