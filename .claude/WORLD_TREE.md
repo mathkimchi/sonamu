@@ -143,7 +143,7 @@ published treeviews.
   focus stays; Shift+Left/Right swap the center with a sibling (`swap_zoom_center`). Rows stack around the center's view, one
   `Scaled` (`zoom_out` setting, default 4 × 3 views) over all of `size`, a thin box around the views' column. Panes don't take
   the mouse meanwhile: scroll moves the center, a click (`zoom_button`, on release, hit-testing `zoom_layout`) makes a node the
-  center, or focuses it if it already is; a drag (past 12 px) to a pane's edge, in any row (`zoom_drop`: outer quarter; left/right: beside it, bottom: its child after its remembered child; top and middle: nothing), moves the node there (`move_node`, applets keep running), as the center, a line on that edge showing it meanwhile (`zoom_motion`); both stay below the focused node, and a node holding its children gets none. Enter in the selector also focuses the center. Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
+  center, or focuses it if it already is; a drag (past 12 px) to a pane's edge, in any row (`zoom_drop`: outer quarter; left/right: beside it, bottom: its child after its remembered child; top and middle: nothing), moves the node there (`move_node`, applets keep running), as the center, a line on that edge showing it meanwhile (`zoom_motion`), the node framed in the accent and its children's panes (rows focused inside it) greyed out; both stay below the focused node, and a node holding its children gets none. Enter in the selector also focuses the center. Only the active screen. Gotcha: a UI node with an explicit size clips its children, so the
   `Scaled` box covers `size` and the panes sit in an equally big container. A project's overview embeds it.
   Animated (`ZoomAnim`, `update_zoom_anim` in `update_layout`): when focus goes to or from a node without a main, the
   view springs (`swipe::spring_progress`, the swipe settle spring) between the center's view filling `size` (scale 1)
@@ -152,7 +152,7 @@ published treeviews.
   a project grows its zoom area from all of it to below its rows (`zoom_view`), or draws only that while zooming in.
   Moving the center (`set_zoom_center`: arrows, scroll, clicks) pans: `zoom_pan` starts off by where the old center
   was minus where it is now (`zoom_position`, unscaled, so the area's size cancels; a pan underway carries on) and
-  springs to 0 (`pan_zoom`, measured around the change, so drops and swaps pan too); a lateral one (center among the same siblings) leaves the rows above and the box still. `zoom_animating` covers both, for holders' redraws.
+  springs to 0 (`pan_zoom`, measured around the change); a lateral one (center among the same siblings) leaves the rows above and the box still. Drops and swaps instead slide each pane from where it was (`move_zoom_panes`, `zoom_moves`: offsets per node and occurrence, since rows repeat nodes). `zoom_animating` covers all, for holders' redraws.
   Titles (`NodeTree::title`: icon and label, no treeview marks) sit above each pane at full text size once zoomed out,
   in room the rows get for them (`row_height`, unscaled, so the step between rows depends on the scale; a pan keeps
   its vertical offset as px in the row plus rows).

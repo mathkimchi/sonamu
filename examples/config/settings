@@ -72,4 +72,5 @@ print(json.dumps({
     # run once when Sonamu starts
     "startup": ["dms run"],
     "watch": [str(colors_path), str(dms_settings_path)],
+    "zoom_out": [6, 5],
 }, indent=2))

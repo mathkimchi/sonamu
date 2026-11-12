@@ -161,6 +161,9 @@ pub struct NodeTree {
     /// rows down (rows are further apart than their views when zoomed out, by their titles); lateral (to a node
     /// in the same row): the rows above stay
     zoom_pan: Option<(Instant, [f32; 2], f32, bool)>,
+    /// Panes sliding to where a drop or swap put them in the zoom-out view: since when, and from how far off (px,
+    /// before scaling) per node and its occurrence (rows show a node more than once)
+    zoom_moves: Option<(Instant, ZoomOccurrences<[f32; 2]>)>,
 }
 
 impl Drop for NodeTree {
@@ -239,10 +242,14 @@ impl Pane {
     }
 }
 
+/// Something per pane of the zoom-out view, by its node and occurrence (rows show a node more than once)
+type ZoomOccurrences<T> = HashMap<(NodeId, usize), T>;
+
 /// The zoom-out view's rows (`NodeTree::zoom_rows`): the center (`zoom_center`, else the focused node), its row,
 /// and the rows' spacing (px)
 struct ZoomRows {
-    rows: Vec<Vec<Pane>>,
+    /// Each with the node focus is at for it
+    rows: Vec<(NodeId, Vec<Pane>)>,
     center: NodeId,
     center_row: usize,
     step: i32,
@@ -252,6 +259,8 @@ struct ZoomRows {
 /// center's column (`[x, y, width, height]`)
 struct ZoomLayout {
     panes: Vec<Pane>,
+    /// For each pane, the node focus is at for its row
+    row_focus: Vec<NodeId>,
     center: NodeId,
     scale: f32,
     column: [f32; 4],
@@ -336,6 +345,7 @@ impl NodeTree {
             zoom_anim: None,
             was_zoomed: None,
             zoom_pan: None,
+            zoom_moves: None,
         };
         tree.root = insert_root(&mut tree);
         tree.view_root = tree.root;
@@ -2154,11 +2164,18 @@ impl NodeTree {
         {
             self.zoom_pan = None;
         }
+        if self
+            .zoom_moves
+            .as_ref()
+            .is_some_and(|(started, _)| swipe::spring_progress(*started).is_none())
+        {
+            self.zoom_moves = None;
+        }
     }
 
-    /// Whether the zoom-out view is springing (zooming or panning), so holders redraw
+    /// Whether the zoom-out view is springing (zooming, panning or moving panes), so holders redraw
     pub fn zoom_animating(&self) -> bool {
-        self.zoom_anim.is_some() || self.zoom_pan.is_some()
+        self.zoom_anim.is_some() || self.zoom_pan.is_some() || self.zoom_moves.is_some()
     }
 
     /// How far off its center the zoom-out view still is while panning to it (like `zoom_pan`)
@@ -2225,7 +2242,7 @@ impl NodeTree {
     /// Swaps the zoom-out view's center with a sibling; it stays the center
     fn swap_zoom_center(&mut self, shift: isize) {
         if let Some(center) = self.zoom_center() {
-            self.pan_zoom(|tree| {
+            self.move_zoom_panes(|tree| {
                 tree.swap_sibling(center, shift);
                 tree.remember_zoom_center(center);
             });
@@ -2270,6 +2287,45 @@ impl NodeTree {
                 siblings && before_row == after_row && (carried_lateral || self.zoom_pan.is_none());
             self.zoom_pan = Some((Instant::now(), offset, rows, lateral));
         }
+    }
+
+    /// Changes the zoom-out view (eg moves a node), each pane sliding from where it was to its new place
+    fn move_zoom_panes(&mut self, change: impl FnOnce(&mut Self)) {
+        let before = self.zoom_occurrences();
+        change(self);
+        // `before` has them in
+        self.zoom_pan = None;
+        self.zoom_moves = None;
+        let moves = self
+            .zoom_occurrences()
+            .into_iter()
+            .filter_map(|(key, after)| {
+                let before = before.get(&key)?;
+                let offset = [0, 1].map(|axis| before[axis] - after[axis]);
+                (offset != [0; 2]).then_some((key, offset.map(|value| value as f32)))
+            })
+            .collect();
+        self.zoom_moves = Some((Instant::now(), moves));
+        self.damaged = true;
+    }
+
+    /// Where each node's panes are in the zoom-out view (before scaling), by occurrence
+    fn zoom_occurrences(&self) -> ZoomOccurrences<[i32; 2]> {
+        let Some(ZoomLayout { panes, .. }) = self
+            .latest_size
+            .and_then(|size| self.zoom_layout(size, 1.0))
+        else {
+            return HashMap::new();
+        };
+        let mut counts = HashMap::new();
+        panes
+            .iter()
+            .map(|pane| {
+                let count = counts.entry(pane.node).or_insert(0);
+                *count += 1;
+                ((pane.node, *count - 1), [pane.rect[0], pane.rect[1]])
+            })
+            .collect()
     }
 
     /// A scroll in the zoom-out view: past a step, moves its center one node (sideways: siblings, down: child)
@@ -2346,7 +2402,7 @@ impl NodeTree {
         }
 
         // a container shows the same row as the child it shows
-        let mut rows: Vec<(Vec<Pane>, bool)> = Vec::new();
+        let mut rows: Vec<(NodeId, Vec<Pane>, bool)> = Vec::new();
         for id in chain {
             let strips = Strips {
                 focus: id,
@@ -2360,19 +2416,22 @@ impl NodeTree {
             for pane in &mut panes {
                 pane.border = border;
             }
-            let same = |(row, _): &(Vec<Pane>, bool)| {
+            let same = |(_, row, _): &(NodeId, Vec<Pane>, bool)| {
                 row.iter()
                     .map(|pane| pane.node)
                     .eq(panes.iter().map(|pane| pane.node))
             };
             match rows.last_mut() {
-                Some(last) if same(last) => last.1 |= id == center,
-                _ => rows.push((panes, id == center)),
+                Some(last) if same(last) => last.2 |= id == center,
+                _ => rows.push((id, panes, id == center)),
             }
         }
         Some(ZoomRows {
-            center_row: rows.iter().position(|(_, center)| *center).unwrap_or(0),
-            rows: rows.into_iter().map(|(panes, _)| panes).collect(),
+            center_row: rows.iter().position(|(_, _, center)| *center).unwrap_or(0),
+            rows: rows
+                .into_iter()
+                .map(|(focus, panes, _)| (focus, panes))
+                .collect(),
             center,
             step: view.height.cast_signed() + gap,
         })
@@ -2384,7 +2443,7 @@ impl NodeTree {
         let ZoomRows {
             rows, center_row, ..
         } = self.zoom_rows()?;
-        rows.iter().enumerate().find_map(|(index, panes)| {
+        rows.iter().enumerate().find_map(|(index, (_, panes))| {
             let pane = panes.iter().find(|pane| self.contains(id, pane.node))?;
             Some((
                 [pane.rect[0], pane.rect[1]],
@@ -2399,6 +2458,7 @@ impl NodeTree {
     pub fn zoom_window(&self, size: DisplayContainerSize) -> UITree {
         let Some(ZoomLayout {
             panes,
+            row_focus,
             center,
             scale,
             column,
@@ -2438,6 +2498,33 @@ impl NodeTree {
             };
             ui::rect(settings.palette.accent, position, size)
         });
+        // while dragging: the node framed, what is shown of its children greyed out (rows focused inside it)
+        let dragged = self
+            .zoom_press
+            .filter(|&(id, from, at)| self.nodes.contains_key(id) && Self::zoom_dragged(from, at))
+            .into_iter()
+            .flat_map(|(id, ..)| {
+                panes
+                    .iter()
+                    .zip(&row_focus)
+                    .filter(move |(pane, _)| self.contains(id, pane.node))
+                    .map(move |(pane, &focus)| {
+                        let [x, y, width, height] = pane.rect.map(|value| value as f32 * scale);
+                        if focus != id && self.contains(id, focus) {
+                            let mut grey = settings.palette.bg;
+                            grey.0[3] = 0xB0;
+                            ui::rect(grey, [x, y], [width, height])
+                        } else {
+                            ui::frame(
+                                settings.palette.accent,
+                                settings.radius * scale,
+                                DROP_LINE,
+                                Style::absolute([x, y], [width, height]),
+                                Vec::new(),
+                            )
+                        }
+                    })
+            });
         let size_style = Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]);
         // a box: nothing is drawn outside `size`
         let scaled = UITree::new_styled(
@@ -2468,6 +2555,7 @@ impl NodeTree {
             std::iter::once(scaled)
                 .chain(titles)
                 .chain(drop_line)
+                .chain(dragged)
                 .collect(),
         )
     }
@@ -2503,31 +2591,48 @@ impl NodeTree {
         });
         // a lateral pan leaves the rows above the center's and the box alone
         let x_above = if lateral { x_still } else { x };
-        let panes = rows
+        // moved panes are still this far off
+        let moves = self.zoom_moves.as_ref().map(|(started, moves)| {
+            let left = 1.0 - swipe::spring_progress(*started).unwrap_or(1.0);
+            (moves, left)
+        });
+        let mut counts = HashMap::new();
+        let (panes, row_focus) = rows
             .iter()
             .enumerate()
-            .flat_map(|(index, panes)| {
+            .flat_map(|(index, (focus, panes))| {
                 let y = y + ((index as f32 - center_row as f32) * step).round() as i32;
                 let x = if index < center_row { x_above } else { x };
-                panes.iter().map(move |pane| {
-                    let rect = [
-                        pane.rect[0] + x,
-                        pane.rect[1] + y,
-                        pane.rect[2],
-                        pane.rect[3],
-                    ];
-                    Pane {
-                        rect,
-                        clip: rect,
-                        ..*pane
-                    }
-                })
+                panes.iter().map(move |pane| (*focus, pane, [x, y]))
             })
-            .collect();
+            .map(|(focus, pane, [x, y])| {
+                let count = counts.entry(pane.node).or_insert(0);
+                *count += 1;
+                let [moved_x, moved_y] = moves
+                    .and_then(|(moves, left)| {
+                        let offset = moves.get(&(pane.node, *count - 1))?;
+                        Some(offset.map(|value| (value * left).round() as i32))
+                    })
+                    .unwrap_or_default();
+                let rect = [
+                    pane.rect[0] + x + moved_x,
+                    pane.rect[1] + y + moved_y,
+                    pane.rect[2],
+                    pane.rect[3],
+                ];
+                let pane = Pane {
+                    rect,
+                    clip: rect,
+                    ..*pane
+                };
+                (pane, focus)
+            })
+            .unzip();
         let top = y as f32 - center_row as f32 * step;
         let column_height = (rows.len() as f32 - 1.0) * step + height;
         Some(ZoomLayout {
             panes,
+            row_focus,
             center,
             scale,
             column: [x_above as f32, top, width, column_height],
@@ -2619,7 +2724,7 @@ impl NodeTree {
             return;
         };
         if let Some((id, target, side, _)) = drop {
-            self.pan_zoom(|tree| {
+            self.move_zoom_panes(|tree| {
                 tree.move_node(id, target, side);
                 tree.remember_zoom_center(id);
             });
