@@ -11,8 +11,9 @@ mod notification_list;
 mod notifications;
 mod resources;
 mod system;
+mod tray;
 
-use super::treeview::{BTN_LEFT, guide};
+use super::treeview::{BTN_LEFT, BTN_RIGHT, guide};
 use crate::{command_hub::bar_bg, ui};
 use chrono::{Local, NaiveDate};
 use controls::Controls;
@@ -27,6 +28,10 @@ use sonamu_ui::{
 };
 use std::sync::Arc;
 use system::System;
+use tray::Tray;
+
+/// The middle mouse button (evdev)
+const BTN_MIDDLE: u32 = 0x112;
 
 /// Room between segments and at the bar's ends
 const GAP: f32 = 12.0;
@@ -88,6 +93,8 @@ enum Segment {
     Resources,
     /// Wifi, bluetooth, volume and brightness; opens the hub
     Hub,
+    /// The tray's icons (`Tray::items`, passive ones left out)
+    Tray,
     /// The notifications' bell, with their count; opens their list
     Bell,
 }
@@ -111,6 +118,8 @@ enum Popup {
     Resources(resources::Sort),
     /// With this section's list shown
     Hub(Option<hub::Section>),
+    /// A tray item's menu (`Tray::menu`, read meanwhile)
+    TrayMenu,
     Notifications,
     /// `StatusBar::launcher`'s
     Launcher,
@@ -121,6 +130,7 @@ impl Popup {
             Self::Calendar(_) => Segment::Time,
             Self::Resources(_) => Segment::Resources,
             Self::Hub(_) => Segment::Hub,
+            Self::TrayMenu => Segment::Tray,
             Self::Notifications => Segment::Bell,
             Self::Launcher => Segment::Launcher,
         }
@@ -223,6 +233,7 @@ pub struct StatusBar {
     /// What `tick` last saw: the clock's text and the popping up notifications
     shown: (String, Vec<u32>, bool),
     controls: Controls,
+    tray: Tray,
 }
 
 /// Under the bar's right end: the notifications popping up, `GAP` apart
@@ -239,6 +250,7 @@ impl StatusBar {
             system: System::start(move || system_changed()),
             notifications: Notifications::start(Arc::clone(&changed)),
             controls: Controls::start(Arc::clone(&changed)),
+            tray: Tray::start(Arc::clone(&changed)),
             icons: Icons::start(changed),
             launcher: None,
             shown: Default::default(),
@@ -272,6 +284,7 @@ impl StatusBar {
             (Segment::Time, vec![(Self::time(), fg)]),
         ];
         let right = [
+            (Segment::Tray, self.tray_spans(palette)),
             (Segment::Bell, self.bell(palette)),
             (
                 Segment::Resources,
@@ -305,6 +318,43 @@ impl StatusBar {
             x -= GAP;
         }
         placed
+    }
+
+    /// The tray's shown items
+    fn tray_items(&self) -> Vec<tray::Item> {
+        let items = self.tray.items.lock().unwrap();
+        items.iter().filter(|item| !item.passive).cloned().collect()
+    }
+
+    /// Room for the tray's icons: 2 columns each, 1 between
+    fn tray_spans(&self, palette: &Palette) -> Spans {
+        let count = self.tray_items().len();
+        if count == 0 {
+            return Vec::new();
+        }
+        vec![("   ".repeat(count - 1) + "  ", palette.fg)]
+    }
+
+    /// The tray's icons from `left`: its pixmap, else its icon by name
+    #[expect(clippy::cast_precision_loss, reason = "a few icons")]
+    fn tray_icons(&self, left: f32) -> Vec<UITree> {
+        let size = font_size() * 1.1;
+        let top = (height() as f32 - size) / 2.0;
+        self.tray_items()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let image = item.pixmap.or_else(|| self.icons.get(&item.icon_name))?;
+                let x = left + index as f32 * 3.0 * char_width();
+                Some(
+                    UITree::leaf_styled(
+                        UIElement::Image(image),
+                        Style::absolute([x, top], [size, size]),
+                    )
+                    .with_pointer(),
+                )
+            })
+            .collect()
     }
 
     /// The count over the bell's top right corner, small (`left` is the bell's)
@@ -359,6 +409,9 @@ impl StatusBar {
             );
             if *segment == Segment::Bell {
                 children.extend(self.bell_count(&settings.palette, *left));
+            }
+            if *segment == Segment::Tray {
+                children.extend(self.tray_icons(*left));
             }
         }
         let mut trees = vec![UITree::new_container_styled(
@@ -439,6 +492,7 @@ impl StatusBar {
                 .map(|launcher| launcher.draw(settings, &self.icons))
                 .unwrap_or_default(),
             Popup::Hub(open) => hub::draw(settings, &self.controls.state.lock().unwrap(), open),
+            Popup::TrayMenu => tray::draw_menu(settings, self.tray.menu.lock().unwrap().as_ref()),
         }
     }
 
@@ -452,6 +506,7 @@ impl StatusBar {
             }
             Popup::Launcher => Launcher::size(),
             Popup::Hub(open) => hub::size(&self.controls.state.lock().unwrap(), open),
+            Popup::TrayMenu => tray::menu_size(self.tray.menu.lock().unwrap().as_ref()),
         };
         let [left, segment_width] = placed
             .iter()
@@ -477,6 +532,9 @@ impl StatusBar {
             .set_want_processes(matches!(popup, Some(Popup::Resources(_))));
         self.controls
             .set_want_lists(matches!(popup, Some(Popup::Hub(_))));
+        if popup != Some(Popup::TrayMenu) {
+            self.tray.close_menu();
+        }
     }
 
     /// A mouse event (in the screen's coords, `width` wide); the root passes it on unless `consumed`
@@ -490,13 +548,14 @@ impl StatusBar {
         let [x, y] = event.position;
         let placed = self.layout(state, palette, width);
         let on_bar = y < f64::from(height());
-        let pressed = matches!(
-            event.kind,
+        let button = match event.kind {
             MouseEventKind::Button {
-                button: BTN_LEFT,
+                button,
                 pressed: true,
-            }
-        );
+            } => Some(button),
+            _ => None,
+        };
+        let pressed = button == Some(BTN_LEFT);
         let inside = |[ax, ay, aw, ah]: [f32; 4]| {
             let [ax, ay, aw, ah] = [ax, ay, aw, ah].map(f64::from);
             (ax..ax + aw).contains(&x) && (ay..ay + ah).contains(&y)
@@ -525,53 +584,39 @@ impl StatusBar {
                 }
             }
         }
-        if let Some(([ax, ay, ..], index)) = self
-            .popup_notifications(palette, width)
-            .into_iter()
-            .enumerate()
-            .find_map(|(index, (area, _))| inside(area).then_some((area, index)))
-        {
-            if pressed {
-                let click = {
-                    let store = self.notifications.store.lock().unwrap();
-                    let notification = store.popups().nth(index);
-                    let at = Lines::new().at([x - f64::from(ax), y - f64::from(ay)]);
-                    notification
-                        .zip(at)
-                        .map(|(n, (line, column))| notification_list::click_popup(n, line, column))
-                };
-                if let Some(click) = click {
-                    self.apply_notification_click(click);
-                }
-            }
-            return BarResponse {
-                consumed: true,
-                damaged: pressed,
-                action: None,
-            };
+        if let Some(response) = self.mouse_on_popup_notification(palette, [x, y], width, pressed) {
+            return response;
         }
         if !on_bar {
             return BarResponse::default();
         }
         let mut response = BarResponse {
             consumed: true,
-            damaged: pressed,
+            damaged: button.is_some(),
             action: None,
         };
-        if !pressed {
+        let Some(button) = button else {
             return response;
-        }
+        };
         // half the gap around each segment is its too
-        let Some(segment) = placed
+        let Some((segment, [left, _])) = placed
             .iter()
             .find(|placed| {
                 let [left, w] = placed.span;
                 (f64::from(left - GAP / 2.0)..f64::from(left + w + GAP / 2.0)).contains(&x)
             })
-            .map(|placed| placed.segment)
+            .map(|placed| (placed.segment, placed.span))
         else {
             return response;
         };
+        if segment == Segment::Tray {
+            self.click_tray(button, x - f64::from(left));
+            return response;
+        }
+        // other buttons only on the tray
+        if button != BTN_LEFT {
+            return response;
+        }
         // clicking a segment again closes its popup
         let open = |popup: Popup| (was.map(Popup::segment) != Some(segment)).then_some(popup);
         match segment {
@@ -583,8 +628,74 @@ impl StatusBar {
             Segment::Bell => self.set_popup(open(Popup::Notifications)),
             Segment::Hub => self.set_popup(open(Popup::Hub(None))),
             Segment::Launcher => self.set_popup(open(Popup::Launcher)),
+            // handled above
+            Segment::Tray => {}
         }
         response
+    }
+
+    /// A mouse event at `[x, y]` over a notification popping up (a click dismisses or activates it)
+    fn mouse_on_popup_notification(
+        &self,
+        palette: &Palette,
+        [x, y]: [f64; 2],
+        width: f32,
+        pressed: bool,
+    ) -> Option<BarResponse> {
+        let ([ax, ay, ..], index) = self
+            .popup_notifications(palette, width)
+            .into_iter()
+            .enumerate()
+            .find_map(|(index, ([ax, ay, aw, ah], _))| {
+                let [ax, ay, aw, ah] = [ax, ay, aw, ah].map(f64::from);
+                ((ax..ax + aw).contains(&x) && (ay..ay + ah).contains(&y))
+                    .then_some(([ax, ay, aw, ah], index))
+            })?;
+        if pressed {
+            let click = {
+                let store = self.notifications.store.lock().unwrap();
+                let notification = store.popups().nth(index);
+                let at = Lines::new().at([x - ax, y - ay]);
+                notification
+                    .zip(at)
+                    .map(|(n, (line, column))| notification_list::click_popup(n, line, column))
+            };
+            if let Some(click) = click {
+                self.apply_notification_click(click);
+            }
+        }
+        Some(BarResponse {
+            consumed: true,
+            damaged: pressed,
+            action: None,
+        })
+    }
+
+    /// A click `x` px into the tray: left activates, middle secondary-activates, right opens the menu
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "an icon's index"
+    )]
+    fn click_tray(&mut self, button: u32, x: f64) {
+        let index = (x.max(0.0) / f64::from(3.0 * char_width())) as usize;
+        let Some(item) = self.tray_items().into_iter().nth(index) else {
+            return;
+        };
+        match button {
+            BTN_LEFT if item.item_is_menu => {
+                self.tray.activate(&item);
+                self.set_popup(Some(Popup::TrayMenu));
+            }
+            BTN_LEFT => self.tray.activate(&item),
+            BTN_MIDDLE => self.tray.secondary_activate(&item),
+            BTN_RIGHT => {
+                self.set_popup(None);
+                self.tray.open_menu(&item);
+                self.set_popup(Some(Popup::TrayMenu));
+            }
+            _ => {}
+        }
     }
 
     fn apply_notification_click(&self, click: notification_list::Click) {
@@ -628,6 +739,15 @@ impl StatusBar {
                     return false;
                 };
                 self.apply_notification_click(click);
+                return true;
+            }
+            Popup::TrayMenu => {
+                let id = tray::menu_click(self.tray.menu.lock().unwrap().as_ref(), line);
+                let Some(id) = id else {
+                    return false;
+                };
+                self.tray.click_menu(id);
+                self.set_popup(None);
                 return true;
             }
             Popup::Hub(open) => {

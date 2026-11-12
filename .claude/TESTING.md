@@ -42,3 +42,7 @@ Found while debugging #60; nothing here is in the repo's code.
 - Test runs share the machine: the status bar sets the real power profile (`power-saver` at start, and on clicks).
 - 2026-11-12: `wtype f` (with a held `wtype -s` keyboard too) reached the root as `Escape`; key handling is
   unit-tested instead (eg `status_bar::launcher` tests).
+- Tray (#150): a ~40-line scratch zbus 6 program serving `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu`
+  (`GetLayout` children as `zbus::Structure::from((id, props, children))` variants) and calling the watcher's
+  `RegisterStatusNotifierItem` stands in for an app (`cargo build --offline` once zbus is cached); run it inside the
+  same `dbus-run-session` as Sonamu. Right click: `click 273` (BTN_RIGHT) in the pointer client.

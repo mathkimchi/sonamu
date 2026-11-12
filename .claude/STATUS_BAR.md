@@ -95,7 +95,15 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
   slider click sets the level, the icon mutes; outputs list; Settings placeholder), OSD (middle, under the bar,
   1.5 s; not while the hub is open). Wifi connects only to networks `nmcli` can join without asking (no
   password prompt yet).
-- Headless tests: the test `XDG_RUNTIME_DIR` hides PipeWire, so volume reads fail there (OSD untested live).
+- Headless tests: the test `XDG_RUNTIME_DIR` hides PipeWire; give Sonamu `PIPEWIRE_RUNTIME_DIR=/run/user/1000
+  PULSE_RUNTIME_PATH=/run/user/1000/pulse` (OSD checked that way).
+- Done: 7. `tray.rs`: serves `org.kde.StatusNotifierWatcher` (`/StatusNotifierWatcher`; items register a bus
+  name, or an object path on the sender as Ayatana's do), emits `StatusNotifierHostRegistered` at start; a thread
+  reads every item's properties every 2 s (no proxy property cache: items signal `NewIcon`, not
+  `PropertiesChanged`), drops ones that can't be read; `Passive` ones aren't drawn. Icons: `IconPixmap` (ARGB →
+  RGBA, nearest 48 px), else `IconName` via `Icons`. Left: `Activate` (menu if `ItemIsMenu`), middle:
+  `SecondaryActivate`, right: its DBusMenu (`AboutToShow`, `GetLayout` parsed from `Variant`s; submenus indented;
+  `_` mnemonics dropped; click → `Event(id, "clicked")`). Tested with a scratch zbus item (TESTING.md).
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work
