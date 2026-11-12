@@ -899,25 +899,28 @@ impl DrawingSharedData<'_> {
         let mut text_renderer =
             TextRenderer::new(self.atlas, self.device, MultisampleState::default(), None);
 
-        text_renderer
-            .prepare(
-                self.device,
-                self.queue,
-                self.font_system,
-                self.atlas,
-                self.viewport,
-                [glyphon::TextArea {
-                    buffer: text_buffer,
-                    left,
-                    top,
-                    scale,
-                    bounds,
-                    default_color: glyphon::Color::rgb(255, 255, 255),
-                    custom_glyphs: &[],
-                }],
-                self.swash_cache,
-            )
-            .unwrap();
+        // huge text (eg magnified) can fill the glyph atlas, since glyphon rasterizes a visible line's
+        // glyphs before cutting them to the bounds: skip it rather than crash
+        if let Err(err) = text_renderer.prepare(
+            self.device,
+            self.queue,
+            self.font_system,
+            self.atlas,
+            self.viewport,
+            [glyphon::TextArea {
+                buffer: text_buffer,
+                left,
+                top,
+                scale,
+                bounds,
+                default_color: glyphon::Color::rgb(255, 255, 255),
+                custom_glyphs: &[],
+            }],
+            self.swash_cache,
+        ) {
+            log::warn!("Text not drawn: {err}");
+            return;
+        }
 
         text_renderer
             .render(self.atlas, self.viewport, &mut self.render_pass)
