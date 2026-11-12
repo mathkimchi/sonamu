@@ -6,7 +6,7 @@
   on the project itself rather than on something in it. That is also the state right after Super+P, so a freshly
   focus path ending at the project node shows it too (#145: no separate selected state).
 - It replaces the panes there (they were the last child's pane before). Rows, from the top: name, directory, key hint,
-  then `NEW_ROWS` (#154: no row per child, the zoom-out view shows them; project `p`, terminal `t`, browser `b`; no command hub since the buffer line). Rows are a fixed height so the project hit-tests clicks itself.
+  then `NEW_ROWS` on one line, in `NEW_CELL` font sizes wide cells (#154: no row per child, the zoom-out view shows them; project `p`, terminal `t`, browser `b`; no command hub since the buffer line). Rows are a fixed height so the project hit-tests clicks itself. A box (`overview_header`, unfocused border) surrounds the rows, apart from the zoom-out view.
 - `p` (#81) adds an empty project (`ProjectApplet::empty`, no contents, this project's directory) to the inner
   root and focuses inside it, so its own overview shows, ready to rename and fill.
 - Icon: a row after the directory (so the hint is row 3, `NEW_ROWS` from `OPTIONS_ROW` 4). `i` or a click on it opens a

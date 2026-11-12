@@ -29,7 +29,7 @@ use sonamu_common::{
 use sonamu_ui::{
     color::Color,
     display_units::{DisplayContainerSize, ToPx},
-    ui_element::{Style, UIElement, UITree},
+    ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
 use std::{
@@ -42,14 +42,16 @@ use std::{
 /// Its name until it is renamed: its inner tree root's label
 const LABEL: &str = "Project";
 
-// The overview's rows (`overview_rows`): the name, its directory, its icon, a hint, then `NEW_ROWS`
-// (its contents are in the zoom-out view below, #154)
+// The overview's rows (`overview_rows`), in a box: the name, its directory, its icon, a hint, then `NEW_ROWS` on one
+// line (its contents are in the zoom-out view below, #154)
 const DIRECTORY_ROW: usize = 1;
 const ICON_ROW: usize = 2;
 /// The only row a click does nothing on
 const HINT_ROW: usize = 3;
 /// Rows before `NEW_ROWS` (or the directory or icon options, while setting one)
 const OPTIONS_ROW: usize = 4;
+/// Of each of `NEW_ROWS`' cells on their line, in font sizes
+const NEW_CELL: f32 = 10.0;
 /// The icons the picker lists (any typed character works too)
 const ICONS: [(char, &str); 20] = [
     (PROJECT_ICON, "briefcase"),
@@ -82,7 +84,7 @@ enum New {
     Project,
     Program(fn() -> String),
 }
-/// Rows after its contents that add to it: label, key, and what it adds
+/// Cells on a line that add to it: label, key, and what it adds
 const NEW_ROWS: [(&str, char, New); 3] = [
     ("+ project  (p)", 'p', New::Project),
     ("+ terminal  (t)", 't', New::Program(terminal)),
@@ -402,8 +404,7 @@ impl ProjectApplet {
         if self.setting_directory.is_some() || self.picking_icon.is_some() {
             return None;
         }
-        let rows = OPTIONS_ROW + NEW_ROWS.len();
-        Some(PAD + rows as f32 * row_height() + PAD)
+        Some(PAD + (OPTIONS_ROW + 1) as f32 * row_height() + PAD)
     }
 
     /// Starts typing a new directory, from the current one (the runner's if it has none)
@@ -620,9 +621,13 @@ impl ProjectApplet {
             }
             Some(DIRECTORY_ROW) => self.start_setting_directory(),
             Some(ICON_ROW) => self.start_picking_icon(),
-            Some(row) if row >= OPTIONS_ROW => {
-                if row - OPTIONS_ROW < NEW_ROWS.len() {
-                    self.add_new(row - OPTIONS_ROW);
+            Some(OPTIONS_ROW) => {
+                let cell = NEW_CELL * font_size();
+                if let Some(index) = (0..NEW_ROWS.len()).find(|&index| {
+                    let left = f64::from(PAD + index as f32 * cell);
+                    (left..left + f64::from(cell)).contains(&x)
+                }) {
+                    self.add_new(index);
                 }
             }
             Some(_) => {}
@@ -713,9 +718,8 @@ impl ProjectApplet {
                     }
                 })
                 .collect(),
-            (None, None) => NEW_ROWS
-                .map(|(label, _, _)| (label.to_string(), text))
-                .into(),
+            // `NEW_ROWS` are on one line instead
+            (None, None) => Vec::new(),
         }
     }
 
@@ -777,6 +781,8 @@ impl ProjectApplet {
             ),
         };
         let below = self.overview_options();
+        let count = OPTIONS_ROW + below.len().max(1);
+        let options = !below.is_empty();
         let rows = [
             (title, text),
             directory,
@@ -799,6 +805,11 @@ impl ProjectApplet {
                     row.with_pointer()
                 }
             })
+            .collect::<Vec<_>>();
+        let header = Self::overview_header(width, count, options);
+        let rows = header
+            .into_iter()
+            .chain(rows)
             .chain(self.zoom_view(size))
             .collect();
         UITree::new_styled(
@@ -806,6 +817,35 @@ impl ProjectApplet {
             Style::full_size(),
             rows,
         )
+    }
+
+    /// The box around the overview's `count` rows, apart from the zoom-out view, and unless `options` show,
+    /// `NEW_ROWS` on one line
+    fn overview_header(width: f32, count: usize, options: bool) -> Vec<UITree> {
+        let settings = settings::get();
+        let layout = overview_rows();
+        let header = ui::frame(
+            settings.border.unfocused,
+            settings.radius,
+            settings.gap_and_border_px().1 as f32,
+            Style::absolute(
+                [PAD / 2.0; 2],
+                [(width - PAD).max(0.0), count as f32 * row_height() + PAD],
+            ),
+            Vec::new(),
+        );
+        let cell = NEW_CELL * font_size();
+        let new_cells = (0..)
+            .zip(NEW_ROWS)
+            .filter(|_| !options)
+            .map(|(index, (label, _, _))| {
+                UITree::leaf_styled(
+                    ui::text(label, settings.palette.fg),
+                    layout.style(OPTIONS_ROW, PAD + index as f32 * cell, cell),
+                )
+                .with_pointer()
+            });
+        std::iter::once(header).chain(new_cells).collect()
     }
 
     /// Its tree's zoom-out view below the overview's rows; while it springs, from or to all of `size`
