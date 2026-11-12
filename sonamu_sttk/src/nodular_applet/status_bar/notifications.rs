@@ -108,6 +108,12 @@ impl Notifications {
         }
     }
 
+    /// One of its actions, then dismissed
+    pub fn invoke(&self, id: u32, key: String) {
+        let _ = self.signals.send(Signal::Action(id, key));
+        self.close(id, CloseReason::Dismissed);
+    }
+
     /// Clicked: its default action if it has one, then dismissed
     pub fn activate(&self, id: u32) {
         let has_default = self

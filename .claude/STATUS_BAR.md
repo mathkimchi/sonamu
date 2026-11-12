@@ -117,6 +117,8 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
   stays there.
 - Improvement: the hovered segment, and the one whose popup is open, get a lighter background (`hovered`,
   `segment_at`; active screen only).
+- Improvement: a popping up notification shows its actions other than `default` as `[label]` buttons (while they
+  fit one line); a click sends `ActionInvoked(id, key)`, then dismisses it.
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work

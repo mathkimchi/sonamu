@@ -24,10 +24,12 @@ const BODY_LINES: usize = 3;
 pub const POPUPS: usize = 3;
 const CLEAR_ALL: &str = "Clear all";
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum Click {
     /// Clicked it: its default action, then dismissed
     Activate(u32),
+    /// One of its other actions (by key), then dismissed
+    Action(u32, String),
     Dismiss(u32),
     ClearAll,
     DoNotDisturb,
@@ -199,7 +201,36 @@ fn popup_lines(notification: &Notification, palette: &Palette) -> Vec<Spans> {
             .filter(|line| !line.is_empty())
             .map(|line| vec![(line, palette.inactive)]),
     );
+    let buttons = action_buttons(notification);
+    if !buttons.is_empty() {
+        lines.push(
+            buttons
+                .into_iter()
+                .map(|(_, label, _)| (format!("[{label}]  "), palette.accent))
+                .collect(),
+        );
+    }
     lines
+}
+
+/// Its actions other than `default`, as buttons: key, label and columns (from `TEXT_COLUMN`), while they fit
+fn action_buttons(notification: &Notification) -> Vec<(String, String, [usize; 2])> {
+    let mut column = 0;
+    notification
+        .actions
+        .iter()
+        .filter(|(key, _)| key != "default")
+        .map_while(|(key, label)| {
+            let label = cut(label, 16);
+            // `[label]  `
+            let end = column + columns(&label) + 2;
+            (end <= COLUMNS - TEXT_COLUMN).then(|| {
+                let button = (key.clone(), label, [column, end]);
+                column = end + 2;
+                button
+            })
+        })
+        .collect()
 }
 
 /// Its height in lines
@@ -219,9 +250,18 @@ pub fn draw_popup(notification: &Notification, palette: &Palette, icons: &Icons)
 }
 
 pub fn click_popup(notification: &Notification, line: usize, column: usize) -> Click {
+    let palette = Palette::default();
+    let buttons_line = popup_line_count(notification, &palette) - 1;
+    let buttons = action_buttons(notification);
     if line == 0 && column + 3 >= COLUMNS {
-        Click::Dismiss(notification.id)
-    } else {
-        Click::Activate(notification.id)
+        return Click::Dismiss(notification.id);
     }
+    if line == buttons_line
+        && let Some((key, ..)) = buttons.into_iter().find(|(_, _, [from, to])| {
+            (from + TEXT_COLUMN..to + TEXT_COLUMN).contains(&column)
+        })
+    {
+        return Click::Action(notification.id, key);
+    }
+    Click::Activate(notification.id)
 }

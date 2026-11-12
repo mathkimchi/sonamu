@@ -835,6 +835,7 @@ impl StatusBar {
     fn apply_notification_click(&self, click: notification_list::Click) {
         match click {
             notification_list::Click::Activate(id) => self.notifications.activate(id),
+            notification_list::Click::Action(id, key) => self.notifications.invoke(id, key),
             notification_list::Click::Dismiss(id) => {
                 self.notifications.close(id, CloseReason::Dismissed);
             }
