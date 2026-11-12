@@ -71,6 +71,16 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
 - Widths: Nerd Font icons count as 2 columns (`columns`), they render ~1.5 wide.
 - Don't `match` on `snapshot.lock()` directly when an arm locks again (the guard lives through the match: deadlock).
 - Process names are `comm` (15 chars, eg `.quickshell-wra`).
+- Done: 4. `notifications.rs`: zbus 6 (no blocking API: `zbus::block_on(Builder::session().name(..).serve_at(..)
+  .build())`, then zbus's helper thread serves it); the `Server` interface fills `Arc<Mutex<Store>>`; signals
+  (`NotificationClosed`, `ActionInvoked`) go out from the serving thread via an mpsc channel. Name taken (eg DMS
+  running) → logged, nothing served. `notification_list.rs`: bell (count as a `UIElement::Scaled(0.55)`
+  superscript; 󰂛 while Do not disturb), list popup (dismiss ✕, click = `default` action + dismiss, clear all, Do
+  not disturb), popping up ones (≤ 3, under the bar's right end, `popups()`: until `popup_until`; critical ones
+  until dismissed; none while Do not disturb). `StatusBar::tick` redraws when the clock text or the popping up set
+  changes. Icons not drawn yet (`icon`, `desktop_entry` kept).
+- Tested in a private bus: `dbus-run-session -- <script>` running Sonamu, `busctl --user call -- ... Notify
+  "susssasa{sv}i" app 0 "" summary body 0 0 -1` (`--`, else `-1` reads as an option).
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work

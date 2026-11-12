@@ -32,6 +32,7 @@
     "damping_ratio": 1.0
   },
   "zoom_out": { "child_previews": true, "view": "free" },
+  "notifications": { "timeout": 5.0 },
   "keybinds": [],
   "restore_programs": [],
   "startup": [],

@@ -43,6 +43,10 @@
       "description": "Smaller copies of windows and images, so they look smooth when drawn small (eg the zoom-out view); a bit\nmore GPU work each time a window updates",
       "type": "boolean"
     },
+    "notifications": {
+      "description": "Desktop notifications, shown by the status bar (#150)",
+      "$ref": "#/$defs/NotificationSettings"
+    },
     "palette": {
       "$ref": "#/$defs/Palette"
     },
@@ -177,6 +181,17 @@
         "key",
         "command"
       ]
+    },
+    "NotificationSettings": {
+      "description": "Desktop notifications (#150)",
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "description": "How long a new one pops up, in seconds (unless it asks for its own time; critical ones stay)",
+          "type": "number",
+          "format": "float"
+        }
+      }
     },
     "Palette": {
       "type": "object",

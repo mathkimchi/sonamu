@@ -120,8 +120,6 @@ pub struct RootNodeApplet {
     echoed: u64,
     /// The status bar's popups (#150)
     status_bar: StatusBar,
-    /// The time the bar last showed, to redraw when it changes
-    bar_time: String,
     loop_handle: LoopHandle<'static, Self>,
 }
 
@@ -611,7 +609,6 @@ impl RootNodeApplet {
                     .unwrap();
                 StatusBar::new(move || ping.ping())
             },
-            bar_time: String::new(),
             loop_handle: event_loop.clone(),
         };
         // a clean session starts with the help shown
@@ -979,9 +976,9 @@ impl RootNodeApplet {
         self.holder.do_zoom_action();
     }
 
-    /// Redraws when the bar's clock changes; checked a few times a second
+    /// Redraws when the bar's clock or popping up notifications change; checked a few times a second
     fn tick_bar_clock(_: Instant, (): &mut (), root: &mut Self) -> TimeoutAction {
-        if StatusBar::tick(&mut root.bar_time) {
+        if root.status_bar.tick() {
             root.surface.damage();
         }
         TimeoutAction::ToDuration(Duration::from_millis(200))

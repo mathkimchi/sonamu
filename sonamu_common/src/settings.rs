@@ -66,6 +66,8 @@ pub struct Settings {
     pub swipe: SwipeSettings,
     /// The zoom-out view (#145)
     pub zoom_out: ZoomOutSettings,
+    /// Desktop notifications, shown by the status bar (#150)
+    pub notifications: NotificationSettings,
     /// Global shortcuts that run a shell command
     pub keybinds: Vec<Keybind>,
     /// Programs restored running in their terminal (see `.claude/SESSIONS.md`)
@@ -188,6 +190,14 @@ pub struct SwipeSettings {
     pub stiffness: f32,
     /// Of that spring: 1 is critically damped (no bounce), below 1 overshoots and bounces, above 1 is sluggish
     pub damping_ratio: f32,
+}
+
+/// Desktop notifications (#150)
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[schemars(transform = optional_fields)]
+pub struct NotificationSettings {
+    /// How long a new one pops up, in seconds (unless it asks for its own time; critical ones stay)
+    pub timeout: f32,
 }
 
 /// The zoom-out view (#145); pinches scale it

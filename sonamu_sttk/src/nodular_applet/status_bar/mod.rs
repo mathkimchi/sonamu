@@ -2,18 +2,22 @@
 //! See `.claude/STATUS_BAR.md`.
 
 mod calendar;
+mod notification_list;
+mod notifications;
 mod resources;
 mod system;
 
 use super::treeview::{BTN_LEFT, guide};
 use crate::{command_hub::bar_bg, ui};
 use chrono::{Local, NaiveDate};
+use notifications::{CloseReason, Notifications};
 use sonamu_common::settings::{Palette, Settings};
 use sonamu_ui::{
     color::Color,
     ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{MouseEvent, MouseEventKind},
 };
+use std::sync::Arc;
 use system::System;
 
 /// Room between segments and at the bar's ends
@@ -68,6 +72,8 @@ enum Segment {
     Time,
     /// Battery, cpu and memory; opens the resources popup
     Resources,
+    /// The notifications' bell, with their count; opens their list
+    Bell,
 }
 
 /// What a click on the bar does, for the root
@@ -87,12 +93,14 @@ enum Popup {
     /// Showing the month of this date's
     Calendar(NaiveDate),
     Resources(resources::Sort),
+    Notifications,
 }
 impl Popup {
     fn segment(self) -> Segment {
         match self {
             Self::Calendar(_) => Segment::Time,
             Self::Resources(_) => Segment::Resources,
+            Self::Notifications => Segment::Bell,
         }
     }
 }
@@ -174,20 +182,41 @@ impl Lines {
 pub struct StatusBar {
     popup: Option<Popup>,
     system: System,
+    notifications: Notifications,
+    /// What `tick` last saw: the clock's text and the popping up notifications
+    shown: (String, Vec<u32>),
 }
 
+/// Under the bar's right end: the notifications popping up, `GAP` apart
+const POPUP_NOTIFICATION_GAP: f32 = 8.0;
+
 impl StatusBar {
-    /// Starts reading the system; `changed` is called (on another thread) when there's something new to show
+    /// Starts reading the system and serving notifications; `changed` is called (on other threads) when there's
+    /// something new to show
     pub fn new(changed: impl Fn() + Send + Sync + 'static) -> Self {
+        let changed: Arc<dyn Fn() + Send + Sync> = Arc::new(changed);
+        let system_changed = Arc::clone(&changed);
         Self {
             popup: None,
-            system: System::start(changed),
+            system: System::start(move || system_changed()),
+            notifications: Notifications::start(changed),
+            shown: Default::default(),
         }
     }
 
     /// The time as shown, eg `2026-12-25 12:00:00PM`
     fn time() -> String {
         Local::now().format("%Y-%m-%d %I:%M:%S%p").to_string()
+    }
+
+    /// The bell, and room for its count's superscript
+    fn bell(&self, palette: &Palette) -> Spans {
+        let icon = if self.notifications.store.lock().unwrap().do_not_disturb {
+            notification_list::BELL_OFF
+        } else {
+            notification_list::BELL
+        };
+        vec![(format!("{icon} "), palette.fg)]
     }
 
     /// The segments with their text and place, for both drawing and clicking
@@ -200,10 +229,13 @@ impl StatusBar {
             ),
             (Segment::Time, vec![(Self::time(), fg)]),
         ];
-        let right = [(
-            Segment::Resources,
-            resources::segment(&self.system.snapshot.lock().unwrap(), palette),
-        )];
+        let right = [
+            (Segment::Bell, self.bell(palette)),
+            (
+                Segment::Resources,
+                resources::segment(&self.system.snapshot.lock().unwrap(), palette),
+            ),
+        ];
         let mut placed = Vec::new();
         let mut x = GAP;
         for (segment, spans) in left {
@@ -229,7 +261,31 @@ impl StatusBar {
         placed
     }
 
-    /// The bar, `width` wide, at the top of a screen, and on the active screen the open popup
+    /// The count over the bell's top right corner, small (`left` is the bell's)
+    fn bell_count(&self, palette: &Palette, left: f32) -> Option<UITree> {
+        let count = self.notifications.store.lock().unwrap().list.len();
+        if count == 0 {
+            return None;
+        }
+        let text = if count > 9 {
+            "9+".to_string()
+        } else {
+            count.to_string()
+        };
+        let scale = 0.55;
+        let [w, h] = [text_width(&text), font_size() * 1.3];
+        Some(UITree::new_styled(
+            UIElement::Scaled(scale),
+            Style::absolute([left + 1.5 * char_width(), 2.0], [w * scale, h * scale]),
+            vec![UITree::leaf_styled(
+                ui::text(text, palette.accent),
+                Style::absolute([0.0, 0.0], [w, h]),
+            )],
+        ))
+    }
+
+    /// The bar, `width` wide, at the top of a screen, and on the active screen the open popup and the
+    /// notifications popping up
     pub fn draw(
         &self,
         settings: &Settings,
@@ -246,24 +302,57 @@ impl StatusBar {
         let rows = ui::Rows::with_height(0.0, height);
         let placed = self.layout(state, &settings.palette, width);
         for Placed {
+            segment,
             spans,
             span: [left, w],
-            ..
         } in &placed
         {
             children.push(
                 rows.text(ui::spans(spans.clone()), *left, left + w)
                     .with_pointer(),
             );
+            if *segment == Segment::Bell {
+                children.extend(self.bell_count(&settings.palette, *left));
+            }
         }
         let mut trees = vec![UITree::new_container_styled(
             Style::absolute([0.0, 0.0], [width, height]),
             children,
         )];
-        if active && let Some(popup) = self.popup {
-            trees.push(self.draw_popup(settings, popup, &placed, width));
+        if active {
+            for (area, items) in self.popup_notifications(&settings.palette, width) {
+                trees.push(popup_frame(settings, area, items));
+            }
+            if let Some(popup) = self.popup {
+                let area = self.popup_area(popup, &placed, width);
+                trees.push(popup_frame(
+                    settings,
+                    area,
+                    self.popup_items(settings, popup),
+                ));
+            }
         }
         trees
+    }
+
+    /// The notifications popping up: each one's `[x, y, width, height]` and items, top down
+    fn popup_notifications(&self, palette: &Palette, width: f32) -> Vec<([f32; 4], Vec<UITree>)> {
+        let store = self.notifications.store.lock().unwrap();
+        let [w, _] = Lines::size(0, notification_list::COLUMNS);
+        let mut y = height() as f32 + POPUP_NOTIFICATION_GAP;
+        store
+            .popups()
+            .take(notification_list::POPUPS)
+            .map(|notification| {
+                let [_, h] = Lines::size(
+                    notification_list::popup_line_count(notification, palette),
+                    notification_list::COLUMNS,
+                );
+                let area = [(width - GAP - w).max(0.0), y, w, h];
+                y += h + POPUP_NOTIFICATION_GAP;
+                (area, notification_list::draw_popup(notification, palette))
+            })
+            .collect()
     }
 
     fn popup_items(&self, settings: &Settings, popup: Popup) -> Vec<UITree> {
@@ -271,6 +360,9 @@ impl StatusBar {
             Popup::Calendar(month) => calendar::draw(settings, month),
             Popup::Resources(sort) => {
                 resources::draw(settings, &self.system.snapshot.lock().unwrap(), sort)
+            }
+            Popup::Notifications => {
+                notification_list::draw(settings, &self.notifications.store.lock().unwrap())
             }
         }
     }
@@ -280,6 +372,9 @@ impl StatusBar {
         let [w, h] = match popup {
             Popup::Calendar(_) => calendar::size(),
             Popup::Resources(_) => resources::size(&self.system.snapshot.lock().unwrap()),
+            Popup::Notifications => {
+                notification_list::size(&self.notifications.store.lock().unwrap())
+            }
         };
         let [left, segment_width] = placed
             .iter()
@@ -292,22 +387,6 @@ impl StatusBar {
             left
         };
         [x.min(width - w).max(0.0), height() as f32, w, h]
-    }
-
-    fn draw_popup(
-        &self,
-        settings: &Settings,
-        popup: Popup,
-        placed: &[Placed],
-        width: f32,
-    ) -> UITree {
-        let [x, y, w, h] = self.popup_area(popup, placed, width);
-        let items = self.popup_items(settings, popup);
-        UITree::new_styled(
-            UIElement::Backgrounded(popup_bg(settings)),
-            Style::absolute([x, y], [w, h]),
-            vec![ui::frame(guide(), 0.0, 1.0, Style::full_size(), items)],
-        )
     }
 
     fn set_popup(&mut self, popup: Option<Popup>) {
@@ -334,11 +413,16 @@ impl StatusBar {
                 pressed: true,
             }
         );
+        let inside = |[ax, ay, aw, ah]: [f32; 4]| {
+            let [ax, ay, aw, ah] = [ax, ay, aw, ah].map(f64::from);
+            (ax..ax + aw).contains(&x) && (ay..ay + ah).contains(&y)
+        };
         let was = self.popup;
         if let Some(popup) = self.popup {
-            let [px, py, pw, ph] = self.popup_area(popup, &placed, width).map(f64::from);
-            if (px..px + pw).contains(&x) && (py..py + ph).contains(&y) {
-                let damaged = pressed && self.click_popup(popup, [x - px, y - py]);
+            let area = self.popup_area(popup, &placed, width);
+            if inside(area) {
+                let damaged = pressed
+                    && self.click_popup(popup, [x - f64::from(area[0]), y - f64::from(area[1])]);
                 return BarResponse {
                     consumed: true,
                     damaged,
@@ -356,6 +440,31 @@ impl StatusBar {
                     };
                 }
             }
+        }
+        if let Some(([ax, ay, ..], index)) = self
+            .popup_notifications(palette, width)
+            .into_iter()
+            .enumerate()
+            .find_map(|(index, (area, _))| inside(area).then_some((area, index)))
+        {
+            if pressed {
+                let click = {
+                    let store = self.notifications.store.lock().unwrap();
+                    let notification = store.popups().nth(index);
+                    let at = Lines::new().at([x - f64::from(ax), y - f64::from(ay)]);
+                    notification
+                        .zip(at)
+                        .map(|(n, (line, column))| notification_list::click_popup(n, line, column))
+                };
+                if let Some(click) = click {
+                    self.apply_notification_click(click);
+                }
+            }
+            return BarResponse {
+                consumed: true,
+                damaged: pressed,
+                action: None,
+            };
         }
         if !on_bar {
             return BarResponse::default();
@@ -387,8 +496,20 @@ impl StatusBar {
             Segment::Resources => {
                 self.set_popup(open(Popup::Resources(resources::Sort::default())));
             }
+            Segment::Bell => self.set_popup(open(Popup::Notifications)),
         }
         response
+    }
+
+    fn apply_notification_click(&self, click: notification_list::Click) {
+        match click {
+            notification_list::Click::Activate(id) => self.notifications.activate(id),
+            notification_list::Click::Dismiss(id) => {
+                self.notifications.close(id, CloseReason::Dismissed);
+            }
+            notification_list::Click::ClearAll => self.notifications.clear(),
+            notification_list::Click::DoNotDisturb => self.notifications.toggle_do_not_disturb(),
+        }
     }
 
     /// A click at `[x, y]` in the popup; whether it changed
@@ -411,6 +532,18 @@ impl StatusBar {
                     None => None,
                 }
             }
+            Popup::Notifications => {
+                let click = notification_list::click(
+                    &self.notifications.store.lock().unwrap(),
+                    line,
+                    column,
+                );
+                let Some(click) = click else {
+                    return false;
+                };
+                self.apply_notification_click(click);
+                return true;
+            }
         };
         if let Some(popup) = popup {
             self.set_popup(Some(popup));
@@ -418,13 +551,31 @@ impl StatusBar {
         popup.is_some()
     }
 
-    /// Whether the shown second changed since `last` (and the new one), for the root's clock timer
-    pub fn tick(last: &mut String) -> bool {
-        let now = Self::time();
-        let changed = now != *last;
-        *last = now;
+    /// Whether what changes by itself (the clock's second, which notifications pop up) changed since the last
+    /// call, for the root's timer
+    pub fn tick(&mut self) -> bool {
+        let popups = self
+            .notifications
+            .store
+            .lock()
+            .unwrap()
+            .popups()
+            .map(|n| n.id)
+            .collect();
+        let shown = (Self::time(), popups);
+        let changed = shown != self.shown;
+        self.shown = shown;
         changed
     }
+}
+
+/// A popup's background and frame at `[x, y, width, height]` around `items`
+fn popup_frame(settings: &Settings, [x, y, w, h]: [f32; 4], items: Vec<UITree>) -> UITree {
+    UITree::new_styled(
+        UIElement::Backgrounded(popup_bg(settings)),
+        Style::absolute([x, y], [w, h]),
+        vec![ui::frame(guide(), 0.0, 1.0, Style::full_size(), items)],
+    )
 }
 
 /// Opaque: over the panes, even a little translucency lets their text show through (blending is linear)
