@@ -88,6 +88,14 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
   via resvg; `Icons::get` asks and returns `None` until loaded). Notifications show `app_icon`/image path, else the
   `desktop-entry` hint's or the app name's icon. Keys: while the launcher is open the root sets
   `sonamu_common::BUFFER_MODE` (`sync_key_grab`) so every key comes to it (`handle_grabbed_key`).
+- Done: 6. `controls.rs` (threads: brightness from sysfs every 150 ms, volume re-read on `pactl subscribe` sink /
+  server events; either change sets `State::osd`; wifi (`nmcli`), bluetooth (`bluetoothctl`), sinks (`wpctl
+  status`, `Audio` › `Sinks:`) read at start and every 5 s while the hub is open; actions run on a thread, then
+  everything is read again). `hub.rs`: segment icons, popup (sections expand with `›`; on/off at a header's end;
+  slider click sets the level, the icon mutes; outputs list; Settings placeholder), OSD (middle, under the bar,
+  1.5 s; not while the hub is open). Wifi connects only to networks `nmcli` can join without asking (no
+  password prompt yet).
+- Headless tests: the test `XDG_RUNTIME_DIR` hides PipeWire, so volume reads fail there (OSD untested live).
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work

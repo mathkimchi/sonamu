@@ -2,7 +2,9 @@
 //! See `.claude/STATUS_BAR.md`.
 
 mod calendar;
+mod controls;
 mod desktop;
+mod hub;
 mod icons;
 mod launcher;
 mod notification_list;
@@ -13,6 +15,7 @@ mod system;
 use super::treeview::{BTN_LEFT, guide};
 use crate::{command_hub::bar_bg, ui};
 use chrono::{Local, NaiveDate};
+use controls::Controls;
 use icons::Icons;
 use launcher::Launcher;
 use notifications::{CloseReason, Notifications};
@@ -64,6 +67,10 @@ fn text_width(text: &str) -> f32 {
 /// Runs of text, each in its color
 type Spans = Vec<(String, Color)>;
 
+fn columns_of(spans: &Spans) -> usize {
+    spans.iter().map(|(text, _)| columns(text)).sum()
+}
+
 fn spans_width(spans: &Spans) -> f32 {
     spans.iter().map(|(text, _)| text_width(text)).sum()
 }
@@ -79,6 +86,8 @@ enum Segment {
     Time,
     /// Battery, cpu and memory; opens the resources popup
     Resources,
+    /// Wifi, bluetooth, volume and brightness; opens the hub
+    Hub,
     /// The notifications' bell, with their count; opens their list
     Bell,
 }
@@ -100,6 +109,8 @@ enum Popup {
     /// Showing the month of this date's
     Calendar(NaiveDate),
     Resources(resources::Sort),
+    /// With this section's list shown
+    Hub(Option<hub::Section>),
     Notifications,
     /// `StatusBar::launcher`'s
     Launcher,
@@ -109,6 +120,7 @@ impl Popup {
         match self {
             Self::Calendar(_) => Segment::Time,
             Self::Resources(_) => Segment::Resources,
+            Self::Hub(_) => Segment::Hub,
             Self::Notifications => Segment::Bell,
             Self::Launcher => Segment::Launcher,
         }
@@ -209,7 +221,8 @@ pub struct StatusBar {
     /// While its popup is open
     launcher: Option<Launcher>,
     /// What `tick` last saw: the clock's text and the popping up notifications
-    shown: (String, Vec<u32>),
+    shown: (String, Vec<u32>, bool),
+    controls: Controls,
 }
 
 /// Under the bar's right end: the notifications popping up, `GAP` apart
@@ -225,6 +238,7 @@ impl StatusBar {
             popup: None,
             system: System::start(move || system_changed()),
             notifications: Notifications::start(Arc::clone(&changed)),
+            controls: Controls::start(Arc::clone(&changed)),
             icons: Icons::start(changed),
             launcher: None,
             shown: Default::default(),
@@ -262,6 +276,10 @@ impl StatusBar {
             (
                 Segment::Resources,
                 resources::segment(&self.system.snapshot.lock().unwrap(), palette),
+            ),
+            (
+                Segment::Hub,
+                hub::segment(&self.controls.state.lock().unwrap(), palette),
             ),
         ];
         let mut placed = Vec::new();
@@ -351,6 +369,24 @@ impl StatusBar {
             for (area, items) in self.popup_notifications(&settings.palette, width) {
                 trees.push(popup_frame(settings, area, items));
             }
+            // not over the hub, which shows the same
+            let osd = hub::osd(&self.controls.state.lock().unwrap(), &settings.palette)
+                .filter(|_| !matches!(self.popup, Some(Popup::Hub(_))));
+            if let Some(spans) = osd {
+                // in the middle, under the bar
+                let [w, h] = Lines::size(1, columns_of(&spans));
+                let area = [
+                    ((width - w) / 2.0).max(0.0),
+                    height + POPUP_NOTIFICATION_GAP,
+                    w,
+                    h,
+                ];
+                trees.push(popup_frame(
+                    settings,
+                    area,
+                    vec![Lines::new().text(0, 0, spans)],
+                ));
+            }
             if let Some(popup) = self.popup {
                 let area = self.popup_area(popup, &placed, width);
                 trees.push(popup_frame(
@@ -402,6 +438,7 @@ impl StatusBar {
                 .as_ref()
                 .map(|launcher| launcher.draw(settings, &self.icons))
                 .unwrap_or_default(),
+            Popup::Hub(open) => hub::draw(settings, &self.controls.state.lock().unwrap(), open),
         }
     }
 
@@ -414,6 +451,7 @@ impl StatusBar {
                 notification_list::size(&self.notifications.store.lock().unwrap())
             }
             Popup::Launcher => Launcher::size(),
+            Popup::Hub(open) => hub::size(&self.controls.state.lock().unwrap(), open),
         };
         let [left, segment_width] = placed
             .iter()
@@ -437,6 +475,8 @@ impl StatusBar {
         }
         self.system
             .set_want_processes(matches!(popup, Some(Popup::Resources(_))));
+        self.controls
+            .set_want_lists(matches!(popup, Some(Popup::Hub(_))));
     }
 
     /// A mouse event (in the screen's coords, `width` wide); the root passes it on unless `consumed`
@@ -541,6 +581,7 @@ impl StatusBar {
                 self.set_popup(open(Popup::Resources(resources::Sort::default())));
             }
             Segment::Bell => self.set_popup(open(Popup::Notifications)),
+            Segment::Hub => self.set_popup(open(Popup::Hub(None))),
             Segment::Launcher => self.set_popup(open(Popup::Launcher)),
         }
         response
@@ -589,6 +630,15 @@ impl StatusBar {
                 self.apply_notification_click(click);
                 return true;
             }
+            Popup::Hub(open) => {
+                // not matched on directly: the lock would be held through the actions'
+                let click = hub::click(&self.controls.state.lock().unwrap(), open, line, column);
+                let Some(click) = click else {
+                    return false;
+                };
+                self.apply_hub_click(click);
+                return true;
+            }
             Popup::Launcher => {
                 let launched = self
                     .launcher
@@ -604,6 +654,26 @@ impl StatusBar {
             self.set_popup(Some(popup));
         }
         popup.is_some()
+    }
+
+    fn apply_hub_click(&mut self, click: hub::Click) {
+        let controls = &self.controls;
+        match click {
+            hub::Click::Open(section) => self.set_popup(Some(Popup::Hub(section))),
+            hub::Click::ToggleWifi => controls.toggle_wifi(),
+            hub::Click::ConnectWifi(ssid) => controls.connect_wifi(ssid),
+            hub::Click::ToggleBluetooth => controls.toggle_bluetooth(),
+            hub::Click::ToggleDevice(index) => {
+                let device = controls.state.lock().unwrap().devices.get(index).cloned();
+                if let Some(device) = device {
+                    controls.toggle_device(&device);
+                }
+            }
+            hub::Click::ToggleMute => controls.toggle_mute(),
+            hub::Click::Volume(level) => controls.set_volume(level),
+            hub::Click::Output(id) => controls.set_default_sink(id),
+            hub::Click::Brightness(level) => controls.set_brightness(level),
+        }
     }
 
     /// Whether keys go to the bar (the launcher's search), not the focused applet
@@ -626,8 +696,8 @@ impl StatusBar {
         }
     }
 
-    /// Whether what changes by itself (the clock's second, which notifications pop up) changed since the last
-    /// call, for the root's timer
+    /// Whether what changes by itself (the clock's second, which notifications pop up, the OSD going away) changed
+    /// since the last call, for the root's timer
     pub fn tick(&mut self) -> bool {
         let popups = self
             .notifications
@@ -637,7 +707,8 @@ impl StatusBar {
             .popups()
             .map(|n| n.id)
             .collect();
-        let shown = (Self::time(), popups);
+        let osd = hub::osd(&self.controls.state.lock().unwrap(), &Palette::default()).is_some();
+        let shown = (Self::time(), popups, osd);
         let changed = shown != self.shown;
         self.shown = shown;
         changed

@@ -179,13 +179,19 @@ mod tests {
         let mut launcher = Launcher {
             query: String::new(),
             selected: 0,
-            apps: ["Files", "Firefox", "Foot", "Thunderbird"].map(app).to_vec(),
+            apps: ["Files", "Firefox", "Foot", "Thunderbird"]
+                .map(app)
+                .to_vec(),
         };
         for c in "fo".chars() {
             launcher.key(KeySymbol::Char(c));
         }
         let names = |launcher: &Launcher| -> Vec<String> {
-            launcher.matches().iter().map(|app| app.name.clone()).collect()
+            launcher
+                .matches()
+                .iter()
+                .map(|app| app.name.clone())
+                .collect()
         };
         // a prefix first, then letters in order
         assert_eq!(names(&launcher), ["Foot", "Firefox"]);
