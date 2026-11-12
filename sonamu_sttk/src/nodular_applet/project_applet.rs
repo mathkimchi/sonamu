@@ -547,12 +547,15 @@ impl ProjectApplet {
             }
             // its tree's zoom-out view
             UIEvent::Mouse(MouseEvent {
-                kind: MouseEventKind::Scroll { delta, stop, .. },
+                kind:
+                    MouseEventKind::Scroll {
+                        delta, stop, ctrl, ..
+                    },
                 ..
             }) => {
                 if let Some(top) = self.zoom_top() {
                     let size = self.zoom_size(top);
-                    self.holder.tree.zoom_scroll(size, delta, stop);
+                    self.holder.tree.zoom_scroll(size, delta, stop, ctrl);
                 }
             }
             // a drag in its tree's zoom-out view

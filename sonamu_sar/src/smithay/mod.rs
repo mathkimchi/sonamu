@@ -2335,6 +2335,7 @@ impl AppletRunner {
                 delta: [dx, dy],
                 v120,
                 stop: [stop_x, stop_y],
+                ..
             } => {
                 let mut frame = AxisFrame::new(time).source(if v120.is_some() {
                     AxisSource::Wheel

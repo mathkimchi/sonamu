@@ -159,6 +159,8 @@ pub struct NodeTree {
     zoom_drawn: Cell<Option<DisplayContainerSize>>,
     /// How much a pinch scales the zoom-out view (`zoom_pinch`), and what it was when the pinch began
     zoom_pinched: (f32, Option<f32>),
+    /// The pinch scale springing to `zoom_pinched` (Ctrl+scroll, Shift+C): since when, and from what
+    zoom_rescale: Option<(Instant, f32)>,
     /// The zoom-out view growing out of, or back into, a node's view
     zoom_anim: Option<ZoomAnim>,
     /// Whether focus was at a node without a main (zoomed out) at the last `update_layout`; `None` before it
@@ -365,6 +367,7 @@ impl NodeTree {
             zoom_scrolled: [0.0; 2],
             zoom_press: None,
             zoom_pinched: (1.0, None),
+            zoom_rescale: None,
             zoom_free: ([0.0; 2], 0.0),
             zoom_drawn: Cell::new(None),
             zoom_anim: None,
@@ -1676,7 +1679,9 @@ impl NodeTree {
             return;
         };
         // traversal keys are the root's (`traversal`)
-        if modifiers.shift
+        if modifiers.shift && matches!(key, KeySymbol::Char('c' | 'C')) {
+            self.reset_zoom_view();
+        } else if modifiers.shift
             && let Some(shift) = match key {
                 KeySymbol::ArrowKeyLeft => Some(-1),
                 KeySymbol::ArrowKeyRight => Some(1),
@@ -1716,9 +1721,11 @@ impl NodeTree {
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
         if self.zoomed_out() {
             match mouse_event.kind {
-                MouseEventKind::Scroll { delta, stop, .. } => {
+                MouseEventKind::Scroll {
+                    delta, stop, ctrl, ..
+                } => {
                     if let Some(size) = self.latest_size {
-                        self.zoom_scroll(size, delta, stop);
+                        self.zoom_scroll(size, delta, stop, ctrl);
                     }
                 }
                 MouseEventKind::Button {
@@ -2204,6 +2211,12 @@ impl NodeTree {
         {
             self.zoom_moves = None;
         }
+        if self
+            .zoom_rescale
+            .is_some_and(|(started, _)| swipe::spring_progress(started).is_none())
+        {
+            self.zoom_rescale = None;
+        }
         self.zoom_edge_scroll();
     }
 
@@ -2247,12 +2260,18 @@ impl NodeTree {
 
     /// A pinch in the zoom-out view scales it: apart, the views get bigger
     pub fn zoom_pinch(&mut self, phase: PinchPhase) {
+        // from where a spring is
+        if matches!(phase, PinchPhase::Begin { .. }) {
+            self.zoom_pinched.0 = self.zoom_pinch_now();
+            self.zoom_rescale = None;
+        }
         let (pinched, began) = &mut self.zoom_pinched;
         match phase {
             PinchPhase::Begin { .. } => *began = Some(*pinched),
             PinchPhase::Update { scale, .. } => {
                 if let Some(began) = began {
-                    *pinched = *began * scale as f32;
+                    *pinched =
+                        (*began * scale as f32).clamp(Self::ZOOM_PINCH[0], Self::ZOOM_PINCH[1]);
                 }
             }
             PinchPhase::End { cancelled } => {
@@ -2266,9 +2285,41 @@ impl NodeTree {
         self.damaged = true;
     }
 
+    /// How far a pinch may scale the zoom-out view
+    const ZOOM_PINCH: [f32; 2] = [0.25, 4.0];
+
+    /// The pinch scale, partway while it springs
+    fn zoom_pinch_now(&self) -> f32 {
+        let target = self.zoom_pinched.0;
+        self.zoom_rescale.map_or(target, |(started, from)| {
+            from + (target - from) * swipe::spring_progress(started).unwrap_or(1.0)
+        })
+    }
+
+    /// Springs the pinch scale to `target`
+    fn rescale_zoom(&mut self, target: f32) {
+        let from = self.zoom_pinch_now();
+        self.zoom_pinched.0 = target.clamp(Self::ZOOM_PINCH[0], Self::ZOOM_PINCH[1]);
+        self.zoom_rescale = Some((Instant::now(), from));
+        self.damaged = true;
+    }
+
+    /// Back to the zoom-out view's original scale and, if free, its center in the middle (Shift+C)
+    fn reset_zoom_view(&mut self) {
+        self.rescale_zoom(1.0);
+        if Self::zoom_free_view() {
+            // slides there
+            let (carried, carried_rows, _) = self.zoom_pan_offset();
+            let (free, free_rows) = std::mem::replace(&mut self.zoom_free, ([0.0; 2], 0.0));
+            let offset = [0, 1].map(|axis| carried[axis] + free[axis]);
+            self.zoom_pan = Some((Instant::now(), offset, carried_rows + free_rows, false));
+        }
+    }
+
     /// Whether the zoom-out view is springing (zooming, panning or moving panes), so holders redraw
     pub fn zoom_animating(&self) -> bool {
-        self.zoom_anim.is_some()
+        self.zoom_rescale.is_some()
+            || self.zoom_anim.is_some()
             || self.zoom_pan.is_some()
             || self.zoom_moves.is_some()
             || self.zoom_edge_speed().is_some()
@@ -2514,9 +2565,21 @@ impl NodeTree {
     }
 
     /// A scroll in the zoom-out view drawn at `size`: past a step, moves its center one node (sideways: siblings,
-    /// down: child); a free one (`ZoomOutView::Free`) just moves
-    pub fn zoom_scroll(&mut self, size: DisplayContainerSize, [x, y]: [f64; 2], stop: [bool; 2]) {
+    /// down: child); a free one (`ZoomOutView::Free`) just moves. With Ctrl, it scales like a pinch (up: bigger).
+    pub fn zoom_scroll(
+        &mut self,
+        size: DisplayContainerSize,
+        [x, y]: [f64; 2],
+        stop: [bool; 2],
+        ctrl: bool,
+    ) {
         const STEP: f64 = 50.0;
+        // how much a px of scrolling scales it
+        const RESCALE: f64 = 0.01;
+        if ctrl {
+            self.rescale_zoom(self.zoom_pinched.0 * (-y * RESCALE).exp() as f32);
+            return;
+        }
         if Self::zoom_free_view() {
             if let Some(scale) = self.zoom_full_scale(size) {
                 let (free, _) = &mut self.zoom_free;
@@ -2878,7 +2941,7 @@ impl NodeTree {
         let [width, height] = [view.width, view.height].map(|length| length.max(1) as f32);
         let fit = (size.width as f32 / (across * width)).min(size.height as f32 / (down * height));
         let most = (size.width as f32 / width).min(size.height as f32 / height);
-        Some((fit * self.zoom_pinched.0.max(LEAST)).min(most))
+        Some((fit * self.zoom_pinch_now().max(LEAST)).min(most))
     }
 
     /// Where `zoom_window(size)` draws everything, before scaling, `zoomed` of the way (0 to 1) from the center's

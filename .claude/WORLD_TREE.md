@@ -159,6 +159,9 @@ published treeviews.
   scroll stays. Bounded: the view's middle stays over the panes' bounds (`bound_zoom_free`, after scrolls). Arrows
   slide it (a pan) to bring the center's pane in sight, `gap` from the edges (`show_zoom_center`, at the size
   last drawn, `zoom_drawn`).
+  Scale: pinches (`zoom_pinch`) or Ctrl+scroll (`MouseEventKind::Scroll::ctrl`, springs, `rescale_zoom`), kept
+  in `ZOOM_PINCH` (¼ to 4×). Shift+C (`reset_zoom_view`) springs back to scale 1 and, if free, slides the
+  offset back to 0.
   Child previews (`zoom_out.child_previews`, `zoom_previews`): under each pane of a sibling of its row's focus
   (`zoom_previewed`; a merged container row's focus is its deepest node), its first children (at most 4, as many as
   fit) as views at a quarter size, in room each row gets below it (`zoom_preview_room`). Drawn in the scaled

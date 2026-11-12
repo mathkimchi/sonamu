@@ -206,7 +206,7 @@ impl winit::application::ApplicationHandler for UIDisplay {
                 }
             }
             winit::event::WindowEvent::MouseWheel { delta, .. } => {
-                if let Some(kind) = scroll_kind(delta) {
+                if let Some(kind) = scroll_kind(delta, self.key_modifiers.ctrl) {
                     Self::send_mouse_event(&self.event_queue, self.cursor_position, kind);
                 }
             }
@@ -341,7 +341,7 @@ fn button_kind(
     })
 }
 
-fn scroll_kind(delta: winit::event::MouseScrollDelta) -> Option<MouseEventKind> {
+fn scroll_kind(delta: winit::event::MouseScrollDelta, ctrl: bool) -> Option<MouseEventKind> {
     // REVIEW: (claude) winit's positive is up/left while Wayland's is down/right, so negate
     match delta {
         winit::event::MouseScrollDelta::LineDelta(x, y) => Some(MouseEventKind::Scroll {
@@ -349,11 +349,13 @@ fn scroll_kind(delta: winit::event::MouseScrollDelta) -> Option<MouseEventKind> 
             delta: [f64::from(-x) * 15., f64::from(-y) * 15.],
             v120: Some([(-x * 120.) as i32, (-y * 120.) as i32]),
             stop: [false; 2],
+            ctrl,
         }),
         winit::event::MouseScrollDelta::PixelDelta(pos) => Some(MouseEventKind::Scroll {
             delta: [-pos.x, -pos.y],
             v120: None,
             stop: [false; 2],
+            ctrl,
         }),
         _ => None,
     }
