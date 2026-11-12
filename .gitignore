@@ -26,3 +26,4 @@ target/
 extras/firefox/web-ext-artifacts/
 *.xpi
 *.zip
+.superpowers/
