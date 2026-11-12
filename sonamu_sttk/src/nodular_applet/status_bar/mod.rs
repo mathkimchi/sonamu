@@ -275,6 +275,8 @@ pub struct StatusBar {
     layout: [Vec<Segment>; 2],
     /// Scrolling (touchpad px) not yet a step
     scrolled: f64,
+    /// Under the pointer
+    hovered: Option<Segment>,
 }
 
 /// Under the bar's right end: the notifications popping up, `GAP` apart
@@ -294,6 +296,7 @@ impl StatusBar {
             tray: Tray::start(Arc::clone(&changed)),
             layout: DEFAULT_LAYOUT.map(<[Segment]>::to_vec),
             scrolled: 0.0,
+            hovered: None,
             icons: Icons::start(changed),
             launcher: None,
             shown: Default::default(),
@@ -450,6 +453,17 @@ impl StatusBar {
             span: [left, w],
         } in &placed
         {
+            // the hovered one, or the one whose popup is open, on a lighter background
+            let lit = active
+                && (self.hovered == Some(*segment)
+                    || self.popup.map(Popup::segment) == Some(*segment));
+            if lit {
+                children.push(ui::rect(
+                    settings.palette.raised(30),
+                    [left - GAP / 2.0 + 2.0, 4.0],
+                    [w + GAP - 4.0, height - 8.0],
+                ));
+            }
             children.push(
                 rows.text(ui::spans(spans.clone()), *left, left + w)
                     .with_pointer(),
@@ -592,11 +606,29 @@ impl StatusBar {
         event: &MouseEvent,
         width: f32,
     ) -> BarResponse {
-        let [x, y] = event.position;
         let placed = self.layout(state, palette, width);
+        let [x, y] = event.position;
+        let hovered = (y < f64::from(height()))
+            .then(|| segment_at(&placed, x).map(|(segment, _)| segment))
+            .flatten();
+        let hover_changed = hovered != self.hovered;
+        self.hovered = hovered;
+        let mut response = self.mouse(&placed, palette, event, width);
+        response.damaged |= hover_changed;
+        response
+    }
+
+    fn mouse(
+        &mut self,
+        placed: &[Placed],
+        palette: &Palette,
+        event: &MouseEvent,
+        width: f32,
+    ) -> BarResponse {
+        let [x, y] = event.position;
         let on_bar = y < f64::from(height());
         if let MouseEventKind::Scroll { delta, v120, .. } = event.kind {
-            return self.scroll(&placed, [x, y], width, delta, v120);
+            return self.scroll(placed, [x, y], width, delta, v120);
         }
         let button = match event.kind {
             MouseEventKind::Button {
@@ -612,7 +644,7 @@ impl StatusBar {
         };
         let was = self.popup;
         if let Some(popup) = self.popup {
-            let area = self.popup_area(popup, &placed, width);
+            let area = self.popup_area(popup, placed, width);
             if inside(area) {
                 let damaged = pressed
                     && self.click_popup(popup, [x - f64::from(area[0]), y - f64::from(area[1])]);
@@ -648,15 +680,7 @@ impl StatusBar {
         let Some(button) = button else {
             return response;
         };
-        // half the gap around each segment is its too
-        let Some((segment, [left, _])) = placed
-            .iter()
-            .find(|placed| {
-                let [left, w] = placed.span;
-                (f64::from(left - GAP / 2.0)..f64::from(left + w + GAP / 2.0)).contains(&x)
-            })
-            .map(|placed| (placed.segment, placed.span))
-        else {
+        let Some((segment, [left, _])) = segment_at(placed, x) else {
             return response;
         };
         if segment == Segment::Tray {
@@ -962,6 +986,17 @@ impl StatusBar {
         self.shown = shown;
         changed
     }
+}
+
+/// The segment at `x` on the bar, and its `[left, width]`; half the gap around each is its too
+fn segment_at(placed: &[Placed], x: f64) -> Option<(Segment, [f32; 2])> {
+    placed
+        .iter()
+        .find(|placed| {
+            let [left, w] = placed.span;
+            (f64::from(left - GAP / 2.0)..f64::from(left + w + GAP / 2.0)).contains(&x)
+        })
+        .map(|placed| (placed.segment, placed.span))
 }
 
 /// A popup's background and frame at `[x, y, width, height]` around `items`

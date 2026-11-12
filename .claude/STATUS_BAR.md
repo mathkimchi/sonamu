@@ -115,6 +115,8 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
 - Improvement: scrolling over the hub's icons changes volume 5% a step, over the calendar its month
   (`StatusBar::scroll`; a wheel notch or `SCROLL_STEP` touchpad px per step); any scroll over the bar or a popup
   stays there.
+- Improvement: the hovered segment, and the one whose popup is open, get a lighter background (`hovered`,
+  `segment_at`; active screen only).
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work
