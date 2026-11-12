@@ -2498,33 +2498,7 @@ impl NodeTree {
             };
             ui::rect(settings.palette.accent, position, size)
         });
-        // while dragging: the node framed, what is shown of its children greyed out (rows focused inside it)
-        let dragged = self
-            .zoom_press
-            .filter(|&(id, from, at)| self.nodes.contains_key(id) && Self::zoom_dragged(from, at))
-            .into_iter()
-            .flat_map(|(id, ..)| {
-                panes
-                    .iter()
-                    .zip(&row_focus)
-                    .filter(move |(pane, _)| self.contains(id, pane.node))
-                    .map(move |(pane, &focus)| {
-                        let [x, y, width, height] = pane.rect.map(|value| value as f32 * scale);
-                        if focus != id && self.contains(id, focus) {
-                            let mut grey = settings.palette.bg;
-                            grey.0[3] = 0xB0;
-                            ui::rect(grey, [x, y], [width, height])
-                        } else {
-                            ui::frame(
-                                settings.palette.accent,
-                                settings.radius * scale,
-                                DROP_LINE,
-                                Style::absolute([x, y], [width, height]),
-                                Vec::new(),
-                            )
-                        }
-                    })
-            });
+        let marks = self.zoom_marks(&panes, &row_focus, center, scale);
         let size_style = Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]);
         // a box: nothing is drawn outside `size`
         let scaled = UITree::new_styled(
@@ -2536,7 +2510,7 @@ impl NodeTree {
                         [0.0, 0.0],
                         [size.width as f32 / scale, size.height as f32 / scale],
                     ),
-                    vec![self.window(&panes, Some(center), self.active_screen)],
+                    vec![self.window(&panes, None, self.active_screen)],
                 ),
                 ui::frame(
                     border,
@@ -2555,9 +2529,57 @@ impl NodeTree {
             std::iter::once(scaled)
                 .chain(titles)
                 .chain(drop_line)
-                .chain(dragged)
+                .chain(marks)
                 .collect(),
         )
+    }
+
+    /// Frames over the zoom-out view's panes (scaled by `scale`): the center's in the focused border's color, and while
+    /// dragging, the node's in the accent, what is shown of its children greyed out (rows focused inside it)
+    fn zoom_marks(
+        &self,
+        panes: &[Pane],
+        row_focus: &[NodeId],
+        center: NodeId,
+        scale: f32,
+    ) -> Vec<UITree> {
+        const WIDTH: f32 = 3.0;
+        let settings = settings::get();
+        let outline = |color, [x, y, width, height]: [f32; 4]| {
+            ui::frame(
+                color,
+                settings.radius * scale,
+                WIDTH,
+                Style::absolute([x, y], [width, height]),
+                Vec::new(),
+            )
+        };
+        let scaled_rect = |pane: &Pane| pane.rect.map(|value| value as f32 * scale);
+        let focus = panes
+            .iter()
+            .filter(|pane| pane.node == center)
+            .map(|pane| outline(settings.border.focused, scaled_rect(pane)));
+        let dragged = self
+            .zoom_press
+            .filter(|&(id, from, at)| self.nodes.contains_key(id) && Self::zoom_dragged(from, at))
+            .into_iter()
+            .flat_map(|(id, ..)| {
+                panes
+                    .iter()
+                    .zip(row_focus)
+                    .filter(move |(pane, _)| self.contains(id, pane.node))
+                    .map(move |(pane, &focus)| {
+                        let [x, y, width, height] = scaled_rect(pane);
+                        if focus != id && self.contains(id, focus) {
+                            let mut grey = settings.palette.bg;
+                            grey.0[3] = 0xB0;
+                            ui::rect(grey, [x, y], [width, height])
+                        } else {
+                            outline(settings.palette.accent, [x, y, width, height])
+                        }
+                    })
+            });
+        focus.chain(dragged).collect()
     }
 
     /// Where `zoom_window(size)` draws everything, before scaling, `zoomed` of the way (0 to 1) from the center's
