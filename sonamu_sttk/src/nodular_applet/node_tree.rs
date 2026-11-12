@@ -25,7 +25,7 @@ use sonamu_common::{
     },
 };
 use sonamu_ui::{
-    display_units::DisplayContainerSize,
+    display_units::{DisplayContainerSize, ToPx},
     ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{KeySymbol, MouseEvent, MouseEventKind, PinchPhase, UIEvent},
 };
@@ -2507,7 +2507,11 @@ impl NodeTree {
                     .eq(panes.iter().map(|pane| pane.node))
             };
             match rows.last_mut() {
-                Some(last) if same(last) => last.2 |= id == center,
+                // a container's row is its child's
+                Some(last) if same(last) => {
+                    last.0 = id;
+                    last.2 |= id == center;
+                }
                 _ => rows.push((id, panes, id == center)),
             }
         }
@@ -2595,7 +2599,9 @@ impl NodeTree {
                         [0.0, 0.0],
                         [size.width as f32 / scale, size.height as f32 / scale],
                     ),
-                    vec![self.window(&panes, None, self.active_screen)],
+                    std::iter::once(self.window(&panes, None, self.active_screen))
+                        .chain(self.zoom_previews(&panes, &row_focus))
+                        .collect(),
                 ),
                 ui::frame(
                     border,
@@ -2669,12 +2675,95 @@ impl NodeTree {
         focus.chain(dragged).collect()
     }
 
-    /// The zoom-out view's scale in `size`, fully zoomed out: `zoom_out` views fit, times a pinch
+    /// Of a child preview, to a view
+    const ZOOM_PREVIEW: f32 = 0.25;
+
+    /// Room below each row of the zoom-out view for child previews (px, before scaling; none if they're off)
+    fn zoom_preview_room(view_height: f32) -> f32 {
+        let settings = settings::get();
+        if !settings.zoom_out.child_previews {
+            return 0.0;
+        }
+        settings.gap + view_height * Self::ZOOM_PREVIEW
+    }
+
+    /// The node beside its row's own (a sibling of the row's focus) whose place the pane is in, if it has
+    /// children to preview
+    fn zoom_previewed(&self, pane: &Pane, focus: NodeId) -> Option<NodeId> {
+        if self.contains(focus, pane.node) || self.contains(pane.node, focus) {
+            return None;
+        }
+        let mut slot = pane.node;
+        while let Some(parent) = self.nodes[slot].parent
+            && !self.contains(parent, focus)
+        {
+            slot = parent;
+        }
+        let parent = self.nodes[slot].parent?;
+        (self.nodes[focus].parent == Some(parent) && !self.nodes[slot].children.is_empty())
+            .then_some(slot)
+    }
+
+    /// Tiny views of the children of the nodes beside each row's own, under their panes (before scaling), as many as
+    /// fit, at most 4
+    fn zoom_previews(&self, panes: &[Pane], row_focus: &[NodeId]) -> Vec<UITree> {
+        const LIMIT: usize = 4;
+        let settings = settings::get();
+        let Some(view) = self
+            .latest_size
+            .filter(|_| settings.zoom_out.child_previews)
+        else {
+            return Vec::new();
+        };
+        let (gap, border) = settings.gap_and_border_px();
+        let gap = gap as f32;
+        let [width, height] = [view.width, view.height].map(|length| length as f32);
+        let mini = [width, height].map(|length| length * Self::ZOOM_PREVIEW);
+        panes
+            .iter()
+            .zip(row_focus)
+            .filter_map(|(pane, &focus)| Some((pane, self.zoom_previewed(pane, focus)?)))
+            .flat_map(|(pane, slot)| {
+                let [x, y, pane_width, pane_height] = pane.rect.map(|value| value as f32);
+                let fit = ((pane_width + gap) / (mini[0] + gap))
+                    .floor()
+                    .to_px()
+                    .max(1) as usize;
+                self.nodes[slot]
+                    .children
+                    .iter()
+                    .take(fit.min(LIMIT))
+                    .enumerate()
+                    .map(move |(index, &child)| {
+                        let shown = Pane {
+                            node: self.displayed_node_toward(child, child),
+                            rect: [0, 0, view.width.cast_signed(), view.height.cast_signed()],
+                            clip: [0, 0, view.width.cast_signed(), view.height.cast_signed()],
+                            border,
+                            framed: true,
+                        };
+                        let position = [x + index as f32 * (mini[0] + gap), y + pane_height + gap];
+                        UITree::new_styled(
+                            UIElement::Scaled(Self::ZOOM_PREVIEW),
+                            Style::absolute(position, mini),
+                            vec![UITree::new_container_styled(
+                                Style::absolute([0.0, 0.0], [width, height]),
+                                vec![self.window(&[shown], None, self.active_screen)],
+                            )],
+                        )
+                    })
+            })
+            .collect()
+    }
+
+    /// The zoom-out view's scale in `size`, fully zoomed out: 4 × 3 views fit, times a pinch
     fn zoom_full_scale(&self, size: DisplayContainerSize) -> Option<f32> {
         // pinched no further than a view filling `size`, or a quarter
         const LEAST: f32 = 0.25;
         let view = self.latest_size?;
-        let [across, down] = settings::get().zoom_out.map(|count| count.max(1) as f32);
+        // across and down (the smaller scale of the two); the center view is in the middle, so an even count shows
+        // halves at the edges
+        let [across, down] = [4.0, 3.0];
         let [width, height] = [view.width, view.height].map(|length| length.max(1) as f32);
         let fit = (size.width as f32 / (across * width)).min(size.height as f32 / (down * height));
         let most = (size.width as f32 / width).min(size.height as f32 / height);
@@ -2695,8 +2784,10 @@ impl NodeTree {
         let [width, height] = [view.width, view.height].map(|length| length.max(1) as f32);
         let full_scale = self.zoom_full_scale(size)?;
         let scale = 1.0 + (full_scale - 1.0) * zoomed;
-        // rows have room for their titles above them, which aren't scaled
-        let step = step as f32 + ui::row_height() * zoomed / scale;
+        // rows have room for their titles above them, which aren't scaled, and for child previews below them
+        let step = step as f32
+            + ui::row_height() * zoomed / scale
+            + Self::zoom_preview_room(height) * zoomed;
         // the center view's middle at the middle of `size`, from its top left; off by the pan left
         let (pan, pan_rows, lateral) = self.zoom_pan_offset();
         let pan = [pan[0], pan[1] + pan_rows * step];

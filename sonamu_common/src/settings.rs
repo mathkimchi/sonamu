@@ -61,9 +61,8 @@ pub struct Settings {
     /// When the buffer line (a Luau prompt at the bottom, like vim's command line) shows
     pub buffer_line: BufferLine,
     pub swipe: SwipeSettings,
-    /// The zoom-out view (#145): how many views fit across and down (the smaller scale of the two); the center view is
-    /// in the middle, so an even count shows halves at the edges
-    pub zoom_out: [u32; 2],
+    /// The zoom-out view (#145)
+    pub zoom_out: ZoomOutSettings,
     /// Global shortcuts that run a shell command
     pub keybinds: Vec<Keybind>,
     /// Programs restored running in their terminal (see `.claude/SESSIONS.md`)
@@ -186,6 +185,14 @@ pub struct SwipeSettings {
     pub stiffness: f32,
     /// Of that spring: 1 is critically damped (no bounce), below 1 overshoots and bounces, above 1 is sluggish
     pub damping_ratio: f32,
+}
+
+/// The zoom-out view (#145); pinches scale it
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[schemars(transform = optional_fields)]
+pub struct ZoomOutSettings {
+    /// Tiny previews of the children of the nodes beside each row's own, under their panes
+    pub child_previews: bool,
 }
 
 /// When the buffer line shows

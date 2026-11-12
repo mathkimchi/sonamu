@@ -90,15 +90,8 @@
       }
     },
     "zoom_out": {
-      "description": "The zoom-out view (#145): how many views fit across and down (the smaller scale of the two); the center view is\nin the middle, so an even count shows halves at the edges",
-      "type": "array",
-      "items": {
-        "type": "integer",
-        "format": "uint32",
-        "minimum": 0
-      },
-      "maxItems": 2,
-      "minItems": 2
+      "description": "The zoom-out view (#145)",
+      "$ref": "#/$defs/ZoomOutSettings"
     }
   },
   "$defs": {
@@ -312,6 +305,16 @@
         "left",
         "right"
       ]
+    },
+    "ZoomOutSettings": {
+      "description": "The zoom-out view (#145); pinches scale it",
+      "type": "object",
+      "properties": {
+        "child_previews": {
+          "description": "Tiny previews of the children of the nodes beside each row's own, under their panes",
+          "type": "boolean"
+        }
+      }
     }
   }
 }
