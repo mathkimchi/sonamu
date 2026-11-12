@@ -1,11 +1,10 @@
 //! What the bar shows about the machine: battery, power profile, cpu, memory and processes, read on a thread from
-//! `/sys` and `/proc` (and `powerprofilesctl`).
+//! `/sys` and `/proc` (and power-profiles-daemon over the system bus).
 
 use std::{
     collections::HashMap,
     fs,
     path::Path,
-    process::Command,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -83,7 +82,10 @@ impl System {
             let changed = Arc::clone(&changed);
             thread::spawn(move || {
                 set_profile(PROFILES[0]);
-                let mut reader = Reader::default();
+                let mut reader = Reader {
+                    profiles: profiles_proxy(),
+                    ..Reader::default()
+                };
                 loop {
                     let read = reader.read(want_processes.load(Ordering::Relaxed));
                     *snapshot.lock().unwrap() = read;
@@ -114,11 +116,26 @@ impl System {
     }
 }
 
+/// power-profiles-daemon's (`None` without it)
+fn profiles_proxy() -> Option<zbus::Proxy<'static>> {
+    let connection = zbus::block_on(zbus::Connection::system()).ok()?;
+    zbus::block_on(
+        zbus::proxy::Builder::new(&connection)
+            .destination("org.freedesktop.UPower.PowerProfiles")
+            .path("/org/freedesktop/UPower/PowerProfiles")
+            .interface("org.freedesktop.UPower.PowerProfiles")
+            .cache_properties(zbus::proxy::CacheProperties::No)
+            .build(),
+    )
+    .inspect_err(|err| log::debug!("No power profiles: {err}"))
+    .ok()
+}
+
 fn set_profile(profile: &str) {
-    if let Err(err) = Command::new("powerprofilesctl")
-        .args(["set", profile])
-        .status()
-    {
+    let Some(proxy) = profiles_proxy() else {
+        return;
+    };
+    if let Err(err) = zbus::block_on(proxy.set_property("ActiveProfile", profile)) {
         log::warn!("Couldn't set the power profile to {profile}: {err}");
     }
 }
@@ -131,13 +148,14 @@ struct Reader {
     /// Each pid's ticks, and when read
     processes: HashMap<u32, u64>,
     processes_read: Option<Instant>,
+    profiles: Option<zbus::Proxy<'static>>,
 }
 
 impl Reader {
     fn read(&mut self, processes: bool) -> Snapshot {
         Snapshot {
             battery: battery(),
-            profile: profile(),
+            profile: self.profile(),
             cpu: self.cpu(),
             mem: mem().unwrap_or(0.0),
             processes: if processes {
@@ -250,12 +268,10 @@ fn mem() -> Option<f64> {
     Some((total - available) as f64 / total as f64 * 100.0)
 }
 
-fn profile() -> Option<String> {
-    let output = Command::new("powerprofilesctl").arg("get").output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+impl Reader {
+    fn profile(&self) -> Option<String> {
+        zbus::block_on(self.profiles.as_ref()?.get_property::<String>("ActiveProfile")).ok()
+    }
 }
 
 /// The first battery in `/sys/class/power_supply`

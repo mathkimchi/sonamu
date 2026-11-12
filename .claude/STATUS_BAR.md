@@ -56,6 +56,8 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
 
 ## Status
 
+Follow-ups after the 8 steps (fixes first, then improvements) are logged at the end of this list.
+
 - Done: 1 (`nodular_applet/status_bar.rs`: `layout` places segments for drawing and clicks; `content_size` subtracts
   `status_bar::height()`; the root draws content at `[0, height]` and shifts mouse y).
 - Done: 2. `StatusBar` (in the root) holds the open popup; `handle_mouse` gets screen coords first (popup, then bar;
@@ -64,7 +66,7 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
 - Widths: `char_width()` = 0.6 em (Noto Sans Mono's advance; text isn't measured).
 - Popups are opaque: with 0xF0 alpha the panes' text showed through (linear blending), so the treeview's menu
   (`menu_bg`) likely shows a little too.
-- Done: 3. `status_bar/system.rs`: a thread reads every 2 s (battery from sysfs, profile via `powerprofilesctl get`,
+- Done: 3. `status_bar/system.rs`: a thread reads every 2 s (battery from sysfs, profile via power-profiles-daemon's D-Bus `ActiveProfile` (was `powerprofilesctl`, a Python script started every 2 s),
   cpu/mem from `/proc`; processes from `/proc/*/stat`+`statm` only while the popup is open) into
   `Arc<Mutex<Snapshot>>`, then pings the root (calloop ping → damage). Sets `power-saver` once at start.
   `resources.rs`: segment + popup; `Lines` (mod.rs) places monospace text by column for drawing and clicks.
