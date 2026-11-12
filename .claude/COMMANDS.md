@@ -112,7 +112,8 @@ Deviations from the decisions below:
   luau-lsp yet. `cast` returns `Node`; `file_manager.from_node(n)` is typed `file_manager?`.
 
 - Keybinds: `standard_keybinds::standard_keybind` maps a key to a `KeybindCommand` (`quit`, `wrap_project`, `close`,
-  `toggle_half`, `spawn(program)`, `swap_sibling(±1)`); `handle_standard_keybinds` sends it to the applet's own node
+  `toggle_half`, `spawn(program)`, `spawn_sibling(program)` (Super+Shift+T/N: `NodeRequest::RunSibling`, window goes
+  right after the node via `wl_target`; a project's inner root passes it up), `swap_sibling(±1)`); `handle_standard_keybinds` sends it to the applet's own node
   (`command::send`, no answer; as the old `NodeRequest` via `KeybindCommand::request` until `AppletContext::uid` is
   known). `standard_keybind_request` (wl tiles, session placeholders, file manager, the tree's own keybinds on a
   selected node, `is_keybind`) still gives the request. So Super+W on an applet now asks it (`close_requested`) first.

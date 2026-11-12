@@ -95,6 +95,7 @@ impl KeybindCommand {
             ("close", []) => NodeRequest::Close,
             ("toggle_half", []) => NodeRequest::ToggleHalf,
             ("spawn", [Value::String(program)]) => NodeRequest::Run(program.clone()),
+            ("spawn_sibling", [Value::String(program)]) => NodeRequest::RunSibling(program.clone()),
             #[expect(clippy::cast_possible_truncation, reason = "a sibling offset")]
             ("swap_sibling", [Value::Number(offset)]) => NodeRequest::SwapSibling(*offset as isize),
             _ => return None,
@@ -128,7 +129,7 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
 /// The standard keybinds:
 /// - `Ctrl+Shift+Q` - Quit
 /// - `Super+W` - Close tab
-/// - `Super+T` / `Super+N` - Start the terminal / browser
+/// - `Super+T` / `Super+N` - Start the terminal / browser (with `Shift`: as a sibling)
 /// - `Super+P` - Put the node in a project
 /// - `Super+F` - Toggle half width
 /// - `Alt+Shift+W` / `Alt+Shift+S` - swap with the previous / next sibling
@@ -153,9 +154,14 @@ pub fn standard_keybind(ui_event: &UIEvent) -> Option<KeybindCommand> {
         ('w', KeyModifiers { logo: true, .. }) => KeybindCommand::new("close"),
         // #144
         ('f' | 'F', KeyModifiers { logo: true, .. }) => KeybindCommand::new("toggle_half"),
-        ('t' | 'n', KeyModifiers { logo: true, .. }) => KeybindCommand {
-            name: "spawn",
-            args: vec![Value::String(if key == 't' {
+        ('t' | 'n' | 'T' | 'N', KeyModifiers { logo: true, .. }) => KeybindCommand {
+            // Shift, not the letter's case (Caps Lock)
+            name: if modifiers.shift {
+                "spawn_sibling"
+            } else {
+                "spawn"
+            },
+            args: vec![Value::String(if key.eq_ignore_ascii_case(&'t') {
                 terminal()
             } else {
                 browser()

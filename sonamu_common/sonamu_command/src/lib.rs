@@ -326,7 +326,7 @@ pub fn number_arg(args: &[Value], index: usize) -> Result<f64, String> {
 }
 
 /// The node commands every node has (`Node` methods in scripts); an applet's can't use these names
-pub const NODE_COMMANDS: [&str; 12] = [
+pub const NODE_COMMANDS: [&str; 13] = [
     "close",
     "focus",
     "add_child",
@@ -338,6 +338,7 @@ pub const NODE_COMMANDS: [&str; 12] = [
     "type",
     "title",
     "spawn",
+    "spawn_sibling",
     "quit",
 ];
 
@@ -347,7 +348,7 @@ pub fn node_effect(name: &str) -> Option<Effect> {
         "parent" | "children" | "type" | "title" => Effect::Read,
         "focus" | "add_child" | "swap_sibling" | "toggle_half" | "wrap_project" => Effect::Modify,
         "close" | "quit" => Effect::Destructive,
-        "spawn" => Effect::Spawn,
+        "spawn" | "spawn_sibling" => Effect::Spawn,
         _ => return None,
     })
 }

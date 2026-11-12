@@ -1283,6 +1283,7 @@ impl StandardApplet for FileManagerApplet {
             request @ (NodeRequest::AddChild(_)
             | NodeRequest::Wrap(_)
             | NodeRequest::Run(_)
+            | NodeRequest::RunSibling(_)
             | NodeRequest::AddWlSurface(_)
             | NodeRequest::Open(_)
             | NodeRequest::FocusSelf) => {

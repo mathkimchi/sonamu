@@ -45,6 +45,7 @@ const MAN_PAGE: &[ManSection] = &[
             ),
             entry("Super+T", "spawn terminal"),
             entry("Super+N", "spawn browser"),
+            entry("Super+Shift+T/N", "spawn terminal/browser as sibling"),
             entry("Super+P", "wrap current tab in a project"),
             entry("Super+W", "close current tab"),
             entry("Super+F", "toggle half-view"),

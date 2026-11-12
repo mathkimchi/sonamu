@@ -561,6 +561,9 @@ impl NodeHolder {
                     Err(format!("couldn't start {program}"))
                 }
             })(),
+            // its window goes right after the node (in its parent's tree's directory)
+            "spawn_sibling" => command::string_arg(args, 0)
+                .and_then(|program| request(self, NodeRequest::RunSibling(program.to_owned()))),
             "quit" => request(self, StandardRequest::Quit.into()),
             "wrap_project" => request(self, NodeRequest::Wrap(ProjectApplet::wrapper())),
             "parent" => Ok((
@@ -658,6 +661,15 @@ impl NodeHolder {
             NodeRequest::Unwrap(tree) => self.tree.unwrap(id, tree),
             NodeRequest::Run(program) => {
                 self.run(&program);
+            }
+            // the root of a project's inner tree stands for the project
+            NodeRequest::RunSibling(program) if self.project && id == self.tree.root() => {
+                return Some(NodeRequest::RunSibling(program));
+            }
+            NodeRequest::RunSibling(program) => {
+                if self.run(&program) {
+                    self.wl_target = Some(self.tree.spawn_target(id, true));
+                }
             }
             NodeRequest::AddWlSurface(surface) => self.tree.add_wl_surface(id, surface),
             NodeRequest::Open(open) => self.open_under(id, &open),

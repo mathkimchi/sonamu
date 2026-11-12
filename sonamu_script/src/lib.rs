@@ -769,7 +769,7 @@ Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) togg
       parent(): Node? children(): {Node} type(): string title(): string cast(type): Node?
       inner(): Node? (the root of a project's own tree)
       (also <type>.from_node(n), eg file_manager.from_node(n): typed in sonamu.definitions())
-      spawn(program, {args}?) (in its tree's directory) quit()
+      spawn(program, {args}?) (in its tree's directory) spawn_sibling(program) (its window after the node) quit()
       any other method is a command of its applet, eg hub:clear()
 Effects (`sonamu-msg eval --max <effect>` refuses higher): read < modify < destructive (close, quit, reset) < spawn
       (processes, keymap.set, events.on); applet commands show theirs in [ ]
@@ -791,6 +791,7 @@ const NODE_METHODS: &str = "\
     function cast(self, applet_type: string): Node?  -- typed: <applet_type>.from_node(n)
     function inner(self): Node?
     function spawn(self, program: string, args: {string}?): ()
+    function spawn_sibling(self, program: string): ()
     function quit(self): ()
 ";
 
