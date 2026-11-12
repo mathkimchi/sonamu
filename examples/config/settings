@@ -69,6 +69,8 @@ print(json.dumps({
     # started by Super+T / Super+N
     "terminal": "foot",
     "browser": "firefox",
+    # run once when Sonamu starts (as its .desktop file does)
+    "startup": ["beeper --no-sandbox"],
     "watch": [str(colors_path), str(dms_settings_path)],
     "zoom_out": {"child_previews": True, "view": "free"},
 }, indent=2))
