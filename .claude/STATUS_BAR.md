@@ -131,3 +131,25 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
 6. Hub (audio, brightness, wifi, bluetooth) + OSD.
 7. Tray.
 8. Luau `bar.layout`.
+
+## To do
+
+- Calendar is a placeholder (asked for a good one: events? week numbers? undecided).
+- Hub: Settings row is a placeholder; wifi can't ask for a password (only networks `nmcli` joins alone).
+- DMS leftovers: example `settings` still reads DMS's colors/radius/font scale (`colors_path`, `dms_settings_path`;
+  out of scope, user's "setting setter"); wallpaper came from DMS too.
+- Super+? help (`man_page.rs:72`) still says "Click top right circle: pin/unpin tree view" (the pin is gone: the bar's
+  arrow).
+- Treeview's own menu (`treeview::menu_bg`, alpha 0xF0) likely lets text show through, as the popups did.
+- `pactl subscribe` (controls.rs) isn't killed when Sonamu exits.
+- Tray: no tooltips (`ToolTip`/`Title` unread), no `StatusNotifierItemUnregistered`, `IconThemePath` ignored.
+- Notifications: no inline images (`image-data` hint), no history beyond the list's 8, unread count = all.
+- `cargo machete` wasn't run (not installed).
+
+## Notes
+
+- Untested live: Esc closing popups, launcher typing (injected keys don't reach Sonamu headless; launcher keys
+  unit-tested), DRM multi-monitor.
+- If another notification server or tray watcher (eg DMS) holds the name, the bar's stays empty (logged only).
+- Test runs share the machine: the bar sets the real power profile; hub actions change real volume/wifi.
+- Beeper can't start hidden; the example config closes its first window instead (SETTINGS.md, `startup`).
