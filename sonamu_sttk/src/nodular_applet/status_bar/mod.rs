@@ -490,10 +490,10 @@ impl StatusBar {
             children,
         )];
         if active {
+            // before locking the store: it locks it too
+            let areas = self.popup_notification_areas(width);
             let store = self.notifications.store.lock().unwrap();
-            for (notification, (id, area)) in
-                store.popups().zip(self.popup_notification_areas(width))
-            {
+            for (notification, (id, area)) in store.popups().zip(areas) {
                 let hover = self
                     .hovered_notification
                     .and_then(|(hovered, cell)| (hovered == id).then_some(cell));
