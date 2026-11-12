@@ -112,6 +112,9 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
   waits forever without bluetoothd and would stall the lists' thread.
 - Fix: Esc closes any popup (design asked it): `BAR_POPUP` (root_node_applet.rs) makes `is_keybind` take a bare
   Esc while one is open; `handle_grabbed_key` closes it. Untested live: injected keys didn't reach Sonamu.
+- Improvement: scrolling over the hub's icons changes volume 5% a step, over the calendar its month
+  (`StatusBar::scroll`; a wheel notch or `SCROLL_STEP` touchpad px per step); any scroll over the bar or a popup
+  stays there.
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work

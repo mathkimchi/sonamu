@@ -37,6 +37,8 @@ const BTN_MIDDLE: u32 = 0x112;
 const GAP: f32 = 12.0;
 /// Room inside a popup
 const POPUP_PAD: f32 = 12.0;
+/// Touchpad scrolling (px) per step (eg 5% volume); a wheel notch is one
+const SCROLL_STEP: f64 = 30.0;
 
 /// The bar's height (px), taken from the top of every screen
 #[expect(
@@ -271,6 +273,8 @@ pub struct StatusBar {
     tray: Tray,
     /// `[left, right]`, each left to right (`sonamu.bar_layout`)
     layout: [Vec<Segment>; 2],
+    /// Scrolling (touchpad px) not yet a step
+    scrolled: f64,
 }
 
 /// Under the bar's right end: the notifications popping up, `GAP` apart
@@ -289,6 +293,7 @@ impl StatusBar {
             controls: Controls::start(Arc::clone(&changed)),
             tray: Tray::start(Arc::clone(&changed)),
             layout: DEFAULT_LAYOUT.map(<[Segment]>::to_vec),
+            scrolled: 0.0,
             icons: Icons::start(changed),
             launcher: None,
             shown: Default::default(),
@@ -590,6 +595,9 @@ impl StatusBar {
         let [x, y] = event.position;
         let placed = self.layout(state, palette, width);
         let on_bar = y < f64::from(height());
+        if let MouseEventKind::Scroll { delta, v120, .. } = event.kind {
+            return self.scroll(&placed, [x, y], width, delta, v120);
+        }
         let button = match event.kind {
             MouseEventKind::Button {
                 button,
@@ -674,6 +682,66 @@ impl StatusBar {
             Segment::Tray => {}
         }
         response
+    }
+
+    /// A scroll at `[x, y]`: over the hub's icons it changes the volume, over the calendar its month; any scroll over
+    /// the bar or a popup is the bar's
+    fn scroll(
+        &mut self,
+        placed: &[Placed],
+        [x, y]: [f64; 2],
+        width: f32,
+        delta: [f64; 2],
+        v120: Option<[i32; 2]>,
+    ) -> BarResponse {
+        let popup_area = self
+            .popup
+            .map(|popup| self.popup_area(popup, placed, width).map(f64::from));
+        let in_popup = popup_area.is_some_and(|[px, py, pw, ph]| {
+            (px..px + pw).contains(&x) && (py..py + ph).contains(&y)
+        });
+        let on_bar = y < f64::from(height());
+        if !on_bar && !in_popup {
+            return BarResponse::default();
+        }
+        // a step per wheel notch (hi-res ones' parts add up), or per `SCROLL_STEP` px of a touchpad
+        self.scrolled += v120.map_or(delta[1], |[_, v120]| f64::from(v120) / 120.0 * SCROLL_STEP);
+        #[expect(clippy::cast_possible_truncation, reason = "a few steps")]
+        let steps = (self.scrolled / SCROLL_STEP).trunc() as i32;
+        self.scrolled -= f64::from(steps) * SCROLL_STEP;
+        let mut damaged = false;
+        if steps != 0 {
+            if in_popup && let Some(Popup::Calendar(month)) = self.popup {
+                let month = if steps > 0 {
+                    month.checked_add_months(chrono::Months::new(steps.unsigned_abs()))
+                } else {
+                    month.checked_sub_months(chrono::Months::new(steps.unsigned_abs()))
+                };
+                if let Some(month) = month {
+                    self.popup = Some(Popup::Calendar(month));
+                    damaged = true;
+                }
+            } else if on_bar
+                && placed.iter().any(|placed| {
+                    let [left, w] = placed.span.map(f64::from);
+                    placed.segment == Segment::Hub && (left..left + w).contains(&x)
+                })
+            {
+                let volume = self.controls.state.lock().unwrap().volume;
+                if let Some(volume) = volume {
+                    // up is louder
+                    #[expect(clippy::cast_precision_loss, reason = "a few steps")]
+                    let level = (volume.level - steps as f32 * 0.05).clamp(0.0, 1.0);
+                    self.controls.set_volume(level);
+                    damaged = true;
+                }
+            }
+        }
+        BarResponse {
+            consumed: true,
+            damaged,
+            action: None,
+        }
     }
 
     /// A mouse event at `[x, y]` over a notification popping up (a click dismisses or activates it)
