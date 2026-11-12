@@ -41,7 +41,9 @@ Found while debugging #60; nothing here is in the repo's code.
   subshell into it with `grim` calls between (the pointer stays while stdin is open). Coords include sway's title bar.
   The first `move` only enters the window: winit's buttons carry its last cursor position (`[0, 0]` until a
   motion), so move twice before clicking.
-- Test runs share the machine: the status bar sets the real power profile (`power-saver` at start, and on clicks).
+- Test runs share the machine: the status bar sets the real power profile on clicks (at start only on the tty). Run
+  Sonamu in `dbus-run-session -- target/release/sonamu_sde`, so its notification server and tray watcher don't
+  queue behind your session's Sonamu on the real session bus.
 - 2026-11-12: `wtype f` (with a held `wtype -s` keyboard too) reached the root as `Escape`; key handling is
   unit-tested instead (eg `status_bar::launcher` tests).
 - Tray (#150): a ~40-line scratch zbus 6 program serving `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu`

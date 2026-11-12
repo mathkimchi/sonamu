@@ -176,6 +176,8 @@ pub enum BarRequest {
     Input(BarInput),
     /// The bar's arrow was clicked: passed to the root as `StandardEvent::ToggleTreeview`
     ToggleTreeview,
+    /// A screen's bar was pressed, so it's active: passed to the root as `StandardEvent::ActivateScreen`
+    ActivateScreen(usize),
 }
 impl From<StandardRequest> for BarRequest {
     fn from(request: StandardRequest) -> Self {
@@ -264,6 +266,8 @@ pub enum StandardEvent {
     NodeUid(NodeUid),
     /// The status bar's arrow was clicked. Only the root gets these.
     ToggleTreeview,
+    /// Make this screen active (keys, treeview), eg its status bar was pressed. Only the root gets these.
+    ActivateScreen(usize),
     /// The root's state, for the status bar (from `StandardRequest::BarState`). Only the bar gets these.
     BarState(BarState),
     /// Run the applet's command (`StandardApplet::command`) and answer on `reply`

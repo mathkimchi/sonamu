@@ -246,6 +246,7 @@ impl StandardApplet for CommandHubApplet {
             | StandardEvent::ScreenViews { .. }
             | StandardEvent::Open(_)
             | StandardEvent::ToggleTreeview
+            | StandardEvent::ActivateScreen(_)
             | StandardEvent::BarState(_) => {}
             // has no inner world
             StandardEvent::Swipe(_) => {}

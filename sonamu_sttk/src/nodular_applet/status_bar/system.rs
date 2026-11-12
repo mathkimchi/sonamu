@@ -81,7 +81,10 @@ impl System {
             let want_processes = Arc::clone(&want_processes);
             let changed = Arc::clone(&changed);
             thread::spawn(move || {
-                set_profile(PROFILES[0]);
+                // not from a test run in a window
+                if sonamu_common::ON_TTY.load(Ordering::Relaxed) {
+                    set_profile(PROFILES[0]);
+                }
                 let mut reader = Reader {
                     profiles: profiles_proxy(),
                     ..Reader::default()

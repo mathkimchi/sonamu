@@ -163,8 +163,10 @@ impl StatusBarApplet {
         if pressed
             && let Some(index) = under
             && event.position[1] < f64::from(self.screens[index][1] + height())
+            && index != self.state.active_screen
         {
             self.state.active_screen = index;
+            let _ = self.request_sender.send(BarRequest::ActivateScreen(index));
         }
         let Some(&[x, y, width, _]) = self.screens.get(self.state.active_screen) else {
             return;

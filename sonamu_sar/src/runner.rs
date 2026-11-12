@@ -171,6 +171,7 @@ impl AppletRunner {
             std::env::set_var("ELECTRON_OZONE_PLATFORM_HINT", "auto");
             std::env::set_var("NIXOS_OZONE_WL", "1");
         }
+        sonamu_common::ON_TTY.store(on_tty, std::sync::atomic::Ordering::Relaxed);
         if on_tty {
             Self::export_session_env(&smithay_state.socket_name);
         }
@@ -330,7 +331,11 @@ impl AppletRunner {
                 }
             }
             BarRequest::ToggleTreeview => {
-                self.root_client.send_event(StandardEvent::ToggleTreeview)
+                self.root_client.send_event(StandardEvent::ToggleTreeview);
+            }
+            BarRequest::ActivateScreen(index) => {
+                self.root_client
+                    .send_event(StandardEvent::ActivateScreen(index));
             }
         }
     }
@@ -363,6 +368,15 @@ impl AppletRunner {
         if took || self.pointer_on_bar {
             self.bar_client
                 .send_event(StandardEvent::UIEvent(UIEvent::Mouse(*event)));
+        }
+        // the root sees it leave (it's above the root's screens), so its hover clears
+        if in_region && !self.pointer_on_bar {
+            let left = MouseEvent {
+                kind: MouseEventKind::Motion,
+                ..*event
+            };
+            self.root_client
+                .send_event(StandardEvent::UIEvent(UIEvent::Mouse(left)));
         }
         self.pointer_on_bar = in_region;
         if pressed && !took {

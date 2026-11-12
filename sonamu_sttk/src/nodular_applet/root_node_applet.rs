@@ -828,6 +828,10 @@ impl RootNodeApplet {
             // it has the screens itself
             StandardEvent::ScreenViews { .. } => {}
             StandardEvent::ToggleTreeview => self.toggle_treeview(),
+            StandardEvent::ActivateScreen(index) => {
+                self.activate_screen(index);
+                self.surface.damage();
+            }
             // the status bar's
             StandardEvent::BarState(_) => {}
             // it reads the settings when it draws

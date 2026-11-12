@@ -924,6 +924,7 @@ impl StandardApplet for ProjectApplet {
             StandardEvent::CloseRequest
             // only the root and the status bar get these
             | StandardEvent::ToggleTreeview
+            | StandardEvent::ActivateScreen(_)
             | StandardEvent::BarState(_)
             | StandardEvent::Deactivate
             | StandardEvent::SettingsChanged(_)

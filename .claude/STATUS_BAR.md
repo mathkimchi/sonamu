@@ -30,7 +30,7 @@ Transient:
 - New notification pops up under the bar's right end for `notifications.timeout` s (setting, default 5) [my call: the
   sender's own timeout wins; critical stays until dismissed]; not while Do not disturb.
 - Volume/brightness changes show a small OSD popup (like DMS).
-- Power saver is set once at Sonamu start.
+- Power saver is set once at Sonamu start (on the tty only: `sonamu_common::ON_TTY`, so test runs in a window don't).
 
 ## Treeview
 
@@ -49,7 +49,12 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
   shown, active screen) → `StandardEvent::BarState`; `BarRequest::ToggleTreeview` → `StandardEvent::ToggleTreeview`;
   `sonamu.bar_layout` effect-checked by the root, then `StandardRequest::BarCommand` → `StandardEvent::Command`
   (the bar replies). Was drawn by the root until 2026-11-12 (a bar deadlock froze everything).
-- The bar's active screen: the root's, or the one whose bar was last pressed (the root doesn't hear of that).
+- The bar's active screen: the root's; pressing another screen's bar makes it active for both
+  (`BarRequest::ActivateScreen` → `StandardEvent::ActivateScreen`).
+- Entering the bar's region also sends the root that motion: it's above the root's screens, so their hover clears.
+- Narrow screens: `layout` shortens the time (`12:00PM`), then leaves segments out (`LEFT_OUT`: resources, time,
+  bell, tray, hub, launcher; the arrow stays). Popups wider than the screen are drawn `Scaled` down (`fit`,
+  `popup_scale`, `notification_scale`); their areas are the scaled ones and clicks are divided back.
 - Tested headless (2026-11-12): bars on 2 screens, root content under them, arrow round trip, hub popup + hover +
   click outside, launcher scroll, `bar_layout` (and its error), treeview right click.
 - Components are Rust structs (`Segment`-like) in `sonamu_sttk/src/nodular_applet/status_bar/`, not nodes.
@@ -173,5 +178,6 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
 - Bus names are requested queued, without allowing replacement (`serve_queued`): if another server (eg DMS) has
   one, Sonamu gets it once that leaves. Before (fixed), a DMS still running at start kept them and Sonamu never got
   them, even after DMS quit: no tray or notifications.
-- Test runs share the machine: the bar sets the real power profile; hub actions change real volume/wifi.
+- Test runs share the machine: hub actions change real volume/wifi. Run them in `dbus-run-session` (TESTING.md), else
+  they share your session bus (notification and tray names, queued behind your Sonamu).
 - Beeper can't start hidden; the example config closes its first window instead (SETTINGS.md, `startup`).

@@ -139,6 +139,16 @@ const DEFAULT_LAYOUT: [&[Segment]; 2] = [
     ],
 ];
 
+/// Left out of a bar too narrow for all its segments, in this order (the tree's arrow stays)
+const LEFT_OUT: [Segment; 6] = [
+    Segment::Resources,
+    Segment::Time,
+    Segment::Bell,
+    Segment::Tray,
+    Segment::Hub,
+    Segment::Launcher,
+];
+
 /// What a click on the bar does, for the root
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BarAction {
@@ -319,6 +329,11 @@ impl StatusBar {
         Local::now().format("%Y-%m-%d %I:%M:%S%p").to_string()
     }
 
+    /// The time on a narrow screen, eg `12:00PM`
+    fn short_time() -> String {
+        Local::now().format("%I:%M%p").to_string()
+    }
+
     /// The bell, and room for its count's superscript
     fn bell(&self, palette: &Palette) -> Spans {
         let icon = if self.notifications.store.lock().unwrap().do_not_disturb {
@@ -329,11 +344,12 @@ impl StatusBar {
         vec![(format!("{icon} "), palette.fg)]
     }
 
-    /// The segments with their text and place, for both drawing and clicking
+    /// The segments with their text and place, for both drawing and clicking. On a screen too narrow for all of
+    /// them, the time gets shorter, then segments are left out (`LEFT_OUT`'s order).
     fn layout(&self, state: &BarState, palette: &Palette, width: f32) -> Vec<Placed> {
         let fg = palette.fg;
         // empty ones (eg a tray without items) take no room
-        let spans = |segments: &[Segment]| -> Vec<(Segment, Spans)> {
+        let spans = |segments: &[Segment], short: bool| -> Vec<(Segment, Spans)> {
             segments
                 .iter()
                 .map(|&segment| {
@@ -342,6 +358,7 @@ impl StatusBar {
                             vec![(if state.treeview_shown { "▾" } else { "▴" }.to_string(), fg)]
                         }
                         Segment::Launcher => vec![(launcher::ICON.to_string(), fg)],
+                        Segment::Time if short => vec![(Self::short_time(), fg)],
                         Segment::Time => vec![(Self::time(), fg)],
                         Segment::Tray => self.tray_spans(palette),
                         Segment::Bell => self.bell(palette),
@@ -355,7 +372,27 @@ impl StatusBar {
                 .filter(|(_, spans)| !spans.is_empty())
                 .collect()
         };
-        let [left, right] = [spans(&self.layout[0]), spans(&self.layout[1])];
+        let fits = |sides: &[Vec<(Segment, Spans)>; 2]| {
+            let used: f32 = sides
+                .iter()
+                .flatten()
+                .map(|(_, spans)| spans_width(spans) + GAP)
+                .sum();
+            used + GAP <= width
+        };
+        let mut sides = [spans(&self.layout[0], false), spans(&self.layout[1], false)];
+        if !fits(&sides) {
+            sides = [spans(&self.layout[0], true), spans(&self.layout[1], true)];
+        }
+        for left_out in LEFT_OUT {
+            if fits(&sides) {
+                break;
+            }
+            for side in &mut sides {
+                side.retain(|(segment, _)| *segment != left_out);
+            }
+        }
+        let [left, right] = sides;
         let mut placed = Vec::new();
         let mut x = GAP;
         for (segment, spans) in left {
@@ -504,7 +541,12 @@ impl StatusBar {
                     &self.icons,
                     hover,
                 );
-                trees.push(popup_frame(settings, area, items));
+                trees.push(popup_frame(
+                    settings,
+                    area,
+                    notification_scale(width),
+                    items,
+                ));
             }
             drop(store);
             // not over the hub, which shows the same
@@ -513,6 +555,8 @@ impl StatusBar {
             if let Some(spans) = osd {
                 // in the middle, under the bar
                 let [w, h] = Lines::size(1, columns_of(&spans));
+                let scale = fit(width, w);
+                let [w, h] = [w * scale, h * scale];
                 let area = [
                     ((width - w) / 2.0).max(0.0),
                     height + POPUP_NOTIFICATION_GAP,
@@ -522,6 +566,7 @@ impl StatusBar {
                 trees.push(popup_frame(
                     settings,
                     area,
+                    scale,
                     vec![Lines::new().text(0, 0, spans)],
                 ));
             }
@@ -530,6 +575,7 @@ impl StatusBar {
                 trees.push(popup_frame(
                     settings,
                     area,
+                    self.popup_scale(popup, width),
                     self.popup_items(settings, popup),
                 ));
             }
@@ -537,10 +583,11 @@ impl StatusBar {
         trees
     }
 
-    /// The notifications popping up: each one's id and `[x, y, width, height]`, top down
+    /// The notifications popping up: each one's id and `[x, y, width, height]` (`notification_scale`d), top down
     fn popup_notification_areas(&self, width: f32) -> Vec<(u32, [f32; 4])> {
         let store = self.notifications.store.lock().unwrap();
-        let [w, _] = Lines::size(0, notification_list::COLUMNS);
+        let scale = notification_scale(width);
+        let [w, _] = Lines::size(0, notification_list::COLUMNS).map(|length| length * scale);
         let mut y = height() as f32 + POPUP_NOTIFICATION_GAP;
         store
             .popups()
@@ -549,7 +596,8 @@ impl StatusBar {
                 let [_, h] = Lines::size(
                     notification_list::popup_line_count(notification),
                     notification_list::COLUMNS,
-                );
+                )
+                .map(|length| length * scale);
                 let area = [(width - GAP - w).max(0.0), y, w, h];
                 y += h + POPUP_NOTIFICATION_GAP;
                 (notification.id, area)
@@ -563,8 +611,10 @@ impl StatusBar {
             .into_iter()
             .find_map(|(id, area)| {
                 let [ax, ay, aw, ah] = area.map(f64::from);
-                ((ax..ax + aw).contains(&x) && (ay..ay + ah).contains(&y))
-                    .then(|| (id, Lines::new().at([x - ax, y - ay])))
+                ((ax..ax + aw).contains(&x) && (ay..ay + ah).contains(&y)).then(|| {
+                    let scale = f64::from(notification_scale(width));
+                    (id, Lines::new().at([(x - ax) / scale, (y - ay) / scale]))
+                })
             })
     }
 
@@ -599,9 +649,9 @@ impl StatusBar {
         }
     }
 
-    /// The popup's `[x, y, width, height]` on a screen `width` wide: under its segment
-    fn popup_area(&self, popup: Popup, placed: &[Placed], width: f32) -> [f32; 4] {
-        let [w, h] = match popup {
+    /// Its size, unscaled
+    fn popup_size(&self, popup: Popup) -> [f32; 2] {
+        match popup {
             Popup::Calendar(_) => calendar::size(),
             Popup::Resources(..) => resources::size(&self.system.snapshot.lock().unwrap()),
             Popup::Notifications(_) => {
@@ -610,7 +660,18 @@ impl StatusBar {
             Popup::Launcher => Launcher::size(),
             Popup::Hub(open) => hub::size(&self.controls.state.lock().unwrap(), open),
             Popup::TrayMenu => tray::menu_size(self.tray.menu.lock().unwrap().as_ref()),
-        };
+        }
+    }
+
+    /// How much it's scaled down to fit a screen `width` wide
+    fn popup_scale(&self, popup: Popup, width: f32) -> f32 {
+        fit(width, self.popup_size(popup)[0])
+    }
+
+    /// The popup's `[x, y, width, height]` (`popup_scale`d) on a screen `width` wide: under its segment
+    fn popup_area(&self, popup: Popup, placed: &[Placed], width: f32) -> [f32; 4] {
+        let scale = self.popup_scale(popup, width);
+        let [w, h] = self.popup_size(popup).map(|length| length * scale);
         let [left, segment_width] = placed
             .iter()
             .find(|placed| placed.segment == popup.segment())
@@ -659,8 +720,9 @@ impl StatusBar {
         // after: the popup may have changed
         let cell = self.popup.and_then(|popup| {
             let [ax, ay, aw, ah] = self.popup_area(popup, &placed, width).map(f64::from);
+            let scale = f64::from(self.popup_scale(popup, width));
             ((ax..ax + aw).contains(&x) && (ay..ay + ah).contains(&y))
-                .then(|| Lines::new().at([x - ax, y - ay]))
+                .then(|| Lines::new().at([(x - ax) / scale, (y - ay) / scale]))
                 .flatten()
         });
         let notification = self
@@ -695,8 +757,12 @@ impl StatusBar {
         if let Some(popup) = self.popup {
             let area = self.popup_area(popup, placed, width);
             if inside(area) {
-                let damaged = pressed
-                    && self.click_popup(popup, [x - f64::from(area[0]), y - f64::from(area[1])]);
+                let scale = f64::from(self.popup_scale(popup, width));
+                let local = [
+                    (x - f64::from(area[0])) / scale,
+                    (y - f64::from(area[1])) / scale,
+                ];
+                let damaged = pressed && self.click_popup(popup, local);
                 return BarResponse {
                     consumed: true,
                     damaged,
@@ -1106,12 +1172,37 @@ fn serve_queued(
     })
 }
 
-/// A popup's background and frame at `[x, y, width, height]` around `items`
-fn popup_frame(settings: &Settings, [x, y, w, h]: [f32; 4], items: Vec<UITree>) -> UITree {
+/// How much a popup `w` wide is scaled down to fit a screen `width` wide (1: it fits)
+fn fit(width: f32, w: f32) -> f32 {
+    (width / w).min(1.0)
+}
+
+/// How much the notifications popping up are scaled down on a screen `width` wide
+fn notification_scale(width: f32) -> f32 {
+    fit(width, Lines::size(0, notification_list::COLUMNS)[0])
+}
+
+/// A popup's background and frame at `[x, y, width, height]` around `items`, which are drawn `scale`d
+fn popup_frame(
+    settings: &Settings,
+    [x, y, w, h]: [f32; 4],
+    scale: f32,
+    items: Vec<UITree>,
+) -> UITree {
+    let frame = |position, size| {
+        UITree::new_styled(
+            UIElement::Backgrounded(popup_bg(settings)),
+            Style::absolute(position, size),
+            vec![ui::frame(guide(), 0.0, 1.0, Style::full_size(), items)],
+        )
+    };
+    if scale >= 1.0 {
+        return frame([x, y], [w, h]);
+    }
     UITree::new_styled(
-        UIElement::Backgrounded(popup_bg(settings)),
+        UIElement::Scaled(scale),
         Style::absolute([x, y], [w, h]),
-        vec![ui::frame(guide(), 0.0, 1.0, Style::full_size(), items)],
+        vec![frame([0.0, 0.0], [w / scale, h / scale])],
     )
 }
 
