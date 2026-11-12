@@ -156,11 +156,16 @@ published treeviews.
   Free view (`zoom_out.view: free`): 2 finger scrolls move it (`zoom_free`, px and rows, faded out zooming in), not
   the center; clicks, arrows and drops change the center while it stays put (`pan_zoom` adds the offset to
   `zoom_free` instead of springing, but a lateral move's row still slides under its parent); a drag's edge
-  scroll stays. Bounded: the view's middle stays over the panes' bounds (`bound_zoom_free`, after scrolls). Arrows
+  scroll stays. Bounded: the view's middle stays over the panes' bounds (`zoom_overshoot`); past them scrolls move 0.3 as
+  much, and it springs back (`bound_zoom_free`, a pan) once scrolling rests (`zoom_fling`, 150 ms, eg wheels) or a
+  glide ends. Momentum: a finger scroll's `stop` with speed over 100 px/s glides on (`zoom_glide`, friction 4/s,
+  25/s past the bounds; `glide_zoom` in `update_zoom_anim`). Arrows
   slide it (a pan) to bring the center's pane in sight, `gap` from the edges (`show_zoom_center`, at the size
   last drawn, `zoom_drawn`).
   Scale: pinches (`zoom_pinch`) or Ctrl+scroll (`MouseEventKind::Scroll::ctrl`, springs, `rescale_zoom`), kept
-  in `ZOOM_PINCH` (¼ to 4×). Shift+C (`reset_zoom_view`) springs back to scale 1 and, if free, slides the
+  in `ZOOM_PINCH` (¼ to 4×). Free, it scales around the pointer (`zoom_pointer` from `zoom_motion`; fingers too):
+  `zoom_anchor` (pointer from the middle, scale then) shifts the view by `p·(1/s − 1/s₀)` live in `zoom_layout`,
+  baked into `zoom_free` when the pinch or spring ends. Shift+C (`reset_zoom_view`) springs back to scale 1 and, if free, slides the
   offset back to 0.
   Child previews (`zoom_out.child_previews`, `zoom_previews`): under each pane of a sibling of its row's focus
   (`zoom_previewed`; a merged container row's focus is its deepest node), its first children (at most 4, as many as

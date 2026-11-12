@@ -155,6 +155,14 @@ pub struct NodeTree {
     /// How far the free zoom-out view (`ZoomOutView::Free`) was moved: px (before scaling) and rows down, like
     /// `zoom_pan`
     zoom_free: ([f32; 2], f32),
+    /// Where the pointer last was in the zoom-out view, which scaling keeps still (`zoom_motion`)
+    zoom_pointer: Option<[f64; 2]>,
+    /// While scaling around the pointer: where it is from the view's middle (px of the view), and the scale then
+    zoom_anchor: Option<([f32; 2], f32)>,
+    /// While 2 finger scrolling the free view: its speed (px before scaling a second), and when it last scrolled
+    zoom_fling: Option<([f32; 2], Instant)>,
+    /// The free view gliding on after the fingers lift: its speed, and when it last moved
+    zoom_glide: Option<([f32; 2], Instant)>,
     /// The size the zoom-out view was last drawn at (`zoom_window`)
     zoom_drawn: Cell<Option<DisplayContainerSize>>,
     /// How much a pinch scales the zoom-out view (`zoom_pinch`), and what it was when the pinch began
@@ -370,6 +378,10 @@ impl NodeTree {
             zoom_rescale: None,
             zoom_free: ([0.0; 2], 0.0),
             zoom_drawn: Cell::new(None),
+            zoom_pointer: None,
+            zoom_anchor: None,
+            zoom_fling: None,
+            zoom_glide: None,
             zoom_anim: None,
             was_zoomed: None,
             zoom_pan: None,
@@ -2216,7 +2228,14 @@ impl NodeTree {
             .is_some_and(|(started, _)| swipe::spring_progress(started).is_none())
         {
             self.zoom_rescale = None;
+            if self.zoom_pinched.1.is_none() {
+                self.bake_zoom_anchor();
+                if let Some(size) = self.zoom_drawn.get() {
+                    self.bound_zoom_free(size);
+                }
+            }
         }
+        self.glide_zoom();
         self.zoom_edge_scroll();
     }
 
@@ -2264,6 +2283,8 @@ impl NodeTree {
         if matches!(phase, PinchPhase::Begin { .. }) {
             self.zoom_pinched.0 = self.zoom_pinch_now();
             self.zoom_rescale = None;
+            // around the fingers (the pointer)
+            self.anchor_zoom();
         }
         let (pinched, began) = &mut self.zoom_pinched;
         match phase {
@@ -2279,6 +2300,10 @@ impl NodeTree {
                     && cancelled
                 {
                     *pinched = began;
+                }
+                self.bake_zoom_anchor();
+                if let Some(size) = self.zoom_drawn.get() {
+                    self.bound_zoom_free(size);
                 }
             }
         }
@@ -2306,6 +2331,8 @@ impl NodeTree {
 
     /// Back to the zoom-out view's original scale and, if free, its center in the middle (Shift+C)
     fn reset_zoom_view(&mut self) {
+        self.bake_zoom_anchor();
+        self.zoom_glide = None;
         self.rescale_zoom(1.0);
         if Self::zoom_free_view() {
             // slides there
@@ -2319,6 +2346,8 @@ impl NodeTree {
     /// Whether the zoom-out view is springing (zooming, panning or moving panes), so holders redraw
     pub fn zoom_animating(&self) -> bool {
         self.zoom_rescale.is_some()
+            || self.zoom_glide.is_some()
+            || self.zoom_fling.is_some()
             || self.zoom_anim.is_some()
             || self.zoom_pan.is_some()
             || self.zoom_moves.is_some()
@@ -2389,10 +2418,26 @@ impl NodeTree {
         }
     }
 
-    /// Keeps the middle of the free zoom-out view drawn at `size` over its panes, so it can't float away
+    /// Springs the free zoom-out view drawn at `size` back to where its middle is over its panes, so it can't float away
     fn bound_zoom_free(&mut self, size: DisplayContainerSize) {
-        let Some(ZoomLayout { panes, scale, .. }) = self.zoom_layout(size, 1.0) else {
+        let back = self.zoom_overshoot(size);
+        if back.iter().all(|value| value.abs() < f32::EPSILON) {
             return;
+        }
+        let (carried, carried_rows, _) = self.zoom_pan_offset();
+        for axis in [0, 1] {
+            self.zoom_free.0[axis] += back[axis];
+        }
+        let offset = [0, 1].map(|axis| carried[axis] - back[axis]);
+        self.zoom_pan = Some((Instant::now(), offset, carried_rows, false));
+        self.damaged = true;
+    }
+
+    /// How far the free zoom-out view drawn at `size` is to move back so its middle is over its panes (px before
+    /// scaling)
+    fn zoom_overshoot(&self, size: DisplayContainerSize) -> [f32; 2] {
+        let Some(ZoomLayout { panes, scale, .. }) = self.zoom_layout(size, 1.0) else {
+            return [0.0; 2];
         };
         let Some(bounds) = panes.iter().map(|pane| pane.rect).reduce(|a, b| {
             let [left, top] = [0, 1].map(|axis| a[axis].min(b[axis]));
@@ -2400,14 +2445,148 @@ impl NodeTree {
                 [0, 1].map(|axis| (a[axis] + a[axis + 2]).max(b[axis] + b[axis + 2]));
             [left, top, right - left, bottom - top]
         }) else {
-            return;
+            return [0.0; 2];
         };
         let middle = [size.width, size.height].map(|length| length as f32 / scale / 2.0);
-        for axis in [0, 1] {
+        [0, 1].map(|axis| {
             let [low, length] = [bounds[axis], bounds[axis + 2]].map(|value| value as f32);
-            self.zoom_free.0[axis] += middle[axis] - middle[axis].clamp(low, low + length);
+            middle[axis] - middle[axis].clamp(low, low + length)
+        })
+    }
+
+    /// Moves the free zoom-out view while 2 fingers scroll it, `delta` px of the view: harder past its bounds, and
+    /// gliding on once they lift (`stop`)
+    fn scroll_zoom_free(&mut self, size: DisplayContainerSize, delta: [f64; 2], stop: [bool; 2]) {
+        // past its bounds, it moves this much of the scroll
+        const RUBBER: f32 = 0.3;
+        // slower, it doesn't glide (px before scaling a second)
+        const GLIDE: f32 = 100.0;
+        let Some(scale) = self.zoom_full_scale(size) else {
+            return;
+        };
+        self.zoom_glide = None;
+        let back = self.zoom_overshoot(size);
+        let moved = [0, 1].map(|axis| {
+            let moved = -delta[axis] as f32 / scale;
+            // further out
+            if back[axis] * moved < 0.0 {
+                moved * RUBBER
+            } else {
+                moved
+            }
+        });
+        for axis in [0, 1] {
+            self.zoom_free.0[axis] += moved[axis];
+        }
+        let now = Instant::now();
+        let speed = match self.zoom_fling {
+            Some((speed, last)) => {
+                let elapsed = now.duration_since(last).as_secs_f32();
+                if elapsed > 0.1 {
+                    [0.0; 2]
+                } else if elapsed > 0.001 {
+                    [0, 1].map(|axis| 0.6 * speed[axis] + 0.4 * moved[axis] / elapsed)
+                } else {
+                    speed
+                }
+            }
+            None => [0.0; 2],
+        };
+        self.zoom_fling = Some((speed, now));
+        if stop.contains(&true) {
+            self.zoom_fling = None;
+            if speed[0].hypot(speed[1]) > GLIDE {
+                self.zoom_glide = Some((speed, now));
+            } else {
+                self.bound_zoom_free(size);
+            }
         }
         self.damaged = true;
+    }
+
+    /// Glides the free zoom-out view on, slowing (fast past its bounds), then springs it back into them; or springs
+    /// it back once a scroll (eg a wheel's, which has no end) rests
+    fn glide_zoom(&mut self) {
+        // how fast it slows, a second; past its bounds
+        const FRICTION: f32 = 4.0;
+        const BRAKE: f32 = 25.0;
+        const STOPPED: f32 = 20.0;
+        let Some(size) = self.zoom_drawn.get() else {
+            return;
+        };
+        if let Some((_, last)) = self.zoom_fling
+            && last.elapsed().as_secs_f32() > 0.15
+        {
+            self.zoom_fling = None;
+            if self.zoom_press.is_none() {
+                self.bound_zoom_free(size);
+            }
+        }
+        let Some((speed, last)) = self.zoom_glide else {
+            return;
+        };
+        let now = Instant::now();
+        let elapsed = now.duration_since(last).as_secs_f32().min(0.05);
+        for axis in [0, 1] {
+            self.zoom_free.0[axis] += speed[axis] * elapsed;
+        }
+        let back = self.zoom_overshoot(size);
+        let speed = [0, 1].map(|axis| {
+            let friction = if back[axis].abs() > f32::EPSILON {
+                BRAKE
+            } else {
+                FRICTION
+            };
+            speed[axis] * (-friction * elapsed).exp()
+        });
+        self.damaged = true;
+        if speed[0].hypot(speed[1]) < STOPPED {
+            self.zoom_glide = None;
+            self.bound_zoom_free(size);
+        } else {
+            self.zoom_glide = Some((speed, now));
+        }
+    }
+
+    /// Starts scaling the free zoom-out view around the pointer (baking in an earlier one)
+    fn anchor_zoom(&mut self) {
+        self.bake_zoom_anchor();
+        if !Self::zoom_free_view() {
+            return;
+        }
+        let (Some(size), Some(pointer)) = (self.zoom_drawn.get(), self.zoom_pointer) else {
+            return;
+        };
+        let Some(scale) = self.zoom_full_scale(size) else {
+            return;
+        };
+        let middle = [size.width, size.height].map(|length| f64::from(length) / 2.0);
+        let from_middle = [0, 1].map(|axis| (pointer[axis] - middle[axis]) as f32);
+        self.zoom_anchor = Some((from_middle, scale));
+    }
+
+    /// How far scaling around the pointer moved the free view so far, at `scale` (px before scaling)
+    fn zoom_anchor_shift(&self, scale: f32) -> [f32; 2] {
+        self.zoom_anchor.map_or([0.0; 2], |(from_middle, began)| {
+            from_middle.map(|value| value * (1.0 / scale - 1.0 / began))
+        })
+    }
+
+    /// Ends scaling around the pointer, keeping where it moved the view
+    fn bake_zoom_anchor(&mut self) {
+        let Some(scale) = self
+            .zoom_drawn
+            .get()
+            .and_then(|size| self.zoom_full_scale(size))
+        else {
+            self.zoom_anchor = None;
+            return;
+        };
+        let shift = self.zoom_anchor_shift(scale);
+        self.zoom_anchor = None;
+        for axis in [0, 1] {
+            self.zoom_free.0[axis] += shift[axis];
+        }
     }
 
     /// Slides the free zoom-out view so its center's pane is in sight
@@ -2577,16 +2756,12 @@ impl NodeTree {
         // how much a px of scrolling scales it
         const RESCALE: f64 = 0.01;
         if ctrl {
+            self.anchor_zoom();
             self.rescale_zoom(self.zoom_pinched.0 * (-y * RESCALE).exp() as f32);
             return;
         }
         if Self::zoom_free_view() {
-            if let Some(scale) = self.zoom_full_scale(size) {
-                let (free, _) = &mut self.zoom_free;
-                free[0] -= x as f32 / scale;
-                free[1] -= y as f32 / scale;
-                self.bound_zoom_free(size);
-            }
+            self.scroll_zoom_free(size, [x, y], stop);
             return;
         }
         let [moved_x, moved_y] = &mut self.zoom_scrolled;
@@ -2967,8 +3142,13 @@ impl NodeTree {
         let pan = [pan[0], pan[1] + pan_rows * step];
         // dragged at the edges, and floated (gone once zoomed in)
         let (free, free_rows) = self.zoom_free;
+        let anchored = self.zoom_anchor_shift(full_scale);
         let free = if Self::zoom_free_view() {
-            [free[0], free[1] + free_rows * step].map(|value| value * zoomed)
+            [
+                free[0] + anchored[0],
+                free[1] + anchored[1] + free_rows * step,
+            ]
+            .map(|value| value * zoomed)
         } else {
             [0.0; 2]
         };
@@ -3098,6 +3278,7 @@ impl NodeTree {
 
     /// The pointer moved in the zoom-out view; a drag there shows where it drops
     pub fn zoom_motion(&mut self, position: [f64; 2]) {
+        self.zoom_pointer = Some(position);
         if let Some(press) = &mut self.zoom_press {
             press.at = position;
             self.damaged = true;
