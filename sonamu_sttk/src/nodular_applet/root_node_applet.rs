@@ -603,7 +603,14 @@ impl RootNodeApplet {
             echo: None,
             buffer_scroll: 0,
             echoed: 0,
-            status_bar: StatusBar::default(),
+            status_bar: {
+                // redraws when the bar's system readings change
+                let (ping, source) = calloop::ping::make_ping().unwrap();
+                event_loop
+                    .insert_source(source, |(), &mut (), root: &mut Self| root.surface.damage())
+                    .unwrap();
+                StatusBar::new(move || ping.ping())
+            },
             bar_time: String::new(),
             loop_handle: event_loop.clone(),
         };
@@ -885,7 +892,10 @@ impl RootNodeApplet {
                 treeview_shown: self.treeview_pinned,
             };
             let width = self.latest_size.width as f32;
-            let response = self.status_bar.handle_mouse(&state, &mouse_event, width);
+            let palette = settings::get().palette;
+            let response = self
+                .status_bar
+                .handle_mouse(&state, &palette, &mouse_event, width);
             if response.damaged {
                 self.surface.damage();
             }

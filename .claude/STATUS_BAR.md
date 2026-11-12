@@ -64,7 +64,14 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
 - Widths: `char_width()` = 0.6 em (Noto Sans Mono's advance; text isn't measured).
 - Popups are opaque: with 0xF0 alpha the panes' text showed through (linear blending), so the treeview's menu
   (`menu_bg`) likely shows a little too.
-- Untested: clicks (no pointer injection in headless runs); drawing checked by forcing a popup open.
+- Done: 3. `status_bar/system.rs`: a thread reads every 2 s (battery from sysfs, profile via `powerprofilesctl get`,
+  cpu/mem from `/proc`; processes from `/proc/*/stat`+`statm` only while the popup is open) into
+  `Arc<Mutex<Snapshot>>`, then pings the root (calloop ping → damage). Sets `power-saver` once at start.
+  `resources.rs`: segment + popup; `Lines` (mod.rs) places monospace text by column for drawing and clicks.
+- Widths: Nerd Font icons count as 2 columns (`columns`), they render ~1.5 wide.
+- Don't `match` on `snapshot.lock()` directly when an arm locks again (the guard lives through the match: deadlock).
+- Process names are `comm` (15 chars, eg `.quickshell-wra`).
+- Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work
 

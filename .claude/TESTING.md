@@ -35,3 +35,8 @@ Found while debugging #60; nothing here is in the repo's code.
 - Clients launched from a Sonamu run in the dev shell (`IN_NIX_SHELL`) don't get its `LD_LIBRARY_PATH`
   (`connect_wl_client`, #153): it beat Signal's RUNPATH (BoringSSL), so test apps from a shell without it too.
   Run test apps through the settings' `startup` (with `SONAMU_CONFIG`) to launch them as Sonamu does.
+- 2026-11-12 (#150): clicks work with a ~60-line virtual pointer client (`wayland-client` 0.31.14 +
+  `wayland-protocols-wlr` 0.3.12 `client`, `cargo build --offline`): binds `zwlr_virtual_pointer_manager_v1` + seat,
+  reads `move x y` (`motion_absolute` in the output's WxH), `click`, `scroll dy`, `sleep ms` lines from stdin; pipe a
+  subshell into it with `grim` calls between (the pointer stays while stdin is open). Coords include sway's title bar.
+- Test runs share the machine: the status bar sets the real power profile (`power-saver` at start, and on clicks).
