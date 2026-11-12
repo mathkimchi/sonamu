@@ -4,7 +4,7 @@ use super::{
     Lines, Spans, columns,
     icons::Icons,
     notifications::{Notification, Store},
-    widgets::{Button, Cell, label_color},
+    widgets::{Button, Cell, ScrollList, label_color},
 };
 use sonamu_common::settings::{Palette, Settings};
 use sonamu_ui::ui_element::UITree;
@@ -17,7 +17,7 @@ const CLOSE: &str = "\u{f0156}";
 pub const COLUMNS: usize = 44;
 /// Lines above the list: title, Do not disturb, blank
 const HEADER_LINES: usize = 3;
-/// Notifications listed at most (2 lines each)
+/// Notifications shown at once (2 lines each)
 const LISTED: usize = 8;
 /// Body lines a popping up one shows at most
 const BODY_LINES: usize = 3;
@@ -150,8 +150,20 @@ fn notification_buttons(
     ]
 }
 
-/// The list's buttons: clear all, Do not disturb, and each listed notification's
-fn list_buttons(store: &Store, palette: &Palette) -> Vec<Entry> {
+/// The shown notifications, newest first, with their first lines
+fn shown(store: &Store, list: ScrollList) -> impl Iterator<Item = (usize, &Notification)> {
+    let range = list.visible(store.list.len(), LISTED);
+    let lines = (HEADER_LINES..).step_by(2);
+    lines.zip(store.list.iter().rev().skip(range.start).take(range.len()))
+}
+
+/// Scrolls the list `steps` (positive down); whether it moved
+pub fn scroll(store: &Store, list: &mut ScrollList, steps: i32) -> bool {
+    list.scroll(steps, store.list.len(), LISTED)
+}
+
+/// The list's buttons: clear all, Do not disturb, and each shown notification's
+fn list_buttons(store: &Store, list: ScrollList, palette: &Palette) -> Vec<Entry> {
     let on = store.do_not_disturb;
     let (icon, state) = if on { (BELL_OFF, "on") } else { (BELL, "off") };
     let mut entries = vec![
@@ -169,22 +181,23 @@ fn list_buttons(store: &Store, palette: &Palette) -> Vec<Entry> {
             Click::DoNotDisturb,
         ),
     ];
-    for (index, notification) in store.list.iter().rev().take(LISTED).enumerate() {
-        entries.extend(notification_buttons(
-            notification,
-            HEADER_LINES + 2 * index,
-            2,
-            palette,
-        ));
+    for (line, notification) in shown(store, list) {
+        entries.extend(notification_buttons(notification, line, 2, palette));
     }
     entries
 }
 
-pub fn draw(settings: &Settings, store: &Store, icons: &Icons, hover: Option<Cell>) -> Vec<UITree> {
+pub fn draw(
+    settings: &Settings,
+    store: &Store,
+    list: ScrollList,
+    icons: &Icons,
+    hover: Option<Cell>,
+) -> Vec<UITree> {
     let palette = &settings.palette;
     let lines = Lines::new();
     let mut items = vec![lines.text(0, 0, vec![("Notifications".to_string(), palette.fg)])];
-    for (button, spans, click) in list_buttons(store, palette) {
+    for (button, spans, click) in list_buttons(store, list, palette) {
         let on = matches!(click, Click::DoNotDisturb) && store.do_not_disturb;
         items.extend(button.draw(&lines, palette, spans, on, hover));
     }
@@ -195,8 +208,7 @@ pub fn draw(settings: &Settings, store: &Store, icons: &Icons, hover: Option<Cel
             vec![("No notifications".to_string(), palette.inactive)],
         ));
     }
-    for (index, notification) in store.list.iter().rev().take(LISTED).enumerate() {
-        let line = HEADER_LINES + 2 * index;
+    for (line, notification) in shown(store, list) {
         if let Some(icon) = app_icon(notification, icons) {
             items.push(lines.icon(line, 0, icon));
         }
@@ -205,11 +217,18 @@ pub fn draw(settings: &Settings, store: &Store, icons: &Icons, hover: Option<Cel
             .unwrap_or_default();
         items.push(lines.text(line + 1, TEXT_COLUMN, vec![(body, palette.inactive)]));
     }
+    items.extend(list.bar(
+        &lines,
+        [HEADER_LINES, COLUMNS, 2],
+        store.list.len(),
+        LISTED,
+        palette.inactive,
+    ));
     items
 }
 
-pub fn click(store: &Store, cell: Cell) -> Option<Click> {
-    list_buttons(store, &Palette::default())
+pub fn click(store: &Store, list: ScrollList, cell: Cell) -> Option<Click> {
+    list_buttons(store, list, &Palette::default())
         .into_iter()
         .find(|(button, ..)| button.contains(cell))
         .map(|(.., click)| click)
@@ -309,5 +328,36 @@ mod tests {
         assert!(matches!(click((1, 5)), Some(Click::Activate(7))));
         assert!(matches!(click((2, TEXT_COLUMN)), Some(Click::Action(7, key)) if key == "reply"));
         assert!(click((2, COLUMNS - 1)).is_none());
+    }
+
+    #[test]
+    fn list_scrolls_to_older_ones() {
+        let mut store = Store::default();
+        for id in 0..12 {
+            store.list.push(Notification {
+                id,
+                app_name: String::new(),
+                icon: String::new(),
+                desktop_entry: None,
+                summary: String::new(),
+                body: String::new(),
+                actions: Vec::new(),
+                critical: false,
+                popup_until: None,
+            });
+        }
+        let mut list = ScrollList::default();
+        // newest first
+        let first = (HEADER_LINES, 0);
+        assert!(matches!(
+            click(&store, list, first),
+            Some(Click::Activate(11))
+        ));
+        assert!(scroll(&store, &mut list, 10));
+        assert!(matches!(
+            click(&store, list, first),
+            Some(Click::Activate(7))
+        ));
+        assert!(!scroll(&store, &mut list, 1));
     }
 }

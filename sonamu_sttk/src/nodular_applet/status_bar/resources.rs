@@ -211,7 +211,7 @@ pub fn draw(
     }
     items.extend(list.bar(
         &lines,
-        [HEADER_LINES, COLUMNS],
+        [HEADER_LINES, COLUMNS, 1],
         processes.len(),
         PROCESSES,
         palette.inactive,

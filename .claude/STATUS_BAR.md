@@ -124,7 +124,7 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
   selection in view, `item_at`, a thin bar in the right pad while not all fit). Buttons: launcher apps, power
   profiles, sort columns, Do not disturb, Clear all, hub headers' name and on/off, networks/devices/outputs, mute,
   `out ›` (now at the volume line's end). Scrolling: launcher (all matches, 12 shown), processes (all, 15 shown;
-  `Popup::Resources(sort, list)`). Also buttons: calendar `‹`/`›`, tray menu entries (enabled ones), notifications
+  `Popup::Resources(sort, list)`), notifications (all, 8 shown; `Popup::Notifications(list)`). Also buttons: calendar `‹`/`›`, tray menu entries (enabled ones), notifications
   (itself over title + body (`Button::tall`), ✕, actions `[label]`; list and popping up, these hovered by
   `hovered_notification`). A popping up one's click off its buttons (gaps on the actions line) does nothing now (was
   activate). Untested live (no `wlrctl`); hub, calendar and popup notification clicks unit-tested.
@@ -152,7 +152,7 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
 - Treeview's own menu (`treeview::menu_bg`, alpha 0xF0) likely lets text show through, as the popups did.
 - `pactl subscribe` (controls.rs) isn't killed when Sonamu exits.
 - Tray: no tooltips (`ToolTip`/`Title` unread), no `StatusNotifierItemUnregistered`, `IconThemePath` ignored.
-- Notifications: no inline images (`image-data` hint), no history beyond the list's 8, unread count = all.
+- Notifications: no inline images (`image-data` hint), the store is never trimmed, unread count = all.
 - `cargo machete` wasn't run (not installed).
 
 ## Notes

@@ -160,7 +160,8 @@ enum Popup {
     Hub(Option<hub::Section>),
     /// A tray item's menu (`Tray::menu`, read meanwhile)
     TrayMenu,
-    Notifications,
+    /// The bell's list
+    Notifications(ScrollList),
     /// `StatusBar::launcher`'s
     Launcher,
 }
@@ -171,7 +172,7 @@ impl Popup {
             Self::Resources(..) => Segment::Resources,
             Self::Hub(_) => Segment::Hub,
             Self::TrayMenu => Segment::Tray,
-            Self::Notifications => Segment::Bell,
+            Self::Notifications(_) => Segment::Bell,
             Self::Launcher => Segment::Launcher,
         }
     }
@@ -576,9 +577,10 @@ impl StatusBar {
                 (sort, list),
                 hover,
             ),
-            Popup::Notifications => notification_list::draw(
+            Popup::Notifications(list) => notification_list::draw(
                 settings,
                 &self.notifications.store.lock().unwrap(),
+                list,
                 &self.icons,
                 hover,
             ),
@@ -601,7 +603,7 @@ impl StatusBar {
         let [w, h] = match popup {
             Popup::Calendar(_) => calendar::size(),
             Popup::Resources(..) => resources::size(&self.system.snapshot.lock().unwrap()),
-            Popup::Notifications => {
+            Popup::Notifications(_) => {
                 notification_list::size(&self.notifications.store.lock().unwrap())
             }
             Popup::Launcher => Launcher::size(),
@@ -748,7 +750,7 @@ impl StatusBar {
                     ScrollList::default(),
                 )));
             }
-            Segment::Bell => self.set_popup(open(Popup::Notifications)),
+            Segment::Bell => self.set_popup(open(Popup::Notifications(ScrollList::default()))),
             Segment::Hub => self.set_popup(open(Popup::Hub(None))),
             Segment::Launcher => self.set_popup(open(Popup::Launcher)),
             // handled above
@@ -758,7 +760,7 @@ impl StatusBar {
     }
 
     /// A scroll at `[x, y]`: over the hub's icons it changes the volume, over the calendar its month, over the
-    /// launcher or processes their list; any scroll over the bar or a popup is the bar's
+    /// launcher, processes or notifications their list; any scroll over the bar or a popup is the bar's
     fn scroll(
         &mut self,
         placed: &[Placed],
@@ -828,6 +830,15 @@ impl StatusBar {
                 let moved =
                     resources::scroll(&self.system.snapshot.lock().unwrap(), &mut list, steps);
                 self.popup = Some(Popup::Resources(sort, list));
+                moved
+            }
+            Some(Popup::Notifications(mut list)) => {
+                let moved = notification_list::scroll(
+                    &self.notifications.store.lock().unwrap(),
+                    &mut list,
+                    steps,
+                );
+                self.popup = Some(Popup::Notifications(list));
                 moved
             }
             Some(Popup::Launcher) => self
@@ -923,9 +934,9 @@ impl StatusBar {
                     None => None,
                 }
             }
-            Popup::Notifications => {
+            Popup::Notifications(list) => {
                 let click =
-                    notification_list::click(&self.notifications.store.lock().unwrap(), cell);
+                    notification_list::click(&self.notifications.store.lock().unwrap(), list, cell);
                 let Some(click) = click else {
                     return false;
                 };

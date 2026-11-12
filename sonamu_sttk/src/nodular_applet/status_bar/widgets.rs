@@ -115,13 +115,13 @@ impl ScrollList {
         (line < first + shown && index < count).then_some(index)
     }
 
-    /// A thin bar in the right pad of a popup `width` columns wide, beside lines `first..first + shown`, while not
-    /// all `count` fit
+    /// A thin bar in the right pad of a popup `width` columns wide, beside the `shown` items from line `first`
+    /// (`item_lines` lines each), while not all `count` fit
     #[expect(clippy::cast_precision_loss, reason = "list lengths")]
     pub fn bar(
         self,
         lines: &Lines,
-        [first, width]: [usize; 2],
+        [first, width, item_lines]: [usize; 3],
         count: usize,
         shown: usize,
         color: Color,
@@ -130,7 +130,7 @@ impl ScrollList {
             return None;
         }
         let top = lines.rows.top_of(first);
-        let height = shown as f32 * lines.rows.height;
+        let height = (shown * item_lines) as f32 * lines.rows.height;
         let start = self.visible(count, shown).start as f32 / count as f32;
         let x = POPUP_PAD + width as f32 * char_width() + POPUP_PAD / 2.0 - 1.5;
         Some(ui::rect(
