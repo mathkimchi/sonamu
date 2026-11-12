@@ -58,6 +58,13 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
 
 - Done: 1 (`nodular_applet/status_bar.rs`: `layout` places segments for drawing and clicks; `content_size` subtracts
   `status_bar::height()`; the root draws content at `[0, height]` and shifts mouse y).
+- Done: 2. `StatusBar` (in the root) holds the open popup; `handle_mouse` gets screen coords first (popup, then bar;
+  a click outside a popup only closes it). Clock: root timer every 200 ms, redraws when the text changes. Calendar:
+  month grid, today `accent`, `‹`/`›` change month.
+- Widths: `char_width()` = 0.6 em (Noto Sans Mono's advance; text isn't measured).
+- Popups are opaque: with 0xF0 alpha the panes' text showed through (linear blending), so the treeview's menu
+  (`menu_bg`) likely shows a little too.
+- Untested: clicks (no pointer injection in headless runs); drawing checked by forcing a popup open.
 
 ## Order of work
 

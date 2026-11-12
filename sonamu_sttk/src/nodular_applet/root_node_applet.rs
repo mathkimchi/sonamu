@@ -9,12 +9,11 @@ use crate::{
         node_holder::{NodeHolder, client_spawners},
         node_tree::{NodeId, NodeTree},
         project_applet::ProjectApplet,
-        status_bar::{self, BarAction, BarState},
+        status_bar::{self, BarAction, BarState, StatusBar},
         swipe::{Settle, Strip, Swipe},
         traversal::{self, Traversal},
         treeview::{
-            TreeviewAction, TreeviewPointer, TreeviewRow, focused_row,
-            treeview_rows, with_opacity,
+            TreeviewAction, TreeviewPointer, TreeviewRow, focused_row, treeview_rows, with_opacity,
         },
     },
     session,
@@ -119,6 +118,10 @@ pub struct RootNodeApplet {
     echo: Option<(sonamu_script::Message, Instant)>,
     /// `sonamu_script::last_message`'s count when last echoed
     echoed: u64,
+    /// The status bar's popups (#150)
+    status_bar: StatusBar,
+    /// The time the bar last showed, to redraw when it changes
+    bar_time: String,
     loop_handle: LoopHandle<'static, Self>,
 }
 
@@ -266,6 +269,7 @@ impl RootNodeApplet {
             view_path,
             screens,
             repl,
+            status_bar,
             ..
         } = self;
         let active = holder.tree.active_screen();
@@ -301,23 +305,19 @@ impl RootNodeApplet {
                         content.push(notice(&settings, Self::QUIT_NOTICE, size));
                     }
                     let bar_height = status_bar::height() as f32;
-                    let mut window = vec![
-                        // under the bar
-                        UITree::new_container_styled(
-                            Style::absolute(
-                                [0.0, bar_height],
-                                [size.width as f32, size.height as f32],
-                            ),
-                            content,
-                        ),
-                        status_bar::draw(
-                            &settings,
-                            &BarState {
-                                treeview_shown: pinned,
-                            },
-                            size.width as f32,
-                        ),
-                    ];
+                    // under the bar
+                    let mut window = vec![UITree::new_container_styled(
+                        Style::absolute([0.0, bar_height], [size.width as f32, size.height as f32]),
+                        content,
+                    )];
+                    window.extend(status_bar.draw(
+                        &settings,
+                        &BarState {
+                            treeview_shown: pinned,
+                        },
+                        size.width as f32,
+                        index == active,
+                    ));
                     let full = DisplayContainerSize::new(size.width, height);
                     let echo = echo.filter(|_| index == active);
                     if index == active && buffer_mode {
@@ -603,6 +603,8 @@ impl RootNodeApplet {
             echo: None,
             buffer_scroll: 0,
             echoed: 0,
+            status_bar: StatusBar::default(),
+            bar_time: String::new(),
             loop_handle: event_loop.clone(),
         };
         // a clean session starts with the help shown
@@ -648,6 +650,10 @@ impl RootNodeApplet {
                     })
                     .unwrap();
 
+                event_loop
+                    .handle()
+                    .insert_source(Timer::immediate(), RootNodeApplet::tick_bar_clock)
+                    .unwrap();
                 event_loop
                     .handle()
                     .insert_source(
@@ -873,19 +879,22 @@ impl RootNodeApplet {
         // in the active screen's coords
         let [x, y, ..] = self.screens[self.holder.tree.active_screen()].rect;
         mouse_event.position = [pointer_x - f64::from(x), pointer_y - f64::from(y)];
-        // the status bar, unless a drag is on
-        if mouse_event.position[1] < f64::from(status_bar::height())
-            && !self.treeview_pointer.is_pressed()
-            && !self.holder.tree.has_pointer_grab()
-        {
+        // the status bar and its popups, unless a drag is on
+        if !self.treeview_pointer.is_pressed() && !self.holder.tree.has_pointer_grab() {
             let state = BarState {
                 treeview_shown: self.treeview_pinned,
             };
             let width = self.latest_size.width as f32;
-            if let Some(action) = status_bar::handle_mouse(&state, &mouse_event, width) {
+            let response = self.status_bar.handle_mouse(&state, &mouse_event, width);
+            if response.damaged {
+                self.surface.damage();
+            }
+            if let Some(action) = response.action {
                 self.apply_bar_action(action);
             }
-            return;
+            if response.consumed {
+                return;
+            }
         }
         // under the bar
         mouse_event.position[1] -= f64::from(status_bar::height());
@@ -958,6 +967,14 @@ impl RootNodeApplet {
             .tree
             .handle_event(StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)));
         self.holder.do_zoom_action();
+    }
+
+    /// Redraws when the bar's clock changes; checked a few times a second
+    fn tick_bar_clock(_: Instant, (): &mut (), root: &mut Self) -> TimeoutAction {
+        if StatusBar::tick(&mut root.bar_time) {
+            root.surface.damage();
+        }
+        TimeoutAction::ToDuration(Duration::from_millis(200))
     }
 
     fn apply_bar_action(&mut self, action: BarAction) {

@@ -17,6 +17,7 @@ calloop = { workspace = true }
 slotmap = { workspace = true }
 
 log = { workspace = true }
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 
 [build-dependencies]
 regex = "1.12"

@@ -57,7 +57,7 @@ fn hover_bg() -> Color {
 fn focus_bg() -> Color {
     with_opacity(settings::get().palette.tinted(25))
 }
-fn guide() -> Color {
+pub(super) fn guide() -> Color {
     with_opacity(settings::get().palette.raised(25))
 }
 /// The share of a row's height at its top and at its bottom that drops between siblings
@@ -191,7 +191,9 @@ pub(super) struct Menu<T> {
 
 /// What a mouse event did to an open menu (`Menu::handle_mouse`)
 pub(super) enum MenuEvent {
-    Stay { damaged: bool },
+    Stay {
+        damaged: bool,
+    },
     /// It closes, with the item chosen if any
     Close(Option<MenuItem>),
 }
