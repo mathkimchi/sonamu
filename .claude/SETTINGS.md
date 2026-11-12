@@ -53,7 +53,9 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 - `font_size`: physical px (Sonamu's UI isn't scaled). Mirrored into `sonamu_ui::ui_element::font_size()` on load, since `sonamu_ui` can't depend on `sonamu_common`; used by glyphon text, char grid cell size (width = size / 1.933, ceil), and row heights in treeview, project overview, file manager and the pluck ghost.
 - `always_frame` (default true): a pane alone in its tree also gets border, gap and radius, and the treeview is framed like a pane (gap left/top/bottom, the panes' gap on its right; `border.unfocused`; mouse coords shifted by gap + border in `RootNodeApplet::handle_mouse`). False: a lone pane fills its tree and the treeview is flush. The treeview's border is `border.treeview` (DMS `secondary` in the example config).
 - Off for now (#150, `.claude/STATUS_BAR.md`): the treeview is only the left column, shown/hidden by the status bar's
-  arrow (`treeview_pinned`); `treeview.side`, `treeview.floating*` and the pin button are commented out (still parsed).
+  arrow (`treeview_pinned`); hidden, it floats in the column's place (inset by `gap`, panes not resized) while Alt
+  is held after an Alt+traversal key. `treeview.side`, `treeview.floating*` and the pin button are commented out
+  (still parsed).
 - `treeview.side` (`left`, `right`; default `left`): where a pinned treeview's column is (`treeview.width`% of the width, default 20, capped at 100; the panes
   get the rest). `treeview.floating` (`center`, `side`; default `center`): where an unpinned one floats over the panes
   (only while traversing): `treeview.floating_size`% (`[w, h]`, default `[40, 70]`, capped at 100) of the window in the middle, or the column's place at `side`, inset by `gap`.

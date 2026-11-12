@@ -141,7 +141,6 @@ enum TreeviewPlace {
     /// Pinned beside the panes
     Column(TreeviewSide),
     /// Over the panes
-    #[expect(dead_code, reason = "floating is off for now (#150)")]
     Floating,
 }
 
@@ -1383,14 +1382,27 @@ fn treeview_area(
     shown: bool,
     pinned: bool,
 ) -> Option<([u32; 4], TreeviewPlace)> {
-    // only the left column, shown by the status bar's arrow (`pinned`); right side and floating are off (#150)
-    if !shown || !pinned {
+    // the left column, shown by the status bar's arrow (`pinned`); right side and centered floating are off (#150)
+    if !shown {
         return None;
     }
     let column = width * settings.treeview.width.min(100) / 100;
+    if pinned {
+        return Some((
+            [0, 0, column, height],
+            TreeviewPlace::Column(TreeviewSide::Left),
+        ));
+    }
+    // while Alt is held after an Alt+traversal key: over the panes in the column's place, the gap all around
+    let (gap, _) = settings.gap_and_border_px();
     Some((
-        [0, 0, column, height],
-        TreeviewPlace::Column(TreeviewSide::Left),
+        [
+            gap,
+            gap,
+            column.saturating_sub(2 * gap),
+            height.saturating_sub(2 * gap),
+        ],
+        TreeviewPlace::Floating,
     ))
     // let side = settings.treeview.side;
     // let column_x = match side {
