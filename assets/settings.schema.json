@@ -315,7 +315,7 @@
           "type": "boolean"
         },
         "view": {
-          "description": "Whether the view keeps its center in the middle, or floats freely",
+          "description": "Whether the view floats freely (default), or keeps its center in the middle",
           "$ref": "#/$defs/ZoomOutView"
         }
       }

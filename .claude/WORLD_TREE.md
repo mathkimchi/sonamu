@@ -156,7 +156,9 @@ published treeviews.
   Free view (`zoom_out.view: free`): 2 finger scrolls move it (`zoom_free`, px and rows, faded out zooming in), not
   the center; clicks, arrows and drops change the center while it stays put (`pan_zoom` adds the offset to
   `zoom_free` instead of springing, but a lateral move's row still slides under its parent); a drag's edge
-  scroll stays.
+  scroll stays. Bounded: the view's middle stays over the panes' bounds (`bound_zoom_free`, after scrolls). Arrows
+  slide it (a pan) to bring the center's pane in sight, `gap` from the edges (`show_zoom_center`, at the size
+  last drawn, `zoom_drawn`).
   Child previews (`zoom_out.child_previews`, `zoom_previews`): under each pane of a sibling of its row's focus
   (`zoom_previewed`; a merged container row's focus is its deepest node), its first children (at most 4, as many as
   fit) as views at a quarter size, in room each row gets below it (`zoom_preview_room`). Drawn in the scaled

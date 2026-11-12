@@ -155,6 +155,8 @@ pub struct NodeTree {
     /// How far the free zoom-out view (`ZoomOutView::Free`) was moved: px (before scaling) and rows down, like
     /// `zoom_pan`
     zoom_free: ([f32; 2], f32),
+    /// The size the zoom-out view was last drawn at (`zoom_window`)
+    zoom_drawn: Cell<Option<DisplayContainerSize>>,
     /// How much a pinch scales the zoom-out view (`zoom_pinch`), and what it was when the pinch began
     zoom_pinched: (f32, Option<f32>),
     /// The zoom-out view growing out of, or back into, a node's view
@@ -364,6 +366,7 @@ impl NodeTree {
             zoom_press: None,
             zoom_pinched: (1.0, None),
             zoom_free: ([0.0; 2], 0.0),
+            zoom_drawn: Cell::new(None),
             zoom_anim: None,
             was_zoomed: None,
             zoom_pan: None,
@@ -2329,7 +2332,75 @@ impl NodeTree {
         };
         if let Some(target) = target {
             self.set_zoom_center(target);
+            if Self::zoom_free_view() {
+                self.show_zoom_center();
+            }
         }
+    }
+
+    /// Keeps the middle of the free zoom-out view drawn at `size` over its panes, so it can't float away
+    fn bound_zoom_free(&mut self, size: DisplayContainerSize) {
+        let Some(ZoomLayout { panes, scale, .. }) = self.zoom_layout(size, 1.0) else {
+            return;
+        };
+        let Some(bounds) = panes.iter().map(|pane| pane.rect).reduce(|a, b| {
+            let [left, top] = [0, 1].map(|axis| a[axis].min(b[axis]));
+            let [right, bottom] =
+                [0, 1].map(|axis| (a[axis] + a[axis + 2]).max(b[axis] + b[axis + 2]));
+            [left, top, right - left, bottom - top]
+        }) else {
+            return;
+        };
+        let middle = [size.width, size.height].map(|length| length as f32 / scale / 2.0);
+        for axis in [0, 1] {
+            let [low, length] = [bounds[axis], bounds[axis + 2]].map(|value| value as f32);
+            self.zoom_free.0[axis] += middle[axis] - middle[axis].clamp(low, low + length);
+        }
+        self.damaged = true;
+    }
+
+    /// Slides the free zoom-out view so its center's pane is in sight
+    fn show_zoom_center(&mut self) {
+        let (Some(size), Some(center)) = (self.zoom_drawn.get(), self.zoom_center()) else {
+            return;
+        };
+        // where things end up
+        let pan = self.zoom_pan.take();
+        let layout = self.zoom_layout(size, 1.0);
+        self.zoom_pan = pan;
+        let Some(ZoomLayout { panes, scale, .. }) = layout else {
+            return;
+        };
+        let Some(rect) = panes
+            .iter()
+            .find(|pane| self.contains(center, pane.node))
+            .map(|pane| pane.rect.map(|value| value as f32))
+        else {
+            return;
+        };
+        let margin = settings::get().gap;
+        let view = [size.width, size.height].map(|length| length as f32 / scale);
+        let shift = [0, 1].map(|axis| {
+            let [low, high] = [rect[axis] - margin, rect[axis] + rect[axis + 2] + margin];
+            if low < 0.0 {
+                -low
+            } else if high > view[axis] {
+                (view[axis] - high).max(-low)
+            } else {
+                0.0
+            }
+        });
+        if shift.iter().all(|value| value.abs() < f32::EPSILON) {
+            return;
+        }
+        // slides there from where it was
+        let (carried, carried_rows, _) = self.zoom_pan_offset();
+        for axis in [0, 1] {
+            self.zoom_free.0[axis] += shift[axis];
+        }
+        let offset = [0, 1].map(|axis| carried[axis] - shift[axis]);
+        self.zoom_pan = Some((Instant::now(), offset, carried_rows, false));
+        self.damaged = true;
     }
 
     /// Swaps the zoom-out view's center with a sibling; it stays the center
@@ -2451,7 +2522,7 @@ impl NodeTree {
                 let (free, _) = &mut self.zoom_free;
                 free[0] -= x as f32 / scale;
                 free[1] -= y as f32 / scale;
-                self.damaged = true;
+                self.bound_zoom_free(size);
             }
             return;
         }
@@ -2584,6 +2655,7 @@ impl NodeTree {
     /// remembered chain (ancestors above), each the view focus there gives with all its strip's siblings, centered
     /// on that view; the focused node's remembered child is in the middle, a thin box around the views' column.
     pub fn zoom_window(&self, size: DisplayContainerSize) -> UITree {
+        self.zoom_drawn.set(Some(size));
         let Some(ZoomLayout {
             panes,
             row_focus,
@@ -3018,6 +3090,7 @@ impl NodeTree {
             for (free, scroll) in self.zoom_free.0.iter_mut().zip(scroll) {
                 *free += scroll;
             }
+            self.bound_zoom_free(size);
         } else if scroll.iter().any(|value| value.abs() > f32::EPSILON) {
             let (carried, carried_rows, _) = self.zoom_pan_offset();
             let offset = [0, 1].map(|axis| carried[axis] + scroll[axis]);

@@ -193,7 +193,7 @@ pub struct SwipeSettings {
 pub struct ZoomOutSettings {
     /// Tiny previews of the children of the nodes beside each row's own, under their panes
     pub child_previews: bool,
-    /// Whether the view keeps its center in the middle, or floats freely
+    /// Whether the view floats freely (default), or keeps its center in the middle
     pub view: ZoomOutView,
 }
 

@@ -100,5 +100,5 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 - Commands/keybinds by name from the same program. Only things that must run code in-process would need a dylib.
 - Settings editor: deferred; schema autocomplete covers most of it.
 - `zoom_out` (`ZoomOutSettings`, #145): `child_previews` (default true; the example config sets it too): tiny
-  previews under the nodes beside each row's own; `view` (`center` default, or `free`, `ZoomOutView`). Its size setting (`[across, down]`) was removed: it fits 4 × 3
+  previews under the nodes beside each row's own; `view` (`free` default, also in the example config, or `center`, `ZoomOutView`). Its size setting (`[across, down]`) was removed: it fits 4 × 3
   views, scaled by pinching.
