@@ -74,7 +74,7 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
   `PDF_VIEWERS` in `standard_keybinds.rs` (zathura, okular, evince); zathura since 2026-11-05 (was Okular): fast to
   start, keyboard driven, one process per document.
 - `notifications.timeout` (#150, default 5): seconds a new notification pops up under the status bar (a sender's own timeout wins; critical ones stay until dismissed).
-- `startup`: `["dms run"]`, shell commands run once (`sh -c`, with Sonamu's `WAYLAND_DISPLAY`) when the runner starts (`AppletRunner::run_startup`); default none. Changing it later does nothing until restart. The example config runs Beeper (no longer DMS: the status bar replaces it, #150).
+- `startup`: `["dms run"]`, shell commands run once (`sh -c`, with Sonamu's `WAYLAND_DISPLAY`) when the runner starts (`AppletRunner::run_startup`); default none. Changing it later does nothing until restart. The example config runs nothing (no longer DMS: the status bar replaces it, #150; Beeper has no start-hidden option, its window always shows).
 - File manager and code editor (#126): text from `palette` (`fg`, `inactive` for dim text, `accent` for the active/open file and the normal mode cursor), backgrounds made translucent with the treeview's `with_opacity` (a constant 0.8, not a setting). Directory names are `border.focused`.
 - `buffer_line` (`buffer_mode` default, `always`): the root's bottom Luau prompt (`.claude/COMMANDS.md`). `always`
   takes a char-grid row below treeview and panes on every screen (`content_size`), `INSERT` while not in buffer mode;
