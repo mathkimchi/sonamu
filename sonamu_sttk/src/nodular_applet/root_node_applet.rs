@@ -9,16 +9,17 @@ use crate::{
         node_holder::{NodeHolder, client_spawners},
         node_tree::{NodeId, NodeTree},
         project_applet::ProjectApplet,
+        status_bar::{self, BarAction, BarState},
         swipe::{Settle, Strip, Swipe},
         traversal::{self, Traversal},
         treeview::{
-            BTN_LEFT, TreeviewAction, TreeviewPointer, TreeviewRow, close_width, focused_row,
+            TreeviewAction, TreeviewPointer, TreeviewRow, focused_row,
             treeview_rows, with_opacity,
         },
     },
     session,
     standard_keybinds::standard_keybind_request,
-    ui::{self, Rows},
+    ui,
 };
 use calloop::{
     EventLoop, LoopHandle,
@@ -33,7 +34,7 @@ use sonamu_common::{
         session::Session,
         shared_state::{SharedState, StatePublisher},
     },
-    settings::{self, BufferLine, ERROR, Palette, Settings, TreeviewFloating, TreeviewSide},
+    settings::{self, BufferLine, ERROR, Palette, Settings, TreeviewSide},
     utils::tree::{
         tree_node_path::TreeNodePath,
         world_tree::{Step, WorldTree, WorldTreePath},
@@ -136,6 +137,7 @@ enum TreeviewPlace {
     /// Pinned beside the panes
     Column(TreeviewSide),
     /// Over the panes
+    #[expect(dead_code, reason = "floating is off for now (#150)")]
     Floating,
 }
 
@@ -282,23 +284,40 @@ impl RootNodeApplet {
                     let treeview_area = treeview_area(&settings, size, shown, pinned);
                     let [left, width] =
                         applet_area(treeview_area, size).map(|length| length as f32);
-                    let mut window = vec![UITree::new_container_styled(
+                    let mut content = vec![UITree::new_container_styled(
                         Style::absolute([left, 0.0], [width, size.height as f32]),
                         vec![holder.tree.get_screen_window(index)],
                     )];
                     if let Some(area) = treeview_area {
-                        window.push(Self::get_treeview(
+                        content.push(Self::get_treeview(
                             &holder.tree,
                             index,
                             view_path.as_ref(),
                             treeview_pointer,
                             area,
-                            pinned,
                         ));
                     }
                     if quit_asked && index == active {
-                        window.push(notice(&settings, Self::QUIT_NOTICE, size));
+                        content.push(notice(&settings, Self::QUIT_NOTICE, size));
                     }
+                    let bar_height = status_bar::height() as f32;
+                    let mut window = vec![
+                        // under the bar
+                        UITree::new_container_styled(
+                            Style::absolute(
+                                [0.0, bar_height],
+                                [size.width as f32, size.height as f32],
+                            ),
+                            content,
+                        ),
+                        status_bar::draw(
+                            &settings,
+                            &BarState {
+                                treeview_shown: pinned,
+                            },
+                            size.width as f32,
+                        ),
+                    ];
                     let full = DisplayContainerSize::new(size.width, height);
                     let echo = echo.filter(|_| index == active);
                     if index == active && buffer_mode {
@@ -854,6 +873,22 @@ impl RootNodeApplet {
         // in the active screen's coords
         let [x, y, ..] = self.screens[self.holder.tree.active_screen()].rect;
         mouse_event.position = [pointer_x - f64::from(x), pointer_y - f64::from(y)];
+        // the status bar, unless a drag is on
+        if mouse_event.position[1] < f64::from(status_bar::height())
+            && !self.treeview_pointer.is_pressed()
+            && !self.holder.tree.has_pointer_grab()
+        {
+            let state = BarState {
+                treeview_shown: self.treeview_pinned,
+            };
+            let width = self.latest_size.width as f32;
+            if let Some(action) = status_bar::handle_mouse(&state, &mouse_event, width) {
+                self.apply_bar_action(action);
+            }
+            return;
+        }
+        // under the bar
+        mouse_event.position[1] -= f64::from(status_bar::height());
 
         let settings = settings::get();
         let treeview_area = self.treeview_area(&settings);
@@ -881,23 +916,24 @@ impl RootNodeApplet {
             pointer_x - x - f64::from(border),
             pointer_y - y - f64::from(border),
         ];
-        let inner_width = (width - f64::from(2 * border)).max(0.0);
-        if in_treeview
-            && !self.treeview_pointer.is_pressed()
-            && on_pin_button(treeview_event.position, inner_width)
-            && matches!(
-                mouse_event.kind,
-                MouseEventKind::Button {
-                    button: BTN_LEFT,
-                    pressed: true
-                }
-            )
-        {
-            self.treeview_pinned = !self.treeview_pinned;
-            self.surface.damage();
-            self.update_treeview_visibility();
-            return;
-        }
+        // the pin button is off (#150)
+        // let inner_width = (width - f64::from(2 * border)).max(0.0);
+        // if in_treeview
+        //     && !self.treeview_pointer.is_pressed()
+        //     && on_pin_button(treeview_event.position, inner_width)
+        //     && matches!(
+        //         mouse_event.kind,
+        //         MouseEventKind::Button {
+        //             button: BTN_LEFT,
+        //             pressed: true
+        //         }
+        //     )
+        // {
+        //     self.treeview_pinned = !self.treeview_pinned;
+        //     self.surface.damage();
+        //     self.update_treeview_visibility();
+        //     return;
+        // }
         let response = self.treeview_pointer.handle_mouse(
             &treeview_event,
             in_treeview,
@@ -922,6 +958,16 @@ impl RootNodeApplet {
             .tree
             .handle_event(StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)));
         self.holder.do_zoom_action();
+    }
+
+    fn apply_bar_action(&mut self, action: BarAction) {
+        match action {
+            BarAction::ToggleTreeview => {
+                self.treeview_pinned = !self.treeview_pinned;
+                self.surface.damage();
+                self.update_treeview_visibility();
+            }
+        }
     }
 
     fn apply_treeview_action(&mut self, action: TreeviewAction) {
@@ -1205,7 +1251,6 @@ impl RootNodeApplet {
         view_path: Option<&WorldTreePath>,
         treeview_pointer: &mut TreeviewPointer,
         (area, place): ([u32; 4], TreeviewPlace),
-        pinned: bool,
     ) -> UITree {
         let (rows, _) = view_rows(tree, view_path, screen);
         let settings = settings::get();
@@ -1217,25 +1262,26 @@ impl RootNodeApplet {
             &tree.screen_focus_path(screen),
             tree.screen_focus_inside(screen),
         );
-        // the top row's close button's place
-        let size = close_width();
-        let left = inner_width - size + (size - font_size()) / 2.0;
-        let pin_button = Rows::new(0.0)
-            .text(
-                ui::text(
-                    if pinned { "●" } else { "○" },
-                    with_opacity(settings.palette.fg),
-                ),
-                left,
-                left + size,
-            )
-            .with_pointer();
+        // the pin button is off: the status bar's arrow shows and hides the treeview (#150)
+        // // the top row's close button's place
+        // let size = close_width();
+        // let left = inner_width - size + (size - font_size()) / 2.0;
+        // let pin_button = Rows::new(0.0)
+        //     .text(
+        //         ui::text(
+        //             if pinned { "●" } else { "○" },
+        //             with_opacity(settings.palette.fg),
+        //         ),
+        //         left,
+        //         left + size,
+        //     )
+        //     .with_pointer();
         ui::frame(
             settings.border.treeview,
             if border > 0 { settings.radius } else { 0.0 },
             border as f32,
             Style::absolute([x as f32, y as f32], [width as f32, height as f32]),
-            vec![treeview, pin_button],
+            vec![treeview],
         )
     }
 }
@@ -1248,36 +1294,41 @@ fn treeview_area(
     shown: bool,
     pinned: bool,
 ) -> Option<([u32; 4], TreeviewPlace)> {
-    if !shown {
+    // only the left column, shown by the status bar's arrow (`pinned`); right side and floating are off (#150)
+    if !shown || !pinned {
         return None;
     }
-    let side = settings.treeview.side;
     let column = width * settings.treeview.width.min(100) / 100;
-    let column_x = match side {
-        TreeviewSide::Left => 0,
-        TreeviewSide::Right => width - column,
-    };
-    if pinned {
-        return Some(([column_x, 0, column, height], TreeviewPlace::Column(side)));
-    }
-    let area = match settings.treeview.floating {
-        TreeviewFloating::Center => {
-            let [w, h] = settings.treeview.floating_size;
-            let [w, h] = [width * w.min(100) / 100, height * h.min(100) / 100];
-            [(width - w) / 2, (height - h) / 2, w, h]
-        }
-        // in the column's place, with the gap all around
-        TreeviewFloating::Side => {
-            let (gap, _) = settings.gap_and_border_px();
-            [
-                column_x + gap,
-                gap,
-                column.saturating_sub(2 * gap),
-                height.saturating_sub(2 * gap),
-            ]
-        }
-    };
-    Some((area, TreeviewPlace::Floating))
+    Some((
+        [0, 0, column, height],
+        TreeviewPlace::Column(TreeviewSide::Left),
+    ))
+    // let side = settings.treeview.side;
+    // let column_x = match side {
+    //     TreeviewSide::Left => 0,
+    //     TreeviewSide::Right => width - column,
+    // };
+    // if pinned {
+    //     return Some(([column_x, 0, column, height], TreeviewPlace::Column(side)));
+    // }
+    // let area = match settings.treeview.floating {
+    //     TreeviewFloating::Center => {
+    //         let [w, h] = settings.treeview.floating_size;
+    //         let [w, h] = [width * w.min(100) / 100, height * h.min(100) / 100];
+    //         [(width - w) / 2, (height - h) / 2, w, h]
+    //     }
+    //     // in the column's place, with the gap all around
+    //     TreeviewFloating::Side => {
+    //         let (gap, _) = settings.gap_and_border_px();
+    //         [
+    //             column_x + gap,
+    //             gap,
+    //             column.saturating_sub(2 * gap),
+    //             height.saturating_sub(2 * gap),
+    //         ]
+    //     }
+    // };
+    // Some((area, TreeviewPlace::Floating))
 }
 
 /// The applets' area's left edge and width on a screen of `size`: beside a treeview column, else everything
@@ -1296,11 +1347,12 @@ fn applet_area(
     }
 }
 
-/// Whether `[x, y]` (in the treeview's coords, inside its frame) is on its pin button, in its top right corner
-fn on_pin_button([x, y]: [f64; 2], inner_width: f64) -> bool {
-    let size = f64::from(close_width());
-    (inner_width - size..inner_width).contains(&x) && (0.0..size).contains(&y)
-}
+// the pin button is off (#150)
+// /// Whether `[x, y]` (in the treeview's coords, inside its frame) is on its pin button, in its top right corner
+// fn on_pin_button([x, y]: [f64; 2], inner_width: f64) -> bool {
+//     let size = f64::from(close_width());
+//     (inner_width - size..inner_width).contains(&x) && (0.0..size).contains(&y)
+// }
 
 /// The treeview's frame (`[x, y, width, height]`, border included) in its `area`, and its border width.
 /// Framed like a pane with `always_frame`: in a column the panes' gap is on the side facing them, so it gets the
@@ -1455,9 +1507,12 @@ fn buffer_line_height(settings: &Settings) -> u32 {
     }
 }
 
-/// A screen's (`[x, y, width, height]`) room for the treeview and panes, above the buffer line
+/// A screen's (`[x, y, width, height]`) room for the treeview and panes, under the status bar and above the buffer line
 fn content_size(settings: &Settings, [_, _, width, height]: [u32; 4]) -> DisplayContainerSize {
-    DisplayContainerSize::new(width, height.saturating_sub(buffer_line_height(settings)))
+    DisplayContainerSize::new(
+        width,
+        height.saturating_sub(status_bar::height() + buffer_line_height(settings)),
+    )
 }
 
 /// The buffer line's bottom row

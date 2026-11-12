@@ -54,6 +54,11 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
 - Icons: freedesktop icon theme lookup; SVG via `resvg`, drawn as `UIElement::Image`.
 - Luau: `bar.layout({left = {...}, right = {...}})` with component names (default as above), set from `init.luau`.
 
+## Status
+
+- Done: 1 (`nodular_applet/status_bar.rs`: `layout` places segments for drawing and clicks; `content_size` subtracts
+  `status_bar::height()`; the root draws content at `[0, height]` and shifts mouse y).
+
 ## Order of work
 
 1. Bar row + layout shift + treeview arrow (treeview left-only).
