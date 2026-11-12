@@ -110,6 +110,8 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
   without items) take no room. `init.luau` re-runs on `sonamu.reset()`, which is the live reload.
 - Fix: hub commands have timeouts (`command_within`: 5 s, 30 s to connect; killed after), since `bluetoothctl`
   waits forever without bluetoothd and would stall the lists' thread.
+- Fix: Esc closes any popup (design asked it): `BAR_POPUP` (root_node_applet.rs) makes `is_keybind` take a bare
+  Esc while one is open; `handle_grabbed_key` closes it. Untested live: injected keys didn't reach Sonamu.
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work

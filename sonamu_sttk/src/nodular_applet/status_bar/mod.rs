@@ -849,6 +849,14 @@ impl StatusBar {
         Ok(())
     }
 
+    pub fn has_popup(&self) -> bool {
+        self.popup.is_some()
+    }
+
+    pub fn close_popup(&mut self) {
+        self.set_popup(None);
+    }
+
     /// Whether keys go to the bar (the launcher's search), not the focused applet
     pub fn wants_keys(&self) -> bool {
         self.launcher.is_some()

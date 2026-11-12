@@ -47,7 +47,10 @@ use sonamu_ui::{
 use std::{
     collections::{BTreeMap, HashMap},
     path::PathBuf,
-    sync::{Arc, RwLock, atomic::Ordering},
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -172,6 +175,18 @@ impl RootNodeApplet {
             self.set_buffer_mode(!self.buffer_mode);
             return true;
         }
+        if !self.buffer_mode
+            && matches!(symbol, Some(KeySymbol::Escape))
+            && modifiers == KeyModifiers::NONE
+            && self.status_bar.has_popup()
+        {
+            if pressed {
+                self.status_bar.close_popup();
+                self.surface.damage();
+                self.sync_key_grab();
+            }
+            return true;
+        }
         if self.status_bar.wants_keys() {
             if let (true, Some(key)) = (pressed, symbol)
                 && self.status_bar.handle_key(key)
@@ -190,12 +205,14 @@ impl RootNodeApplet {
         false
     }
 
-    /// Every key comes to the root in buffer mode and while the status bar's launcher is open
+    /// Every key comes to the root in buffer mode and while the status bar's launcher is open, and Esc while any of
+    /// its popups is
     fn sync_key_grab(&self) {
         sonamu_common::BUFFER_MODE.store(
             self.buffer_mode || self.status_bar.wants_keys(),
             Ordering::Relaxed,
         );
+        BAR_POPUP.store(self.status_bar.has_popup(), Ordering::Relaxed);
     }
 
     /// A key in buffer mode: Esc clears the prompt, or leaves buffer mode if it's empty; others go to the prompt
@@ -1078,6 +1095,7 @@ impl RootNodeApplet {
                     .map(|()| Value::Nil)
             };
             self.surface.damage();
+            self.sync_key_grab();
             let _ = call.reply.send(result);
             return;
         }
@@ -1557,6 +1575,16 @@ impl RootKeybind {
 /// The runner sends other keys straight to the client (#56).
 pub fn is_keybind(ui_event: &UIEvent) -> bool {
     sonamu_common::BUFFER_MODE.load(Ordering::Relaxed)
+        // closes it
+        || (BAR_POPUP.load(Ordering::Relaxed)
+            && matches!(
+                ui_event,
+                UIEvent::Key {
+                    symbol: Some(KeySymbol::Escape),
+                    modifiers: KeyModifiers::NONE,
+                    ..
+                }
+            ))
         || matches!(
             ui_event,
             UIEvent::Key {
@@ -1569,6 +1597,9 @@ pub fn is_keybind(ui_event: &UIEvent) -> bool {
         || standard_keybind_request(ui_event).is_some()
         || Traversal::of(ui_event, false).is_some()
 }
+
+/// A status bar popup is open: Esc comes to the root (to close it)
+static BAR_POPUP: AtomicBool = AtomicBool::new(false);
 
 /// Rows the buffer line takes below the panes: one when it always shows, else none (it shows over them)
 fn buffer_line_height(settings: &Settings) -> u32 {
