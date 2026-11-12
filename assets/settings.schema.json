@@ -39,6 +39,10 @@
         "$ref": "#/$defs/Keybind"
       }
     },
+    "mipmaps": {
+      "description": "Smaller copies of windows and images, so they look smooth when drawn small (eg the zoom-out view); a bit\nmore GPU work each time a window updates",
+      "type": "boolean"
+    },
     "palette": {
       "$ref": "#/$defs/Palette"
     },

@@ -777,11 +777,13 @@ impl ImageCache {
             };
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 size,
-                mip_level_count: 1,
+                mip_level_count: crate::mipmaps::level_count(size),
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | crate::mipmaps::USAGE,
                 label: Some("image_texture"),
                 view_formats: &[],
             });
@@ -795,6 +797,7 @@ impl ImageCache {
                 },
                 size,
             );
+            crate::mipmaps::generate(device, queue, &texture);
             (
                 texture.create_view(&wgpu::TextureViewDescriptor::default()),
                 false,
@@ -1259,7 +1262,8 @@ impl DrawingSharedData<'_> {
                 address_mode_w: wgpu::AddressMode::ClampToEdge,
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+                mipmap_filter: wgpu::MipmapFilterMode::Linear,
+                // only images and surfaces made with `mipmaps::level_count` have levels
                 ..Default::default()
             });
 

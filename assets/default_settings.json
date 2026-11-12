@@ -16,6 +16,7 @@
   "radius": 12.0,
   "always_frame": true,
   "font_size": 24.0,
+  "mipmaps": true,
   "buffer_line": "buffer_mode",
   "treeview": {
     "side": "left",

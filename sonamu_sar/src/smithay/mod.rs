@@ -102,6 +102,7 @@ use sonamu_common::sap::packets::{
 use sonamu_ui::{
     DisplayInfo, ImeEvent, PointerGrab,
     display_units::{DisplayAreaPx, DisplayContainerSize},
+    mipmaps,
     ui_element::{Cursor, Style, UIElement, UITree},
     ui_event::{MouseEvent, MouseEventKind, PinchPhase},
     winit_backend::drm::{REPEAT_DELAY, REPEAT_INTERVAL},
@@ -1174,13 +1175,14 @@ impl SmithayState {
 
                         let texture = device.create_texture(&wgpu::TextureDescriptor {
                             size: texture_size,
-                            mip_level_count: 1,
+                            mip_level_count: mipmaps::level_count(texture_size),
                             sample_count: 1,
                             dimension: wgpu::TextureDimension::D2,
                             format,
                             // COPY_DST means that we want to copy data to this texture
                             usage: wgpu::TextureUsages::TEXTURE_BINDING
-                                | wgpu::TextureUsages::COPY_DST,
+                                | wgpu::TextureUsages::COPY_DST
+                                | mipmaps::USAGE,
                             label: Some("wayland_buffer_texture"),
                             view_formats: &[],
                         });
@@ -1210,6 +1212,7 @@ impl SmithayState {
                             },
                             texture_size,
                         );
+                        mipmaps::generate(device, queue, &texture);
 
                         Some(texture.create_view(&TextureViewDescriptor::default()))
                     },
@@ -1226,11 +1229,13 @@ impl SmithayState {
                 // a copy, so the client can reuse the buffer once it's released
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
                     size: texture_size,
-                    mip_level_count: 1,
+                    mip_level_count: mipmaps::level_count(texture_size),
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: dmabuf::WGPU_FORMAT,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        | mipmaps::USAGE,
                     label: Some("wayland_dmabuf_texture"),
                     view_formats: &[],
                 });
@@ -1251,6 +1256,7 @@ impl SmithayState {
                     texture_size,
                 );
                 queue.submit([encoder.finish()]);
+                mipmaps::generate(device, queue, &texture);
                 Some(texture.create_view(&TextureViewDescriptor::default()))
             }
             // not advertised, so clients shouldn't send these; draw nothing instead of panicking

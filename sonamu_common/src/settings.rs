@@ -57,6 +57,9 @@ pub struct Settings {
     pub always_frame: bool,
     /// Text height in px (Sonamu's own UI isn't scaled)
     pub font_size: f32,
+    /// Smaller copies of windows and images, so they look smooth when drawn small (eg the zoom-out view); a bit
+    /// more GPU work each time a window updates
+    pub mipmaps: bool,
     pub treeview: TreeviewSettings,
     /// When the buffer line (a Luau prompt at the bottom, like vim's command line) shows
     pub buffer_line: BufferLine,
@@ -466,6 +469,7 @@ fn reload_from(dir: &Path, reloading: bool) -> Option<Vec<PathBuf>> {
         Ok(Loaded { settings, watch }) => {
             // read by sonamu_ui itself (eg char grid sizes), which can't see the settings
             sonamu_ui::ui_element::set_font_size(settings.font_size);
+            sonamu_ui::mipmaps::set_enabled(settings.mipmaps);
             let changed = {
                 let mut current = CURRENT.write().unwrap_or_else(PoisonError::into_inner);
                 std::mem::replace(&mut *current, settings) != *current

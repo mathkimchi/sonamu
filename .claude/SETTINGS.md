@@ -99,6 +99,7 @@ Scope for now: cosmetic settings only: palette, border (width, focused/unfocused
 
 - Commands/keybinds by name from the same program. Only things that must run code in-process would need a dylib.
 - Settings editor: deferred; schema autocomplete covers most of it.
+- `mipmaps` (default true): wl surface and `Image` textures get mip levels (`sonamu_ui::mipmaps`: `level_count`, `USAGE`, `generate` by a render pass per level), mirrored into `sonamu_ui` like `font_size`; sampled with linear mip filtering. Costs a pass chain per surface commit. Off: 1 level. Applies to textures made after the change.
 - `zoom_out` (`ZoomOutSettings`, #145): `child_previews` (default true; the example config sets it too): tiny
   previews under the nodes beside each row's own; `view` (`free` default, also in the example config, or `center`, `ZoomOutView`). Its size setting (`[across, down]`) was removed: it fits 4 × 3
   views, scaled by pinching.
