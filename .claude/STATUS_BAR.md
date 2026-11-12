@@ -108,6 +108,8 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
   `_` mnemonics dropped; click → `Event(id, "clicked")`). Tested with a scratch zbus item (TESTING.md).
 - Done: 8. `sonamu.bar_layout` (COMMANDS.md); `StatusBar::layout`, `Segment::NAMES`; empty segments (a tray
   without items) take no room. `init.luau` re-runs on `sonamu.reset()`, which is the live reload.
+- Fix: hub commands have timeouts (`command_within`: 5 s, 30 s to connect; killed after), since `bluetoothctl`
+  waits forever without bluetoothd and would stall the lists' thread.
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work

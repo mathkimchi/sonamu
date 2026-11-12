@@ -161,7 +161,13 @@ impl Controls {
 
     /// Known networks connect; others need a password, which this can't ask for yet
     pub fn connect_wifi(&self, ssid: String) {
-        self.run(move || command("nmcli", &["device", "wifi", "connect", &ssid]));
+        self.run(move || {
+            command_within(
+                "nmcli",
+                &["device", "wifi", "connect", &ssid],
+                CONNECT_TIMEOUT,
+            )
+        });
     }
 
     pub fn toggle_bluetooth(&self) {
@@ -172,9 +178,10 @@ impl Controls {
     pub fn toggle_device(&self, device: &Device) {
         let (mac, connected) = (device.mac.clone(), device.connected);
         self.run(move || {
-            command(
+            command_within(
                 "bluetoothctl",
                 &[if connected { "disconnect" } else { "connect" }, &mac],
+                CONNECT_TIMEOUT,
             );
         });
     }
@@ -184,19 +191,47 @@ impl Controls {
     }
 }
 
-/// Runs it, its output if it worked
+/// Most a command may take (eg `bluetoothctl` waits forever for a missing bluetoothd)
+const TIMEOUT: Duration = Duration::from_secs(5);
+/// Connecting may take longer
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Runs it, its output if it worked within `TIMEOUT`
 fn command(program: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(program)
+    command_within(program, args, TIMEOUT)
+}
+
+/// Runs it, its output if it worked within `timeout` (else it's killed)
+fn command_within(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
+    let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .output()
+        .spawn()
         .inspect_err(|err| log::debug!("Couldn't run {program}: {err}"))
         .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    let mut stdout = child.stdout.take()?;
+    // read meanwhile, so a full pipe can't block it
+    let reader = thread::spawn(move || {
+        let mut out = String::new();
+        std::io::Read::read_to_string(&mut stdout, &mut out).map(|_| out)
+    });
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().ok()? {
+            break status;
+        }
+        if start.elapsed() > timeout {
+            log::debug!("{program} took over {timeout:?}");
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    let out = reader.join().ok()?.ok()?;
+    status.success().then_some(out)
 }
 
 /// The first backlight's `[brightness, max_brightness]` files

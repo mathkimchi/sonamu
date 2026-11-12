@@ -126,7 +126,12 @@ impl Segment {
 /// The default layout: `[left, right]`, each left to right
 const DEFAULT_LAYOUT: [&[Segment]; 2] = [
     &[Segment::Tree, Segment::Launcher, Segment::Time],
-    &[Segment::Tray, Segment::Bell, Segment::Resources, Segment::Hub],
+    &[
+        Segment::Tray,
+        Segment::Bell,
+        Segment::Resources,
+        Segment::Hub,
+    ],
 ];
 
 /// What a click on the bar does, for the root

@@ -270,7 +270,12 @@ fn mem() -> Option<f64> {
 
 impl Reader {
     fn profile(&self) -> Option<String> {
-        zbus::block_on(self.profiles.as_ref()?.get_property::<String>("ActiveProfile")).ok()
+        zbus::block_on(
+            self.profiles
+                .as_ref()?
+                .get_property::<String>("ActiveProfile"),
+        )
+        .ok()
     }
 }
 

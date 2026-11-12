@@ -1064,10 +1064,13 @@ impl RootNodeApplet {
 
     /// A command for the root's tree or a node in it
     fn handle_node_call(&mut self, call: NodeCall) {
-        // the root's own (`sonamu.bar_layout`); the limit is checked by the caller's `call`'s world below, so here
+        // the root's own (`sonamu.bar_layout`), so its effect limit is checked here, as the holder does for others
         if call.uid.is_none() && call.name == "bar_layout" {
             let result = if command::tree_effect(&call.name) > call.max {
-                Err(format!("bar_layout is above this eval's limit ({:?})", call.max))
+                Err(format!(
+                    "bar_layout is above this eval's limit ({:?})",
+                    call.max
+                ))
             } else {
                 command::strings_arg(&call.args, 0)
                     .and_then(|left| Ok((left, command::strings_arg(&call.args, 1)?)))
