@@ -921,6 +921,7 @@ impl RootNodeApplet {
         self.holder
             .tree
             .handle_event(StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)));
+        self.holder.do_zoom_action();
     }
 
     fn apply_treeview_action(&mut self, action: TreeviewAction) {

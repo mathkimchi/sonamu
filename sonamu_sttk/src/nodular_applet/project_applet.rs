@@ -532,6 +532,19 @@ impl ProjectApplet {
 
     /// The overview's keys and clicks; gives back what it doesn't take
     fn handle_overview_event(&mut self, ui_event: UIEvent) -> Option<UIEvent> {
+        // its tree's zoom-out view's right-click menu
+        if let UIEvent::Mouse(mut mouse_event) = ui_event
+            && let Some(top) = self.zoom_top()
+        {
+            mouse_event.position[1] -= f64::from(top);
+            let size = self.zoom_size(top);
+            if self.holder.tree.zoom_menu_mouse(size, &mouse_event) {
+                self.holder.do_zoom_action();
+                self.hook.damage_window();
+                self.hook.damage_treeview();
+                return None;
+            }
+        }
         match ui_event {
             UIEvent::Mouse(MouseEvent {
                 position,

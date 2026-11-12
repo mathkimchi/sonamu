@@ -192,6 +192,7 @@ impl NodeHolder {
             _ => None,
         };
         self.tree.handle_event(event);
+        self.do_zoom_action();
         self.tree.wake_focused();
         let (id, request) = self.tree.take_keybind_request()?;
         if matches!(request, NodeRequest::Close) {
@@ -218,6 +219,15 @@ impl NodeHolder {
             self.tree.send_event(id, StandardEvent::CloseRequest);
         } else {
             self.handle_node_request(id, NodeRequest::Close);
+        }
+    }
+
+    /// Does what was chosen in the zoom-out view's right-click menu, if anything
+    pub fn do_zoom_action(&mut self) {
+        if let Some((id, action)) = self.tree.take_zoom_action()
+            && let Some(path) = self.tree.path_of(id)
+        {
+            self.node_action(&WorldTreePath::from_tree_path(&path), action);
         }
     }
 

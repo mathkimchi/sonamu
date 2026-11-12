@@ -1,7 +1,9 @@
 use crate::{
     creatable_applet::CreatableNodularApplet,
     nodular_applet::{
-        NodeRequest, NodularAppletInitializer, swipe, traversal::Traversal, treeview::BTN_LEFT,
+        NodeRequest, NodularAppletInitializer, swipe,
+        traversal::Traversal,
+        treeview::{BTN_LEFT, BTN_RIGHT, Menu, MenuEvent, MenuItem, node_items},
     },
     session,
     standard_keybinds::standard_keybind_request,
@@ -14,7 +16,7 @@ use sonamu_common::{
     sap::{
         client_handle::ClientHandle,
         detached::{DetachedClient, DetachedTree, EMPTY_LABEL},
-        packets::{AwaitedWl, NewWlSurface, SpawnPosition, StandardEvent, SwipeView, WlSurfaceId},
+        packets::{AwaitedWl, NewWlSurface, NodeAction, SpawnPosition, StandardEvent, SwipeView, WlSurfaceId},
         session::{SavedApplet, SavedTree, SavedWl},
     },
     settings::{self, ZoomOutView},
@@ -152,6 +154,10 @@ pub struct NodeTree {
     zoom_scrolled: [f64; 2],
     /// A press in the zoom-out view, until its release (`zoom_button`)
     zoom_press: Option<ZoomPress>,
+    /// A pane's right-click menu in the zoom-out view (`zoom_menu_mouse`)
+    zoom_menu: Option<Menu<NodeId>>,
+    /// What was chosen in it, for the holder to do (`take_zoom_action`)
+    zoom_action: Option<(NodeId, NodeAction)>,
     /// How far the free zoom-out view (`ZoomOutView::Free`) was moved: px (before scaling) and rows down, like
     /// `zoom_pan`
     zoom_free: ([f32; 2], f32),
@@ -384,6 +390,8 @@ impl NodeTree {
             zoom_glide: None,
             zoom_anim: None,
             was_zoomed: None,
+            zoom_menu: None,
+            zoom_action: None,
             zoom_pan: None,
             zoom_moves: None,
         };
@@ -428,6 +436,11 @@ impl NodeTree {
 
     pub const fn damage(&mut self) {
         self.damaged = true;
+    }
+
+    /// What was chosen in the zoom-out view's right-click menu, since the last call
+    pub const fn take_zoom_action(&mut self) -> Option<(NodeId, NodeAction)> {
+        self.zoom_action.take()
     }
 
     /// A standard keybind pressed on a node with no main, since the last call
@@ -1732,6 +1745,11 @@ impl NodeTree {
     /// A press focuses the pane's applet.
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
         if self.zoomed_out() {
+            if let Some(size) = self.latest_size
+                && self.zoom_menu_mouse(size, &mouse_event)
+            {
+                return;
+            }
             match mouse_event.kind {
                 MouseEventKind::Scroll {
                     delta, stop, ctrl, ..
@@ -2192,6 +2210,7 @@ impl NodeTree {
     fn update_zoom_anim(&mut self) {
         let zoomed = self.nodes[self.focused_node()].main.is_none();
         if self.was_zoomed.is_some_and(|was| was != zoomed) {
+            self.zoom_menu = None;
             let center = if zoomed {
                 self.zoom_center()
             } else {
@@ -2973,6 +2992,11 @@ impl NodeTree {
                 .chain(titles)
                 .chain(drop_line)
                 .chain(marks)
+                .chain(
+                    self.zoom_menu
+                        .as_ref()
+                        .map(|menu| menu.render([size.width as f32, size.height as f32])),
+                )
                 .collect(),
         )
     }
@@ -3280,6 +3304,43 @@ impl NodeTree {
             && self.contains(focused, parent)
             && !self.holds_children(parent))
         .then_some((id, target, side, pane.rect))
+    }
+
+    /// Takes `event` (at a position of the zoom-out view drawn at `size`) if it is for a pane's right-click menu: a right
+    /// press on a pane opens it (the treeview's node actions); what is chosen is left for the holder (`take_zoom_action`)
+    pub fn zoom_menu_mouse(&mut self, size: DisplayContainerSize, event: &MouseEvent) -> bool {
+        if let MouseEventKind::Button {
+            button: BTN_RIGHT,
+            pressed: true,
+        } = event.kind
+            && self.zoom_press.is_none()
+            && let Some((pane, _)) = self.zoom_pane_at(size, event.position)
+        {
+            let closable = self.nodes[pane.node].parent.is_some();
+            let position = event.position.map(|coord| coord as f32);
+            self.zoom_menu = Some(Menu::new(
+                pane.node,
+                node_items(closable, false),
+                position,
+            ));
+            self.damaged = true;
+            return true;
+        }
+        let Some(menu) = &mut self.zoom_menu else {
+            return false;
+        };
+        match menu.handle_mouse(event, [size.width as f32, size.height as f32]) {
+            None => return false,
+            Some(MenuEvent::Stay { damaged }) => self.damaged |= damaged,
+            Some(MenuEvent::Close(item)) => {
+                if let Some(MenuItem::Action(action)) = item {
+                    self.zoom_action = Some((menu.target, action));
+                }
+                self.zoom_menu = None;
+                self.damaged = true;
+            }
+        }
+        true
     }
 
     /// The pointer moved in the zoom-out view; a drag there shows where it drops

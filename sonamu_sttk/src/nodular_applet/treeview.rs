@@ -35,7 +35,7 @@ pub fn close_width() -> f32 {
 /// How far the pointer moves while pressed before it's a drag
 const DRAG_THRESHOLD: f64 = 12.0;
 pub const BTN_LEFT: u32 = 0x110;
-const BTN_RIGHT: u32 = 0x111;
+pub const BTN_RIGHT: u32 = 0x111;
 /// Rows per scroll step
 const SCROLL_STEP: usize = 3;
 
@@ -174,51 +174,87 @@ pub struct TreeviewPointer {
     /// The focused row last scrolled to, so it is scrolled to again only when focus moves
     followed: Option<WorldTreePath>,
     /// Opened by a right click
-    menu: Option<Menu>,
+    menu: Option<Menu<WorldTreePath>>,
     /// The last click on a row's name, to tell a double click
     last_click: Option<(WorldTreePath, Instant)>,
 }
 
-/// A right-click menu: actions on a row's node, or what can be added
-struct Menu {
+/// A right-click menu: actions on a node (a row's path, or a zoom-out view pane's node), or what can be added
+pub(super) struct Menu<T> {
     /// Where its actions go
-    target: WorldTreePath,
+    pub target: T,
     /// Where it was opened; it is moved to fit (`rect`)
     position: [f32; 2],
     items: Vec<MenuItem>,
     hovered: Option<usize>,
 }
-impl Menu {
-    /// Actions on the row's node, or if it is a `‹` row (or none), what can be added to `general`
-    fn new(row: Option<&TreeviewRow>, general: &WorldTreePath, position: [f32; 2]) -> Self {
-        let (target, items) = match row.filter(|row| !row.label.starts_with('‹')) {
-            Some(row) => {
-                let mut items = vec![MenuItem::New { sibling: false }];
-                if row.closable {
-                    items.push(MenuItem::New { sibling: true });
-                }
-                items.push(MenuItem::Action(NodeAction::MakeProject));
-                items.push(MenuItem::ViewRoot);
-                if row.closable {
-                    items.extend(
-                        [
-                            NodeAction::Deactivate,
-                            NodeAction::Close,
-                            NodeAction::CloseWithChildren,
-                        ]
-                        .map(MenuItem::Action),
-                    );
-                }
-                (row.path.clone(), items)
-            }
-            None => (general.clone(), new_items(false)),
-        };
+
+/// What a mouse event did to an open menu (`Menu::handle_mouse`)
+pub(super) enum MenuEvent {
+    Stay { damaged: bool },
+    /// It closes, with the item chosen if any
+    Close(Option<MenuItem>),
+}
+
+/// The items of a node's menu; `view_root` adds "Set as view root"
+pub(super) fn node_items(closable: bool, view_root: bool) -> Vec<MenuItem> {
+    let mut items = vec![MenuItem::New { sibling: false }];
+    if closable {
+        items.push(MenuItem::New { sibling: true });
+    }
+    items.push(MenuItem::Action(NodeAction::MakeProject));
+    if view_root {
+        items.push(MenuItem::ViewRoot);
+    }
+    if closable {
+        items.extend(
+            [
+                NodeAction::Deactivate,
+                NodeAction::Close,
+                NodeAction::CloseWithChildren,
+            ]
+            .map(MenuItem::Action),
+        );
+    }
+    items
+}
+
+impl<T> Menu<T> {
+    pub(super) const fn new(target: T, items: Vec<MenuItem>, position: [f32; 2]) -> Self {
         Self {
             target,
             position,
             items,
             hovered: None,
         }
+    }
+
+    /// `event` is relative to where it is drawn, at `size`; `None` if the event isn't the menu's
+    pub(super) fn handle_mouse(&mut self, event: &MouseEvent, size: [f32; 2]) -> Option<MenuEvent> {
+        let item = self.item_at(event.position, size);
+        Some(match event.kind {
+            MouseEventKind::Motion => MenuEvent::Stay {
+                damaged: std::mem::replace(&mut self.hovered, item) != item,
+            },
+            MouseEventKind::Button {
+                button: BTN_LEFT,
+                pressed: true,
+            } => match item.map(|index| self.items[index]) {
+                Some(MenuItem::New { sibling }) => {
+                    self.items = new_items(sibling);
+                    self.hovered = None;
+                    MenuEvent::Stay { damaged: true }
+                }
+                // a click elsewhere closes it
+                item => MenuEvent::Close(item),
+            },
+            MouseEventKind::Button {
+                button: BTN_LEFT,
+                pressed: false,
+            } => MenuEvent::Stay { damaged: false },
+            MouseEventKind::Button { pressed: true, .. } => MenuEvent::Close(None),
+            MouseEventKind::Button { .. } | MouseEventKind::Scroll { .. } => return None,
+        })
     }
 
     /// `[x, y, width, height]` in a treeview of this size, moved left and up to fit
@@ -241,7 +277,7 @@ impl Menu {
             .flatten()
     }
 
-    fn render(&self, size: [f32; 2]) -> UITree {
+    pub(super) fn render(&self, size: [f32; 2]) -> UITree {
         let [x, y, width, height] = self.rect(size);
         let text = with_opacity(settings::get().palette.fg);
         let rows = Rows::new(0.0);
@@ -265,7 +301,7 @@ impl Menu {
 }
 
 #[derive(Clone, Copy)]
-enum MenuItem {
+pub(super) enum MenuItem {
     /// Lists what can be added, as a child or as the next sibling
     New {
         sibling: bool,
@@ -393,48 +429,26 @@ impl TreeviewPointer {
             && self.press.is_none()
         {
             let position = event.position.map(|coord| coord as f32);
-            self.menu = Some(Menu::new(row, general, position));
+            let (target, items) = match row.filter(|row| !row.label.starts_with('‹')) {
+                Some(row) => (row.path.clone(), node_items(row.closable, true)),
+                None => (general.clone(), new_items(false)),
+            };
+            self.menu = Some(Menu::new(target, items, position));
             return response(None, true);
         }
         let menu = self.menu.as_mut()?;
-        let item = menu.item_at(event.position, size);
-        match event.kind {
-            MouseEventKind::Motion => {
-                let damaged = std::mem::replace(&mut menu.hovered, item) != item;
-                response(None, damaged)
+        let action = match menu.handle_mouse(event, size)? {
+            MenuEvent::Stay { damaged } => return response(None, damaged),
+            MenuEvent::Close(Some(MenuItem::Action(action))) => {
+                Some(TreeviewAction::Node(menu.target.clone(), action))
             }
-            MouseEventKind::Button {
-                button: BTN_LEFT,
-                pressed: true,
-            } => {
-                let action = match item.map(|index| menu.items[index]) {
-                    Some(MenuItem::New { sibling }) => {
-                        menu.items = new_items(sibling);
-                        menu.hovered = None;
-                        return response(None, true);
-                    }
-                    Some(MenuItem::Action(action)) => {
-                        Some(TreeviewAction::Node(menu.target.clone(), action))
-                    }
-                    Some(MenuItem::ViewRoot) => {
-                        Some(TreeviewAction::SetViewRoot(menu.target.clone()))
-                    }
-                    // a click elsewhere closes it
-                    None => None,
-                };
-                self.menu = None;
-                response(action, true)
+            MenuEvent::Close(Some(MenuItem::ViewRoot)) => {
+                Some(TreeviewAction::SetViewRoot(menu.target.clone()))
             }
-            MouseEventKind::Button {
-                button: BTN_LEFT,
-                pressed: false,
-            } => response(None, false),
-            MouseEventKind::Button { pressed: true, .. } => {
-                self.menu = None;
-                response(None, true)
-            }
-            MouseEventKind::Button { .. } | MouseEventKind::Scroll { .. } => None,
-        }
+            MenuEvent::Close(_) => None,
+        };
+        self.menu = None;
+        response(action, true)
     }
 
     /// A click: pressed and released on the same row
