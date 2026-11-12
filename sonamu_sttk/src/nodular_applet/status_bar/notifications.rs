@@ -10,7 +10,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use zbus::{OwnedVariant, connection, interface};
+use zbus::{OwnedVariant, interface};
 
 const PATH: &str = "/org/freedesktop/Notifications";
 const INTERFACE: &str = "org.freedesktop.Notifications";
@@ -136,13 +136,7 @@ impl Notifications {
 }
 
 fn serve(server: Server, signals: &Receiver<Signal>) {
-    let connection = zbus::block_on(
-        connection::Builder::session()
-            .name(INTERFACE)
-            .serve_at(PATH, server)
-            .build(),
-    );
-    let connection = match connection {
+    let connection = match super::serve_queued(INTERFACE, PATH, server) {
         Ok(connection) => connection,
         Err(err) => {
             log::warn!("Not showing desktop notifications: couldn't serve {INTERFACE}: {err}");

@@ -1000,6 +1000,29 @@ fn segment_at(placed: &[Placed], x: f64) -> Option<(Segment, [f32; 2])> {
         .map(|placed| (placed.segment, placed.span))
 }
 
+/// Serves `interface` at `path` on the session bus, then asks for `name` queued: if another server (eg DMS) has it, the
+/// bus hands it over once that one leaves. Nobody can take it over from Sonamu.
+fn serve_queued(
+    name: &'static str,
+    path: &'static str,
+    interface: impl zbus::object_server::Interface,
+) -> zbus::Result<zbus::Connection> {
+    use zbus::fdo::{RequestNameFlags, RequestNameReply};
+    zbus::block_on(async {
+        let connection = zbus::connection::Builder::session()
+            .serve_at(path, interface)
+            .build()
+            .await?;
+        let reply = connection
+            .request_name_with_flags(name, RequestNameFlags::empty())
+            .await?;
+        if reply == RequestNameReply::InQueue {
+            log::warn!("{name} is taken (eg by DMS): Sonamu gets it once that one leaves");
+        }
+        Ok(connection)
+    })
+}
+
 /// A popup's background and frame at `[x, y, width, height]` around `items`
 fn popup_frame(settings: &Settings, [x, y, w, h]: [f32; 4], items: Vec<UITree>) -> UITree {
     UITree::new_styled(

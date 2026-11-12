@@ -12,8 +12,8 @@ use std::{
     time::Duration,
 };
 use zbus::{
-    Connection, OwnedObjectPath, OwnedVariant, Proxy, Variant, connection, interface,
-    message::Header, object_server::SignalEmitter, proxy::CacheProperties,
+    Connection, OwnedObjectPath, OwnedVariant, Proxy, Variant, interface, message::Header,
+    object_server::SignalEmitter, proxy::CacheProperties,
 };
 
 const WATCHER: &str = "org.kde.StatusNotifierWatcher";
@@ -144,13 +144,7 @@ fn serve(
     let watcher = Watcher {
         registered: Arc::clone(&registered),
     };
-    let connection = zbus::block_on(
-        connection::Builder::session()
-            .name(WATCHER)
-            .serve_at(WATCHER_PATH, watcher)
-            .build(),
-    );
-    let connection = match connection {
+    let connection = match super::serve_queued(WATCHER, WATCHER_PATH, watcher) {
         Ok(connection) => connection,
         Err(err) => {
             log::warn!("No tray: couldn't serve {WATCHER}: {err}");

@@ -150,6 +150,8 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
 
 - Untested live: Esc closing popups, launcher typing (injected keys don't reach Sonamu headless; launcher keys
   unit-tested), DRM multi-monitor.
-- If another notification server or tray watcher (eg DMS) holds the name, the bar's stays empty (logged only).
+- Bus names are requested queued, without allowing replacement (`serve_queued`): if another server (eg DMS) has
+  one, Sonamu gets it once that leaves. Before (fixed), a DMS still running at start kept them and Sonamu never got
+  them, even after DMS quit: no tray or notifications.
 - Test runs share the machine: the bar sets the real power profile; hub actions change real volume/wifi.
 - Beeper can't start hidden; the example config closes its first window instead (SETTINGS.md, `startup`).

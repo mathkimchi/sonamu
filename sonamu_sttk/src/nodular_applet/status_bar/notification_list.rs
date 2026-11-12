@@ -257,9 +257,9 @@ pub fn click_popup(notification: &Notification, line: usize, column: usize) -> C
         return Click::Dismiss(notification.id);
     }
     if line == buttons_line
-        && let Some((key, ..)) = buttons.into_iter().find(|(_, _, [from, to])| {
-            (from + TEXT_COLUMN..to + TEXT_COLUMN).contains(&column)
-        })
+        && let Some((key, ..)) = buttons
+            .into_iter()
+            .find(|(_, _, [from, to])| (from + TEXT_COLUMN..to + TEXT_COLUMN).contains(&column))
     {
         return Click::Action(notification.id, key);
     }
