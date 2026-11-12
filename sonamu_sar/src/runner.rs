@@ -14,7 +14,7 @@ use sonamu_common::{
 };
 use sonamu_ui::{
     PointerGrab,
-    display_units::{DisplayContainerSize, ToPx},
+    display_units::{DisplayAreaPx, DisplayContainerSize, ToPx},
     ui_element::{PrimitiveScene, Style, UIElement, UITree},
     ui_event::{KeyModifiers, KeySymbol, MouseEventKind, PinchPhase, UIEvent},
 };
@@ -51,6 +51,8 @@ pub struct AppletRunner {
     is_keybind: fn(&UIEvent) -> bool,
     /// Whether the current pinch goes to the root, no wl surface being under the pointer when it began
     pinch_to_root: bool,
+    /// How much the whole window is magnified around the pointer (Ctrl+Super+scroll, like KDE's zoom); 1: off
+    magnification: f32,
 }
 impl AppletRunner {
     fn new(
@@ -88,6 +90,7 @@ impl AppletRunner {
             pointer_position: [0.0, 0.0],
             is_keybind,
             pinch_to_root: false,
+            magnification: 1.0,
         }
     }
 
@@ -314,9 +317,19 @@ impl AppletRunner {
 
         if let UIEvent::Mouse(mouse_event) = &mut event {
             self.pointer_position = mouse_event.position;
-            // what's plucked follows the pointer
-            if self.plucked.is_some() {
+            // what's plucked follows the pointer, and so does the magnified view
+            if self.plucked.is_some() || self.magnification > 1.0 {
                 self.needs_redraw = true;
+            }
+            if let MouseEventKind::Scroll {
+                delta: [_, y],
+                ctrl: true,
+                logo: true,
+                ..
+            } = mouse_event.kind
+            {
+                self.magnify(y);
+                return;
             }
             // layer surfaces are above (or beside) the root
             // a click on the fullscreen toplevel's screen while another screen has the keyboard goes to the root,
@@ -404,6 +417,47 @@ impl AppletRunner {
         }
     }
 
+    /// Ctrl+Super+scroll: up magnifies, down shrinks back to 1 (off)
+    fn magnify(&mut self, scrolled: f64) {
+        // a wheel notch (15 px) scales by 1.2, as KDE's zoom does; at most 100x, as KDE
+        let factor = (-scrolled * 1.2_f64.ln() / 15.0).exp() as f32;
+        self.magnification = (self.magnification * factor).clamp(1.0, 100.0);
+        self.needs_redraw = true;
+    }
+
+    /// `content` magnified around the pointer, which stays over the same spot (KDE's proportional tracking):
+    /// sweeping the pointer across the window pans across all of it, and input needs no mapping
+    fn magnified(&self, content: UITree) -> UITree {
+        let scale = self.magnification;
+        let size = [
+            self.window_size.width as f32,
+            self.window_size.height as f32,
+        ];
+        // `Scaled` scales from its top-left, so shift the content to keep the pointer's spot
+        let [x, y] = self
+            .pointer_position
+            .map(|p| p as f32 * (1.0 / scale - 1.0));
+        UITree::new_styled(
+            UIElement::Scaled(scale),
+            Style::absolute([0.0, 0.0], size),
+            vec![UITree::new_container_styled(
+                Style::absolute([x, y], size),
+                vec![content],
+            )],
+        )
+    }
+
+    /// Undoes `magnified` on a drawn area
+    fn unmagnified(
+        &self,
+        DisplayAreaPx([[left, top], [right, bot]]): DisplayAreaPx,
+    ) -> DisplayAreaPx {
+        let [px, py] = self.pointer_position.map(|p| p as f32);
+        let x = |x: i32| px + (x as f32 - px) / self.magnification;
+        let y = |y: i32| py + (y as f32 - py) / self.magnification;
+        DisplayAreaPx::from_f32(x(left), y(top), x(right), y(bot))
+    }
+
     fn redraw_ui(&mut self) {
         // background and bottom layers, the root's content in the area left by the exclusive zones
         // (or a fullscreen toplevel over the whole window instead of them),
@@ -446,7 +500,10 @@ impl AppletRunner {
             &self.ui_handle.queue,
         ));
         layers.extend(self.plucked_ghost());
-        let content = UITree::new_container(layers);
+        let mut content = UITree::new_container(layers);
+        if self.magnification > 1.0 {
+            content = self.magnified(content);
+        }
         let scene = PrimitiveScene::from_ui_tree(content, self.window_size, |surface_id| {
             // NOTE: currently only handles subsurfaces being the wl surfaces
             let wl_surface_id = WlSurfaceId::from_u64(surface_id);
@@ -460,12 +517,13 @@ impl AppletRunner {
                     UITree::leaf(UIElement::Backgrounded(sonamu_ui::color::Color::RED))
                 })
         });
-        self.smithay_state.set_tile_areas(
-            scene
-                .subsurface_areas
-                .iter()
-                .map(|&(surface_id, area)| (WlSurfaceId::from_u64(surface_id), area)),
-        );
+        // where the tiles are laid out, which the pointer's position is in
+        let tile_areas: Vec<_> = scene
+            .subsurface_areas
+            .iter()
+            .map(|&(surface_id, area)| (WlSurfaceId::from_u64(surface_id), self.unmagnified(area)))
+            .collect();
+        self.smithay_state.set_tile_areas(tile_areas.into_iter());
         self.ui_handle.set_ui_content(scene);
         if self.smithay_state.wants_capture() {
             self.ui_handle.capture();

@@ -837,6 +837,7 @@ impl DrmDisplay {
                             .then(|| [x_v120.unwrap_or(0), y_v120.unwrap_or(0)]),
                         stop: [stop(Axis::Horizontal), stop(Axis::Vertical)],
                         ctrl: self.modifiers().ctrl,
+                        logo: self.modifiers().logo,
                     },
                     event.time().millis(),
                 );
