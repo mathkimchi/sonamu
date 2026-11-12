@@ -16,7 +16,7 @@ use sonamu_ui::{
     PointerGrab,
     display_units::{DisplayContainerSize, ToPx},
     ui_element::{PrimitiveScene, Style, UIElement, UITree},
-    ui_event::{KeyModifiers, KeySymbol, MouseEventKind, UIEvent},
+    ui_event::{KeyModifiers, KeySymbol, MouseEventKind, PinchPhase, UIEvent},
 };
 
 /// The Singularity Applet Runner (SAR) is kind of just a wrapper around the Singularity UI.
@@ -49,6 +49,8 @@ pub struct AppletRunner {
     pub(crate) pointer_position: [f64; 2],
     /// Whether the applets act on a key. Other keys go straight to the focused wl client
     is_keybind: fn(&UIEvent) -> bool,
+    /// Whether the current pinch goes to the root, no wl surface being under the pointer when it began
+    pinch_to_root: bool,
 }
 impl AppletRunner {
     fn new(
@@ -85,6 +87,7 @@ impl AppletRunner {
             pluck_place: PluckPlace::Idle,
             pointer_position: [0.0, 0.0],
             is_keybind,
+            pinch_to_root: false,
         }
     }
 
@@ -297,10 +300,16 @@ impl AppletRunner {
             return;
         }
 
-        // pinches go straight to wl clients (#152)
+        // pinches go straight to the wl client under the pointer (#152), else to the root (eg its zoom-out view);
+        // decided when they begin
         if let UIEvent::Pinch(phase) = event {
-            self.pinch(phase);
-            return;
+            if matches!(phase, PinchPhase::Begin { .. }) {
+                self.pinch_to_root = self.smithay_state.live_pointer_focus().is_none();
+            }
+            if !self.pinch_to_root {
+                self.pinch(phase);
+                return;
+            }
         }
 
         if let UIEvent::Mouse(mouse_event) = &mut event {

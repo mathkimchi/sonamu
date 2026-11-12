@@ -27,7 +27,7 @@ use sonamu_common::{
 use sonamu_ui::{
     display_units::DisplayContainerSize,
     ui_element::{Style, UIElement, UITree, font_size},
-    ui_event::{KeySymbol, MouseEvent, MouseEventKind, UIEvent},
+    ui_event::{KeySymbol, MouseEvent, MouseEventKind, PinchPhase, UIEvent},
 };
 use std::{cell::Cell, collections::HashMap, time::Instant};
 
@@ -150,9 +150,10 @@ pub struct NodeTree {
     last_focus: NodeId,
     /// How far a scroll in the zoom-out view moved, until it steps (`zoom_scroll`)
     zoom_scrolled: [f64; 2],
-    /// The node a press in the zoom-out view was on, where, and where the pointer is now, until its release
-    /// (`zoom_button`)
-    zoom_press: Option<(NodeId, [f64; 2], [f64; 2])>,
+    /// A press in the zoom-out view, until its release (`zoom_button`)
+    zoom_press: Option<ZoomPress>,
+    /// How much a pinch scales the zoom-out view (`zoom_pinch`), and what it was when the pinch began
+    zoom_pinched: (f32, Option<f32>),
     /// The zoom-out view growing out of, or back into, a node's view
     zoom_anim: Option<ZoomAnim>,
     /// Whether focus was at a node without a main (zoomed out) at the last `update_layout`; `None` before it
@@ -172,6 +173,22 @@ impl Drop for NodeTree {
             command::unregister(node.uid);
         }
     }
+}
+
+/// A press in the zoom-out view (`NodeTree::zoom_button`)
+#[derive(Clone, Copy)]
+struct ZoomPress {
+    /// The node it was on
+    node: NodeId,
+    from: [f64; 2],
+    /// Where the pointer is now
+    at: [f64; 2],
+    /// Of the view
+    size: DisplayContainerSize,
+    /// How far dragging at its edges scrolled it (px, before scaling); the center stays
+    scroll: [f32; 2],
+    /// When `scroll` last moved
+    tick: Instant,
 }
 
 /// Where a drag in the zoom-out view drops a node: beside another (`Before`/`After`), or as its child (`Below`)
@@ -342,6 +359,7 @@ impl NodeTree {
             last_focus: NodeId::default(),
             zoom_scrolled: [0.0; 2],
             zoom_press: None,
+            zoom_pinched: (1.0, None),
             zoom_anim: None,
             was_zoomed: None,
             zoom_pan: None,
@@ -1617,6 +1635,10 @@ impl NodeTree {
                 self.handle_mouse(mouse_event);
                 return;
             }
+            StandardEvent::UIEvent(UIEvent::Pinch(phase)) if self.zoomed_out() => {
+                self.zoom_pinch(phase);
+                return;
+            }
             _ => {}
         }
 
@@ -2171,11 +2193,74 @@ impl NodeTree {
         {
             self.zoom_moves = None;
         }
+        self.zoom_edge_scroll();
+    }
+
+    /// While a drag is at the zoom-out view's edges: how fast it scrolls there (px of `size` a second; toward
+    /// left and up is positive)
+    fn zoom_edge_speed(&self) -> Option<[f32; 2]> {
+        // px from the edge where it starts, and its speed at the edge
+        const MARGIN: f64 = 48.0;
+        const SPEED: f64 = 600.0;
+        let press = self
+            .zoom_press
+            .filter(|press| Self::zoom_dragged(press.from, press.at))?;
+        let size = [press.size.width, press.size.height].map(f64::from);
+        let depth = |distance: f64| (1.0 - distance / MARGIN).clamp(0.0, 1.0);
+        let depths = [0, 1].map(|axis| depth(press.at[axis]) - depth(size[axis] - press.at[axis]));
+        depths
+            .iter()
+            .any(|&depth| depth != 0.0)
+            .then(|| depths.map(|depth| (depth * SPEED) as f32))
+    }
+
+    /// Scrolls the zoom-out view while a drag is at its edges
+    fn zoom_edge_scroll(&mut self) {
+        let speed = self.zoom_edge_speed();
+        let scale = self
+            .zoom_press
+            .and_then(|press| self.zoom_full_scale(press.size));
+        let Some(press) = &mut self.zoom_press else {
+            return;
+        };
+        let now = Instant::now();
+        let elapsed = now.duration_since(press.tick).as_secs_f32().min(0.1);
+        press.tick = now;
+        if let (Some(scale), Some(speed)) = (scale, speed) {
+            for (scroll, speed) in press.scroll.iter_mut().zip(speed) {
+                *scroll += speed * elapsed / scale;
+            }
+            self.damaged = true;
+        }
+    }
+
+    /// A pinch in the zoom-out view scales it: apart, the views get bigger
+    pub fn zoom_pinch(&mut self, phase: PinchPhase) {
+        let (pinched, began) = &mut self.zoom_pinched;
+        match phase {
+            PinchPhase::Begin { .. } => *began = Some(*pinched),
+            PinchPhase::Update { scale, .. } => {
+                if let Some(began) = began {
+                    *pinched = *began * scale as f32;
+                }
+            }
+            PinchPhase::End { cancelled } => {
+                if let Some(began) = began.take()
+                    && cancelled
+                {
+                    *pinched = began;
+                }
+            }
+        }
+        self.damaged = true;
     }
 
     /// Whether the zoom-out view is springing (zooming, panning or moving panes), so holders redraw
     pub fn zoom_animating(&self) -> bool {
-        self.zoom_anim.is_some() || self.zoom_pan.is_some() || self.zoom_moves.is_some()
+        self.zoom_anim.is_some()
+            || self.zoom_pan.is_some()
+            || self.zoom_moves.is_some()
+            || self.zoom_edge_speed().is_some()
     }
 
     /// How far off its center the zoom-out view still is while panning to it (like `zoom_pan`)
@@ -2561,9 +2646,11 @@ impl NodeTree {
             .map(|pane| outline(settings.border.focused, scaled_rect(pane)));
         let dragged = self
             .zoom_press
-            .filter(|&(id, from, at)| self.nodes.contains_key(id) && Self::zoom_dragged(from, at))
+            .filter(|press| {
+                self.nodes.contains_key(press.node) && Self::zoom_dragged(press.from, press.at)
+            })
             .into_iter()
-            .flat_map(|(id, ..)| {
+            .flat_map(|ZoomPress { node: id, .. }| {
                 panes
                     .iter()
                     .zip(row_focus)
@@ -2582,11 +2669,22 @@ impl NodeTree {
         focus.chain(dragged).collect()
     }
 
+    /// The zoom-out view's scale in `size`, fully zoomed out: `zoom_out` views fit, times a pinch
+    fn zoom_full_scale(&self, size: DisplayContainerSize) -> Option<f32> {
+        // pinched no further than a view filling `size`, or a quarter
+        const LEAST: f32 = 0.25;
+        let view = self.latest_size?;
+        let [across, down] = settings::get().zoom_out.map(|count| count.max(1) as f32);
+        let [width, height] = [view.width, view.height].map(|length| length.max(1) as f32);
+        let fit = (size.width as f32 / (across * width)).min(size.height as f32 / (down * height));
+        let most = (size.width as f32 / width).min(size.height as f32 / height);
+        Some((fit * self.zoom_pinched.0.max(LEAST)).min(most))
+    }
+
     /// Where `zoom_window(size)` draws everything, before scaling, `zoomed` of the way (0 to 1) from the center's
     /// view filling `size` to all of it
     fn zoom_layout(&self, size: DisplayContainerSize, zoomed: f32) -> Option<ZoomLayout> {
         let view = self.latest_size?;
-        let [across, down] = settings::get().zoom_out.map(|count| count.max(1) as f32);
         let ZoomRows {
             rows,
             center,
@@ -2595,20 +2693,21 @@ impl NodeTree {
         } = self.zoom_rows()?;
 
         let [width, height] = [view.width, view.height].map(|length| length.max(1) as f32);
-        let full_scale =
-            (size.width as f32 / (across * width)).min(size.height as f32 / (down * height));
+        let full_scale = self.zoom_full_scale(size)?;
         let scale = 1.0 + (full_scale - 1.0) * zoomed;
         // rows have room for their titles above them, which aren't scaled
         let step = step as f32 + ui::row_height() * zoomed / scale;
         // the center view's middle at the middle of `size`, from its top left; off by the pan left
         let (pan, pan_rows, lateral) = self.zoom_pan_offset();
         let pan = [pan[0], pan[1] + pan_rows * step];
+        let scroll = self.zoom_press.map_or([0.0; 2], |press| press.scroll);
         let [[x, x_still], [y, _]] = [
-            [size.width as f32, width, pan[0]],
-            [size.height as f32, height, pan[1]],
+            [size.width as f32, width, pan[0], scroll[0]],
+            [size.height as f32, height, pan[1], scroll[1]],
         ]
-        .map(|[size, length, pan]| {
-            let still = (size / full_scale / 2.0 - length / 2.0) * full_scale * zoomed / scale;
+        .map(|[size, length, pan, scroll]| {
+            let still =
+                (size / full_scale / 2.0 - length / 2.0) * full_scale * zoomed / scale + scroll;
             [(still + pan).round() as i32, still.round() as i32]
         });
         // a lateral pan leaves the rows above the center's and the box alone
@@ -2691,7 +2790,9 @@ impl NodeTree {
     ) -> Option<(NodeId, NodeId, ZoomSide, [i32; 4])> {
         // of the pane's width or height
         const EDGE: f64 = 0.25;
-        let (id, from, at) = self.zoom_press?;
+        let ZoomPress {
+            node: id, from, at, ..
+        } = self.zoom_press?;
         let focused = self.focused_node();
         if !self.nodes.contains_key(id)
             || !Self::zoom_dragged(from, at)
@@ -2724,33 +2825,56 @@ impl NodeTree {
 
     /// The pointer moved in the zoom-out view; a drag there shows where it drops
     pub fn zoom_motion(&mut self, position: [f64; 2]) {
-        if let Some((_, _, at)) = &mut self.zoom_press {
-            *at = position;
+        if let Some(press) = &mut self.zoom_press {
+            press.at = position;
             self.damaged = true;
         }
     }
 
     /// A left press or release at `position` of the zoom-out view drawn at `size`. A click on the center focuses it
     /// (going in), on another node makes that the center. A drag to a pane's edge (`zoom_drop`) moves the node there, as
-    /// the center.
+    /// the center. Anything else springs back from where dragging at the edges scrolled it.
     pub fn zoom_button(&mut self, size: DisplayContainerSize, position: [f64; 2], pressed: bool) {
         if pressed {
             self.zoom_press = self
                 .zoom_pane_at(size, position)
-                .map(|(pane, _)| (pane.node, position, position));
+                .map(|(pane, _)| ZoomPress {
+                    node: pane.node,
+                    from: position,
+                    at: position,
+                    size,
+                    scroll: [0.0; 2],
+                    tick: Instant::now(),
+                });
             return;
         }
         self.zoom_motion(position);
         let drop = self.zoom_drop(size);
-        let Some((id, from, _)) = self.zoom_press.take() else {
+        let Some(ZoomPress {
+            node: id,
+            from,
+            scroll,
+            ..
+        }) = self.zoom_press
+        else {
             return;
         };
         if let Some((id, target, side, _)) = drop {
+            // from where it scrolled to
             self.move_zoom_panes(|tree| {
+                tree.zoom_press = None;
                 tree.move_node(id, target, side);
                 tree.remember_zoom_center(id);
             });
-        } else if self.nodes.contains_key(id) && !Self::zoom_dragged(from, position) {
+            return;
+        }
+        self.zoom_press = None;
+        if scroll.iter().any(|value| value.abs() > f32::EPSILON) {
+            let (carried, carried_rows, _) = self.zoom_pan_offset();
+            let offset = [0, 1].map(|axis| carried[axis] + scroll[axis]);
+            self.zoom_pan = Some((Instant::now(), offset, carried_rows, false));
+        }
+        if self.nodes.contains_key(id) && !Self::zoom_dragged(from, position) {
             // a click
             if Some(id) == self.zoom_center() {
                 self.focus(id, false);

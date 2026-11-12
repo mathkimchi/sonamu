@@ -554,7 +554,7 @@ impl SmithayState {
     }
 
     /// The client may have destroyed it since
-    fn live_pointer_focus(&self) -> Option<&WlSurface> {
+    pub(crate) fn live_pointer_focus(&self) -> Option<&WlSurface> {
         self.pointer_focus
             .as_ref()
             .map(|(surface, _)| surface)
