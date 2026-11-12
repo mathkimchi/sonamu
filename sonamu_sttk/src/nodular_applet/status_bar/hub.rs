@@ -5,6 +5,7 @@ use super::{
     Lines, Spans,
     controls::{Osd, State, Volume},
     notification_list::cut,
+    widgets::{Button, Cell, label_color},
 };
 use sonamu_common::settings::{Palette, Settings};
 use sonamu_ui::ui_element::UITree;
@@ -28,6 +29,12 @@ const BLUETOOTH_CONNECTED: &str = "\u{f00b1}";
 const MUTED: &str = "\u{f075f}";
 const BRIGHTNESS: &str = "\u{f00e0}";
 const SETTINGS: &str = "\u{f0493}";
+/// A header's on/off, at the line's end
+const ON_OFF: [usize; 2] = [COLUMNS - 4, COLUMNS];
+/// The volume's mute, its icon
+const MUTE: [usize; 2] = [0, 2];
+/// The volume's outputs, at the line's end
+const OUTPUTS: [usize; 2] = [COLUMNS - 5, COLUMNS];
 
 /// A section of the popup whose list is shown
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -50,6 +57,7 @@ enum Line {
     Settings,
 }
 
+#[derive(Clone)]
 pub enum Click {
     Open(Option<Section>),
     ToggleWifi,
@@ -180,140 +188,178 @@ fn arrow(open: bool) -> &'static str {
     if open { "▾" } else { "›" }
 }
 
-/// A line's text, and whether it's highlighted
-fn line_spans(
+/// A button on a line: its columns, label, whether it's on, and what a click does
+type LineButton = ([usize; 2], Spans, bool, Click);
+
+/// A line's plain text (from its start) and its buttons
+fn line_parts(
     line: Line,
     state: &State,
     open: Option<Section>,
     palette: &Palette,
-) -> (Spans, bool) {
-    let on_off = |on: bool| if on { "on" } else { "off" };
+) -> (Spans, Vec<LineButton>) {
+    let on_off = |on: bool| {
+        let label = format!("{:>4}", if on { "on" } else { "off" });
+        (label, label_color(palette, on))
+    };
+    let toggle = |section: Section| Click::Open((open != Some(section)).then_some(section));
+    // a header: its name opens its list, its on/off at the end toggles it
+    let header = |left: String, section: Section, on: bool, toggle_click: Click| {
+        let opened = open == Some(section);
+        let left = format!("{left} {}", arrow(opened));
+        let name = [0, ON_OFF[0] - 1];
+        (
+            Vec::new(),
+            vec![
+                (name, vec![(left, palette.fg)], opened, toggle(section)),
+                (ON_OFF, vec![on_off(on)], on, toggle_click),
+            ],
+        )
+    };
+    // a list's line, all one button
+    let row = |text: String, on: bool, click: Click| {
+        (
+            Vec::new(),
+            vec![(
+                [0, COLUMNS],
+                vec![(text, label_color(palette, on))],
+                on,
+                click,
+            )],
+        )
+    };
     match line {
         Line::Wifi => {
             let name = state
                 .active_network()
                 .map_or("Wi-Fi", |network| network.ssid.as_str());
-            let left = format!(
-                "{} {name} {}",
-                wifi_icon(state),
-                arrow(open == Some(Section::Wifi))
-            );
-            (
-                vec![(justified(&left, on_off(state.wifi_enabled)), palette.fg)],
-                false,
+            header(
+                cut(&format!("{} {name}", wifi_icon(state)), ON_OFF[0] - 3),
+                Section::Wifi,
+                state.wifi_enabled,
+                Click::ToggleWifi,
             )
         }
         Line::Network(ssid) => {
             let network = state.networks.iter().find(|network| network.ssid == ssid);
             let (signal, active) = network.map_or((0, false), |n| (n.signal, n.active));
-            let color = if active { palette.accent } else { palette.fg };
-            (
-                vec![(
-                    justified(&format!("   {ssid}"), &format!("{signal}%")),
-                    color,
-                )],
-                false,
-            )
+            let text = justified(&format!("   {ssid}"), &format!("{signal}%"));
+            row(text, active, Click::ConnectWifi(ssid))
         }
-        Line::Bluetooth => {
-            let left = format!(
-                "{} Bluetooth {}",
-                bluetooth_icon(state),
-                arrow(open == Some(Section::Bluetooth))
-            );
-            (
-                vec![(
-                    justified(&left, on_off(state.bluetooth_powered)),
-                    palette.fg,
-                )],
-                false,
-            )
-        }
+        Line::Bluetooth => header(
+            format!("{} Bluetooth", bluetooth_icon(state)),
+            Section::Bluetooth,
+            state.bluetooth_powered,
+            Click::ToggleBluetooth,
+        ),
         Line::Device(index) => {
             let device = &state.devices[index];
-            let color = if device.connected {
-                palette.accent
-            } else {
-                palette.fg
-            };
             let right = if device.connected { "connected" } else { "" };
-            (
-                vec![(justified(&format!("   {}", device.name), right), color)],
-                false,
-            )
+            let text = justified(&format!("   {}", device.name), right);
+            row(text, device.connected, Click::ToggleDevice(index))
         }
-        Line::Volume => {
-            let level = state.volume.map_or(0.0, |volume| volume.level);
-            let muted = state.volume.is_none_or(|volume| volume.muted);
-            (
-                vec![
-                    (format!("{} ", volume_icon(state.volume)), palette.fg),
-                    (
-                        slider(level),
-                        if muted { palette.inactive } else { palette.fg },
-                    ),
-                    (
-                        format!("  out {}", arrow(open == Some(Section::Outputs))),
-                        palette.fg,
-                    ),
-                ],
-                false,
-            )
-        }
+        Line::Volume => volume_parts(state, open, palette),
         Line::Output(id) => {
             let sink = state.sinks.iter().find(|sink| sink.id == id);
             let (name, default) = sink.map_or(("", false), |s| (s.name.as_str(), s.default));
-            let color = if default { palette.accent } else { palette.fg };
-            (vec![(cut(&format!("   {name}"), COLUMNS), color)], default)
+            row(
+                cut(&format!("   {name}"), COLUMNS),
+                default,
+                Click::Output(id),
+            )
         }
         Line::Brightness => (
             vec![(
                 format!("{BRIGHTNESS} {}", slider(state.brightness.unwrap_or(0.0))),
                 palette.fg,
             )],
-            false,
+            Vec::new(),
         ),
         Line::Settings => (
             vec![(format!("{SETTINGS} Settings ›"), palette.inactive)],
-            false,
+            Vec::new(),
         ),
     }
 }
 
-pub fn draw(settings: &Settings, state: &State, open: Option<Section>) -> Vec<UITree> {
+/// The volume line's slider, and its mute and outputs buttons
+fn volume_parts(
+    state: &State,
+    open: Option<Section>,
+    palette: &Palette,
+) -> (Spans, Vec<LineButton>) {
+    let toggle = |section: Section| Click::Open((open != Some(section)).then_some(section));
+    let level = state.volume.map_or(0.0, |volume| volume.level);
+    let muted = state.volume.is_none_or(|volume| volume.muted);
+    let opened = open == Some(Section::Outputs);
+    (
+        vec![
+            ("   ".to_string(), palette.fg),
+            (
+                slider(level),
+                if muted { palette.inactive } else { palette.fg },
+            ),
+        ],
+        vec![
+            (
+                MUTE,
+                vec![(volume_icon(state.volume).to_string(), palette.fg)],
+                false,
+                Click::ToggleMute,
+            ),
+            (
+                OUTPUTS,
+                vec![(format!("out {}", arrow(opened)), palette.fg)],
+                opened,
+                toggle(Section::Outputs),
+            ),
+        ],
+    )
+}
+
+pub fn draw(
+    settings: &Settings,
+    state: &State,
+    open: Option<Section>,
+    hover: Option<Cell>,
+) -> Vec<UITree> {
     let palette = &settings.palette;
     let text = Lines::new();
     let mut items = Vec::new();
     for (index, line) in lines(state, open).into_iter().enumerate() {
-        let (spans, highlight) = line_spans(line, state, open, palette);
-        if highlight {
-            items.push(text.highlight(index, [0, COLUMNS], palette.raised(30)));
+        let (spans, buttons) = line_parts(line, state, open, palette);
+        if !spans.is_empty() {
+            items.push(text.text(index, 0, spans));
         }
-        items.push(text.text(index, 0, spans));
+        for (columns, spans, on, _) in buttons {
+            let button = Button {
+                line: index,
+                columns,
+            };
+            items.extend(button.draw(&text, palette, spans, on, hover));
+        }
     }
     items
 }
 
-pub fn click(state: &State, open: Option<Section>, line: usize, column: usize) -> Option<Click> {
-    let toggle = |section: Section| Click::Open((open != Some(section)).then_some(section));
-    // the on/off at the end of a header line
-    let at_end = column + 4 >= COLUMNS;
-    Some(match lines(state, open).into_iter().nth(line)? {
-        Line::Wifi if at_end => Click::ToggleWifi,
-        Line::Wifi => toggle(Section::Wifi),
-        Line::Network(ssid) => Click::ConnectWifi(ssid),
-        Line::Bluetooth if at_end => Click::ToggleBluetooth,
-        Line::Bluetooth => toggle(Section::Bluetooth),
-        Line::Device(index) => Click::ToggleDevice(index),
-        Line::Volume if column < SLIDER_COLUMN - 1 => Click::ToggleMute,
-        Line::Volume => match slider_level(column) {
-            Some(level) => Click::Volume(level),
-            None => toggle(Section::Outputs),
-        },
-        Line::Output(id) => Click::Output(id),
-        Line::Brightness => Click::Brightness(slider_level(column)?),
-        Line::Settings => return None,
-    })
+pub fn click(state: &State, open: Option<Section>, (line, column): Cell) -> Option<Click> {
+    let shown = lines(state, open).into_iter().nth(line)?;
+    let (_, buttons) = line_parts(shown.clone(), state, open, &Palette::default());
+    let button = buttons.into_iter().find(|(columns, ..)| {
+        Button {
+            line,
+            columns: *columns,
+        }
+        .contains((line, column))
+    });
+    if let Some((.., click)) = button {
+        return Some(click);
+    }
+    match shown {
+        Line::Volume => slider_level(column).map(Click::Volume),
+        Line::Brightness => slider_level(column).map(Click::Brightness),
+        _ => None,
+    }
 }
 
 /// The OSD's columns and its one line, if it's showing
@@ -339,4 +385,40 @@ pub fn osd(state: &State, palette: &Palette) -> Option<Spans> {
             palette.fg,
         )],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clicks_hit_the_drawn_buttons() {
+        let state = State::default();
+        assert!(matches!(
+            click(&state, None, (0, 1)),
+            Some(Click::Open(Some(Section::Wifi)))
+        ));
+        assert!(matches!(
+            click(&state, None, (0, COLUMNS - 1)),
+            Some(Click::ToggleWifi)
+        ));
+        assert!(matches!(
+            click(&state, None, (1, COLUMNS - 2)),
+            Some(Click::ToggleBluetooth)
+        ));
+        // volume: icon mutes, slider sets, the end opens the outputs
+        assert!(matches!(
+            click(&state, None, (2, 0)),
+            Some(Click::ToggleMute)
+        ));
+        assert!(matches!(
+            click(&state, None, (2, SLIDER_COLUMN)),
+            Some(Click::Volume(0.0))
+        ));
+        assert!(matches!(
+            click(&state, None, (2, COLUMNS - 1)),
+            Some(Click::Open(Some(Section::Outputs)))
+        ));
+        assert!(click(&state, None, (3, 0)).is_none());
+    }
 }

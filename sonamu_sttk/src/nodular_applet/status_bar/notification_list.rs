@@ -4,6 +4,7 @@ use super::{
     Lines, Spans, columns,
     icons::Icons,
     notifications::{Notification, Store},
+    widgets::{Button, Cell, label_color},
 };
 use sonamu_common::settings::{Palette, Settings};
 use sonamu_ui::ui_element::UITree;
@@ -23,6 +24,14 @@ const BODY_LINES: usize = 3;
 /// Popping up at once at most
 pub const POPUPS: usize = 3;
 const CLEAR_ALL: &str = "Clear all";
+const DO_NOT_DISTURB: Button = Button::row(1, COLUMNS);
+
+fn clear_all() -> Button {
+    Button {
+        line: 0,
+        columns: [COLUMNS - columns(CLEAR_ALL), COLUMNS],
+    }
+}
 
 #[derive(Clone)]
 pub enum Click {
@@ -118,34 +127,28 @@ pub fn size(store: &Store) -> [f32; 2] {
     Lines::size(HEADER_LINES + (2 * listed(store)).max(1), COLUMNS)
 }
 
-pub fn draw(settings: &Settings, store: &Store, icons: &Icons) -> Vec<UITree> {
+pub fn draw(settings: &Settings, store: &Store, icons: &Icons, hover: Option<Cell>) -> Vec<UITree> {
     let palette = &settings.palette;
     let lines = Lines::new();
-    let mut items = vec![lines.text(
-        0,
-        0,
-        vec![(justified("Notifications", CLEAR_ALL), palette.fg)],
-    )];
-    let (icon, state) = if store.do_not_disturb {
-        (BELL_OFF, "on")
-    } else {
-        (BELL, "off")
-    };
-    let dnd = format!("{icon} Do not disturb");
-    if store.do_not_disturb {
-        items.push(lines.highlight(1, [0, columns(&dnd)], palette.raised(30)));
-    }
-    items.push(lines.text(
-        1,
-        0,
+    let mut items = vec![lines.text(0, 0, vec![("Notifications".to_string(), palette.fg)])];
+    items.extend(clear_all().draw(
+        &lines,
+        palette,
+        vec![(CLEAR_ALL.to_string(), palette.fg)],
+        false,
+        hover,
+    ));
+    let on = store.do_not_disturb;
+    let (icon, state) = if on { (BELL_OFF, "on") } else { (BELL, "off") };
+    items.extend(DO_NOT_DISTURB.draw(
+        &lines,
+        palette,
         vec![(
-            justified(&dnd, state),
-            if store.do_not_disturb {
-                palette.accent
-            } else {
-                palette.fg
-            },
+            justified(&format!("{icon} Do not disturb"), state),
+            label_color(palette, on),
         )],
+        on,
+        hover,
     ));
     if store.list.is_empty() {
         items.push(lines.text(
@@ -171,10 +174,15 @@ pub fn draw(settings: &Settings, store: &Store, icons: &Icons) -> Vec<UITree> {
     items
 }
 
-pub fn click(store: &Store, line: usize, column: usize) -> Option<Click> {
+pub fn click(store: &Store, (line, column): Cell) -> Option<Click> {
+    if clear_all().contains((line, column)) {
+        return Some(Click::ClearAll);
+    }
+    if DO_NOT_DISTURB.contains((line, column)) {
+        return Some(Click::DoNotDisturb);
+    }
     match line {
-        0 if column + columns(CLEAR_ALL) >= COLUMNS => Some(Click::ClearAll),
-        1 => Some(Click::DoNotDisturb),
+        0 | 1 => None,
         _ => {
             let index = line.checked_sub(HEADER_LINES)? / 2;
             let notification = store.list.iter().rev().take(LISTED).nth(index)?;

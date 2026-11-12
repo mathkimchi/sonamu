@@ -3,6 +3,7 @@
 use super::{
     Lines, Spans, columns,
     system::{Battery, PROCESSES, PROFILES, Snapshot},
+    widgets::{Button, Cell, ScrollList, label_color},
 };
 use sonamu_common::settings::{ERROR, Palette, Settings};
 use sonamu_ui::{color::Color, ui_element::UITree};
@@ -22,11 +23,20 @@ const HEADER_LINES: usize = 5;
 /// Where the process list's cpu and memory columns start
 const CPU_COLUMN: usize = 28;
 const MEM_COLUMN: usize = 36;
+/// The profile picker's line
+const PROFILE_LINE: usize = 2;
+/// The process list's header line
+const SORT_LINE: usize = 4;
 /// The profile picker's buttons: label and columns
 const PROFILE_BUTTONS: [(&str, [usize; 2]); 3] = [
     ("\u{f032a} Saver", [0, 8]),
     ("\u{f24e} Balanced", [12, 23]),
     ("\u{f04c5} Performance", [28, 42]),
+];
+/// The process list's sort buttons: label and columns
+const SORT_BUTTONS: [(&str, Sort, [usize; 2]); 2] = [
+    ("CPU", Sort::Cpu, [CPU_COLUMN, CPU_COLUMN + 4]),
+    ("Mem", Sort::Mem, [MEM_COLUMN, MEM_COLUMN + 4]),
 ];
 
 /// What the process list is sorted by (most first)
@@ -118,7 +128,12 @@ fn justified(left: &str, right: &str) -> String {
     format!("{left}{}{right}", " ".repeat(pad))
 }
 
-pub fn draw(settings: &Settings, snapshot: &Snapshot, sort: Sort) -> Vec<UITree> {
+pub fn draw(
+    settings: &Settings,
+    snapshot: &Snapshot,
+    (sort, list): (Sort, ScrollList),
+    hover: Option<Cell>,
+) -> Vec<UITree> {
     let palette = &settings.palette;
     let lines = Lines::new();
     let mut items = Vec::new();
@@ -147,32 +162,35 @@ pub fn draw(settings: &Settings, snapshot: &Snapshot, sort: Sort) -> Vec<UITree>
     if let Some(profile) = &snapshot.profile {
         for ((label, columns), name) in PROFILE_BUTTONS.iter().zip(PROFILES) {
             let on = profile == name;
-            if on {
-                items.push(lines.highlight(2, *columns, palette.raised(30)));
-            }
-            let color = if on { palette.accent } else { palette.fg };
-            items.push(lines.text(2, columns[0], vec![((*label).to_string(), color)]));
+            let button = Button {
+                line: PROFILE_LINE,
+                columns: *columns,
+            };
+            items.extend(button.draw(
+                &lines,
+                palette,
+                vec![((*label).to_string(), label_color(palette, on))],
+                on,
+                hover,
+            ));
         }
     }
-    let arrow = |by: Sort| if by == sort { "▾" } else { " " };
-    let (cpu, mem) = (format!("CPU{}", arrow(Sort::Cpu)), arrow(Sort::Mem));
     items.push(lines.text(
-        4,
+        SORT_LINE,
         0,
-        vec![(
-            format!(
-                "{:<CPU_COLUMN$}{cpu:<w$}Mem{mem}",
-                "Process",
-                w = MEM_COLUMN - CPU_COLUMN
-            ),
-            palette.inactive,
-        )],
+        vec![("Process".to_string(), palette.inactive)],
     ));
-    let mut processes: Vec<_> = snapshot.processes.iter().collect();
-    processes.sort_by(|a, b| match sort {
-        Sort::Cpu => b.cpu.partial_cmp(&a.cpu).unwrap_or(Ordering::Equal),
-        Sort::Mem => b.mem.cmp(&a.mem),
-    });
+    for (label, by, columns) in SORT_BUTTONS {
+        let on = by == sort;
+        let label = format!("{label}{}", if on { "▾" } else { " " });
+        let button = Button {
+            line: SORT_LINE,
+            columns,
+        };
+        let color = if on { palette.accent } else { palette.inactive };
+        items.extend(button.draw(&lines, palette, vec![(label, color)], false, hover));
+    }
+    let processes = sorted(snapshot, sort);
     if processes.is_empty() {
         items.push(lines.text(
             HEADER_LINES,
@@ -180,10 +198,11 @@ pub fn draw(settings: &Settings, snapshot: &Snapshot, sort: Sort) -> Vec<UITree>
             vec![("Reading…".to_string(), palette.inactive)],
         ));
     }
-    for (index, process) in processes.into_iter().take(PROCESSES).enumerate() {
+    let shown = list.visible(processes.len(), PROCESSES);
+    for (line, process) in (HEADER_LINES..).zip(&processes[shown]) {
         let name: String = process.name.chars().take(CPU_COLUMN - 2).collect();
         items.push(lines.text(
-            HEADER_LINES + index,
+            line,
             0,
             vec![(
                 format!(
@@ -196,24 +215,52 @@ pub fn draw(settings: &Settings, snapshot: &Snapshot, sort: Sort) -> Vec<UITree>
             )],
         ));
     }
+    items.extend(list.bar(
+        &lines,
+        [HEADER_LINES, COLUMNS],
+        processes.len(),
+        PROCESSES,
+        palette.inactive,
+    ));
     items
 }
 
-pub fn click(snapshot: &Snapshot, sort: Sort, line: usize, column: usize) -> Option<Click> {
-    match line {
-        2 if snapshot.profile.is_some() => PROFILE_BUTTONS
+/// Its processes, most first
+fn sorted(snapshot: &Snapshot, sort: Sort) -> Vec<&super::system::Process> {
+    let mut processes: Vec<_> = snapshot.processes.iter().collect();
+    processes.sort_by(|a, b| match sort {
+        Sort::Cpu => b.cpu.partial_cmp(&a.cpu).unwrap_or(Ordering::Equal),
+        Sort::Mem => b.mem.cmp(&a.mem),
+    });
+    processes
+}
+
+/// Scrolls the process list `steps` (positive down); whether it moved
+pub fn scroll(snapshot: &Snapshot, list: &mut ScrollList, steps: i32) -> bool {
+    list.scroll(steps, snapshot.processes.len(), PROCESSES)
+}
+
+pub fn click(snapshot: &Snapshot, sort: Sort, cell: Cell) -> Option<Click> {
+    if snapshot.profile.is_some()
+        && let Some((_, name)) = PROFILE_BUTTONS
             .iter()
             .zip(PROFILES)
-            .find(|((_, [from, to]), _)| (*from..*to).contains(&column))
-            .map(|(_, name)| Click::Profile(name)),
-        4 => {
-            let by = match column {
-                CPU_COLUMN..MEM_COLUMN => Sort::Cpu,
-                MEM_COLUMN.. => Sort::Mem,
-                _ => return None,
-            };
-            (by != sort).then_some(Click::Sort(by))
-        }
-        _ => None,
+            .find(|((_, columns), _)| {
+                Button {
+                    line: PROFILE_LINE,
+                    columns: *columns,
+                }
+                .contains(cell)
+            })
+    {
+        return Some(Click::Profile(name));
     }
+    let (_, by, _) = SORT_BUTTONS.into_iter().find(|(_, _, columns)| {
+        Button {
+            line: SORT_LINE,
+            columns: *columns,
+        }
+        .contains(cell)
+    })?;
+    (by != sort).then_some(Click::Sort(by))
 }

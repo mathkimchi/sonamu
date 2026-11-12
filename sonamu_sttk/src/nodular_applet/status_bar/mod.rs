@@ -12,6 +12,7 @@ mod notifications;
 mod resources;
 mod system;
 mod tray;
+mod widgets;
 
 use super::treeview::{BTN_LEFT, BTN_RIGHT, guide};
 use crate::{command_hub::bar_bg, ui};
@@ -29,6 +30,7 @@ use sonamu_ui::{
 use std::sync::Arc;
 use system::System;
 use tray::Tray;
+use widgets::{Cell, ScrollList};
 
 /// The middle mouse button (evdev)
 const BTN_MIDDLE: u32 = 0x112;
@@ -152,7 +154,8 @@ pub struct BarState {
 enum Popup {
     /// Showing the month of this date's
     Calendar(NaiveDate),
-    Resources(resources::Sort),
+    /// Sorted by, and its process list
+    Resources(resources::Sort, ScrollList),
     /// With this section's list shown
     Hub(Option<hub::Section>),
     /// A tray item's menu (`Tray::menu`, read meanwhile)
@@ -165,7 +168,7 @@ impl Popup {
     fn segment(self) -> Segment {
         match self {
             Self::Calendar(_) => Segment::Time,
-            Self::Resources(_) => Segment::Resources,
+            Self::Resources(..) => Segment::Resources,
             Self::Hub(_) => Segment::Hub,
             Self::TrayMenu => Segment::Tray,
             Self::Notifications => Segment::Bell,
@@ -277,6 +280,8 @@ pub struct StatusBar {
     scrolled: f64,
     /// Under the pointer
     hovered: Option<Segment>,
+    /// The open popup's line and column under the pointer, for its buttons
+    hovered_cell: Option<Cell>,
 }
 
 /// Under the bar's right end: the notifications popping up, `GAP` apart
@@ -297,6 +302,7 @@ impl StatusBar {
             layout: DEFAULT_LAYOUT.map(<[Segment]>::to_vec),
             scrolled: 0.0,
             hovered: None,
+            hovered_cell: None,
             icons: Icons::start(changed),
             launcher: None,
             shown: Default::default(),
@@ -537,22 +543,29 @@ impl StatusBar {
     }
 
     fn popup_items(&self, settings: &Settings, popup: Popup) -> Vec<UITree> {
+        let hover = self.hovered_cell;
         match popup {
             Popup::Calendar(month) => calendar::draw(settings, month),
-            Popup::Resources(sort) => {
-                resources::draw(settings, &self.system.snapshot.lock().unwrap(), sort)
-            }
+            Popup::Resources(sort, list) => resources::draw(
+                settings,
+                &self.system.snapshot.lock().unwrap(),
+                (sort, list),
+                hover,
+            ),
             Popup::Notifications => notification_list::draw(
                 settings,
                 &self.notifications.store.lock().unwrap(),
                 &self.icons,
+                hover,
             ),
             Popup::Launcher => self
                 .launcher
                 .as_ref()
-                .map(|launcher| launcher.draw(settings, &self.icons))
+                .map(|launcher| launcher.draw(settings, &self.icons, hover))
                 .unwrap_or_default(),
-            Popup::Hub(open) => hub::draw(settings, &self.controls.state.lock().unwrap(), open),
+            Popup::Hub(open) => {
+                hub::draw(settings, &self.controls.state.lock().unwrap(), open, hover)
+            }
             Popup::TrayMenu => tray::draw_menu(settings, self.tray.menu.lock().unwrap().as_ref()),
         }
     }
@@ -561,7 +574,7 @@ impl StatusBar {
     fn popup_area(&self, popup: Popup, placed: &[Placed], width: f32) -> [f32; 4] {
         let [w, h] = match popup {
             Popup::Calendar(_) => calendar::size(),
-            Popup::Resources(_) => resources::size(&self.system.snapshot.lock().unwrap()),
+            Popup::Resources(..) => resources::size(&self.system.snapshot.lock().unwrap()),
             Popup::Notifications => {
                 notification_list::size(&self.notifications.store.lock().unwrap())
             }
@@ -590,7 +603,7 @@ impl StatusBar {
             self.launcher = Some(Launcher::open());
         }
         self.system
-            .set_want_processes(matches!(popup, Some(Popup::Resources(_))));
+            .set_want_processes(matches!(popup, Some(Popup::Resources(..))));
         self.controls
             .set_want_lists(matches!(popup, Some(Popup::Hub(_))));
         if popup != Some(Popup::TrayMenu) {
@@ -614,7 +627,16 @@ impl StatusBar {
         let hover_changed = hovered != self.hovered;
         self.hovered = hovered;
         let mut response = self.mouse(&placed, palette, event, width);
-        response.damaged |= hover_changed;
+        // after: the popup may have changed
+        let cell = self.popup.and_then(|popup| {
+            let [ax, ay, aw, ah] = self.popup_area(popup, &placed, width).map(f64::from);
+            ((ax..ax + aw).contains(&x) && (ay..ay + ah).contains(&y))
+                .then(|| Lines::new().at([x - ax, y - ay]))
+                .flatten()
+        });
+        let cell_changed = cell != self.hovered_cell;
+        self.hovered_cell = cell;
+        response.damaged |= hover_changed || cell_changed;
         response
     }
 
@@ -697,7 +719,10 @@ impl StatusBar {
             Segment::Tree => response.action = Some(BarAction::ToggleTreeview),
             Segment::Time => self.set_popup(open(Popup::Calendar(Local::now().date_naive()))),
             Segment::Resources => {
-                self.set_popup(open(Popup::Resources(resources::Sort::default())));
+                self.set_popup(open(Popup::Resources(
+                    resources::Sort::default(),
+                    ScrollList::default(),
+                )));
             }
             Segment::Bell => self.set_popup(open(Popup::Notifications)),
             Segment::Hub => self.set_popup(open(Popup::Hub(None))),
@@ -708,8 +733,8 @@ impl StatusBar {
         response
     }
 
-    /// A scroll at `[x, y]`: over the hub's icons it changes the volume, over the calendar its month; any scroll over
-    /// the bar or a popup is the bar's
+    /// A scroll at `[x, y]`: over the hub's icons it changes the volume, over the calendar its month, over the
+    /// launcher or processes their list; any scroll over the bar or a popup is the bar's
     fn scroll(
         &mut self,
         placed: &[Placed],
@@ -735,16 +760,8 @@ impl StatusBar {
         self.scrolled -= f64::from(steps) * SCROLL_STEP;
         let mut damaged = false;
         if steps != 0 {
-            if in_popup && let Some(Popup::Calendar(month)) = self.popup {
-                let month = if steps > 0 {
-                    month.checked_add_months(chrono::Months::new(steps.unsigned_abs()))
-                } else {
-                    month.checked_sub_months(chrono::Months::new(steps.unsigned_abs()))
-                };
-                if let Some(month) = month {
-                    self.popup = Some(Popup::Calendar(month));
-                    damaged = true;
-                }
+            if in_popup {
+                damaged = self.scroll_popup(steps);
             } else if on_bar
                 && placed.iter().any(|placed| {
                     let [left, w] = placed.span.map(f64::from);
@@ -765,6 +782,35 @@ impl StatusBar {
             consumed: true,
             damaged,
             action: None,
+        }
+    }
+
+    /// Scrolls the open popup `steps` (positive down); whether it changed
+    fn scroll_popup(&mut self, steps: i32) -> bool {
+        match self.popup {
+            Some(Popup::Calendar(month)) => {
+                let month = if steps > 0 {
+                    month.checked_add_months(chrono::Months::new(steps.unsigned_abs()))
+                } else {
+                    month.checked_sub_months(chrono::Months::new(steps.unsigned_abs()))
+                };
+                let Some(month) = month else {
+                    return false;
+                };
+                self.popup = Some(Popup::Calendar(month));
+                true
+            }
+            Some(Popup::Resources(sort, mut list)) => {
+                let moved =
+                    resources::scroll(&self.system.snapshot.lock().unwrap(), &mut list, steps);
+                self.popup = Some(Popup::Resources(sort, list));
+                moved
+            }
+            Some(Popup::Launcher) => self
+                .launcher
+                .as_mut()
+                .is_some_and(|launcher| launcher.scroll(steps)),
+            _ => false,
         }
     }
 
@@ -846,17 +892,17 @@ impl StatusBar {
 
     /// A click at `[x, y]` in the popup; whether it changed
     fn click_popup(&mut self, popup: Popup, position: [f64; 2]) -> bool {
-        let Some((line, column)) = Lines::new().at(position) else {
+        let Some(cell) = Lines::new().at(position) else {
             return false;
         };
+        let (line, column) = cell;
         let popup = match popup {
             Popup::Calendar(month) => calendar::click(month, line, column).map(Popup::Calendar),
-            Popup::Resources(sort) => {
+            Popup::Resources(sort, list) => {
                 // not matched on directly: the lock would be held through `set_profile`'s
-                let click =
-                    resources::click(&self.system.snapshot.lock().unwrap(), sort, line, column);
+                let click = resources::click(&self.system.snapshot.lock().unwrap(), sort, cell);
                 match click {
-                    Some(resources::Click::Sort(sort)) => Some(Popup::Resources(sort)),
+                    Some(resources::Click::Sort(sort)) => Some(Popup::Resources(sort, list)),
                     Some(resources::Click::Profile(profile)) => {
                         self.system.set_profile(profile);
                         return true;
@@ -865,11 +911,8 @@ impl StatusBar {
                 }
             }
             Popup::Notifications => {
-                let click = notification_list::click(
-                    &self.notifications.store.lock().unwrap(),
-                    line,
-                    column,
-                );
+                let click =
+                    notification_list::click(&self.notifications.store.lock().unwrap(), cell);
                 let Some(click) = click else {
                     return false;
                 };
@@ -887,7 +930,7 @@ impl StatusBar {
             }
             Popup::Hub(open) => {
                 // not matched on directly: the lock would be held through the actions'
-                let click = hub::click(&self.controls.state.lock().unwrap(), open, line, column);
+                let click = hub::click(&self.controls.state.lock().unwrap(), open, cell);
                 let Some(click) = click else {
                     return false;
                 };

@@ -26,3 +26,5 @@ anything clickable.
 Users: treeview rows and menu, the root's treeview frame / pin button / `notice`, the file manager, the project
 overview (its rows draw text at the row's top, via `style`), the session placeholders, pane frames and the swipe
 highlight. The command hub and man page draw `CharGrid`s (`command_hub::{fill_row, put}`), not this.
+
+Status bar popups (monospace `Lines`) have their own `Button` and `ScrollList` (`status_bar/widgets.rs`, STATUS_BAR.md).

@@ -119,6 +119,13 @@ Follow-ups after the 8 steps (fixes first, then improvements) are logged at the 
   `segment_at`; active screen only).
 - Improvement: a popping up notification shows its actions other than `default` as `[label]` buttons (while they
   fit one line); a click sends `ActionInvoked(id, key)`, then dismisses it.
+- Improvement: `status_bar/widgets.rs`: `Button` (columns on a popup line; draws and hit-tests, so they agree;
+  lit while on, lighter under the pointer: `StatusBar::hovered_cell`) and `ScrollList` (wheel scroll, `show` keeps a
+  selection in view, `item_at`, a thin bar in the right pad while not all fit). Buttons: launcher apps, power
+  profiles, sort columns, Do not disturb, Clear all, hub headers' name and on/off, networks/devices/outputs, mute,
+  `out ›` (now at the volume line's end). Scrolling: launcher (all matches, 12 shown), processes (all, 15 shown;
+  `Popup::Resources(sort, list)`). Not yet buttons: calendar `‹`/`›`, notification rows/✕/actions, tray menu.
+  Untested live (no `wlrctl`); hub clicks unit-tested.
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work

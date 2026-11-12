@@ -16,7 +16,10 @@ use sonamu_common::{
     sap::{
         client_handle::ClientHandle,
         detached::{DetachedClient, DetachedTree, EMPTY_LABEL},
-        packets::{AwaitedWl, NewWlSurface, NodeAction, SpawnPosition, StandardEvent, SwipeView, WlSurfaceId},
+        packets::{
+            AwaitedWl, NewWlSurface, NodeAction, SpawnPosition, StandardEvent, SwipeView,
+            WlSurfaceId,
+        },
         session::{SavedApplet, SavedTree, SavedWl},
     },
     settings::{self, ZoomOutView},
@@ -3318,11 +3321,7 @@ impl NodeTree {
         {
             let closable = self.nodes[pane.node].parent.is_some();
             let position = event.position.map(|coord| coord as f32);
-            self.zoom_menu = Some(Menu::new(
-                pane.node,
-                node_items(closable, false),
-                position,
-            ));
+            self.zoom_menu = Some(Menu::new(pane.node, node_items(closable, false), position));
             self.damaged = true;
             return true;
         }

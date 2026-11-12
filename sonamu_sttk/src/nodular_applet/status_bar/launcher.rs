@@ -1,11 +1,12 @@
-//! The app launcher's popup: a search line over the matching apps; typing filters, Up/Down select, Enter or a click
-//! starts one
+//! The app launcher's popup: a search line over the matching apps; typing filters, Up/Down select, the wheel
+//! scrolls, Enter or a click starts one
 
 use super::{
     Lines,
     desktop::{self, App},
     icons::Icons,
     notification_list,
+    widgets::{Button, Cell, ScrollList, label_color},
 };
 use crate::{command_hub::program_command, standard_keybinds::terminal};
 use sonamu_common::settings::Settings;
@@ -13,7 +14,7 @@ use sonamu_ui::{ui_element::UITree, ui_event::KeySymbol};
 
 pub const ICON: &str = "\u{f003b}";
 const SEARCH: &str = "\u{f0349}";
-/// Apps shown at most
+/// Apps shown at once
 const SHOWN: usize = 12;
 const COLUMNS: usize = 36;
 /// Where an app's name starts, after its icon
@@ -23,6 +24,7 @@ pub struct Launcher {
     query: String,
     /// In the matches
     selected: usize,
+    list: ScrollList,
     apps: Vec<App>,
 }
 
@@ -38,6 +40,7 @@ impl Launcher {
         Self {
             query: String::new(),
             selected: 0,
+            list: ScrollList::default(),
             apps: desktop::apps(),
         }
     }
@@ -51,18 +54,14 @@ impl Launcher {
             .collect();
         // stable: by name within a score
         matches.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-        matches
-            .into_iter()
-            .map(|(_, app)| app)
-            .take(SHOWN)
-            .collect()
+        matches.into_iter().map(|(_, app)| app).collect()
     }
 
     pub fn size() -> [f32; 2] {
         Lines::size(1 + SHOWN, COLUMNS)
     }
 
-    pub fn draw(&self, settings: &Settings, icons: &Icons) -> Vec<UITree> {
+    pub fn draw(&self, settings: &Settings, icons: &Icons, hover: Option<Cell>) -> Vec<UITree> {
         let palette = &settings.palette;
         let lines = Lines::new();
         let mut items = vec![
@@ -81,28 +80,26 @@ impl Launcher {
         if matches.is_empty() {
             items.push(lines.text(1, 0, vec![("No apps".to_string(), palette.inactive)]));
         }
-        for (index, app) in matches.into_iter().enumerate() {
-            let line = 1 + index;
-            if index == self.selected {
-                items.push(lines.highlight(line, [0, COLUMNS], palette.raised(30)));
-            }
+        for index in self.list.visible(matches.len(), SHOWN) {
+            let app = matches[index];
+            let line = 1 + index - self.list.visible(matches.len(), SHOWN).start;
+            let on = index == self.selected;
+            let name = notification_list::cut(&app.name, COLUMNS - NAME_COLUMN);
+            items.extend(Button::row(line, COLUMNS).draw(
+                &lines,
+                palette,
+                vec![(format!("   {name}"), label_color(palette, on))],
+                on,
+                hover,
+            ));
             if let Some(icon) = icons.get(&app.icon) {
                 items.push(lines.icon(line, 0, icon));
             }
-            let color = if index == self.selected {
-                palette.accent
-            } else {
-                palette.fg
-            };
-            items.push(lines.text(
-                line,
-                NAME_COLUMN,
-                vec![(
-                    notification_list::cut(&app.name, COLUMNS - NAME_COLUMN),
-                    color,
-                )],
-            ));
         }
+        items.extend(
+            self.list
+                .bar(&lines, [1, COLUMNS], matches.len(), SHOWN, palette.inactive),
+        );
         items
     }
 
@@ -117,31 +114,41 @@ impl Launcher {
                 return KeyResult::Close;
             }
             KeySymbol::ArrowKeyDown => {
-                self.selected = (self.selected + 1).min(count.saturating_sub(1))
+                self.selected = (self.selected + 1).min(count.saturating_sub(1));
+                self.list.show(self.selected, SHOWN);
             }
-            KeySymbol::ArrowKeyUp => self.selected = self.selected.saturating_sub(1),
+            KeySymbol::ArrowKeyUp => {
+                self.selected = self.selected.saturating_sub(1);
+                self.list.show(self.selected, SHOWN);
+            }
             KeySymbol::Backspace => {
                 self.query.pop();
                 self.selected = 0;
+                self.list.reset();
             }
             KeySymbol::Char(c) if !c.is_control() => {
                 self.query.push(c);
                 self.selected = 0;
+                self.list.reset();
             }
             _ => return KeyResult::Ignored,
         }
         KeyResult::Changed
     }
 
+    /// Scrolls the apps `steps` (positive down); whether they moved
+    pub fn scroll(&mut self, steps: i32) -> bool {
+        let count = self.matches().len();
+        self.list.scroll(steps, count, SHOWN)
+    }
+
     /// Starts the app on `line`; whether there was one
     pub fn click(&self, line: usize) -> bool {
-        let Some(app) = line
-            .checked_sub(1)
-            .and_then(|index| self.matches().get(index).copied())
-        else {
+        let matches = self.matches();
+        let Some(index) = self.list.item_at(line, 1, matches.len(), SHOWN) else {
             return false;
         };
-        launch(app);
+        launch(matches[index]);
         true
     }
 }
@@ -179,6 +186,7 @@ mod tests {
         let mut launcher = Launcher {
             query: String::new(),
             selected: 0,
+            list: ScrollList::default(),
             apps: ["Files", "Firefox", "Foot", "Thunderbird"]
                 .map(app)
                 .to_vec(),
