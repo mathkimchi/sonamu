@@ -145,30 +145,46 @@ pub fn standard_keybind(ui_event: &UIEvent) -> Option<KeybindCommand> {
     else {
         return None;
     };
-    let key = key.to_char()?;
+    // the case comes from Shift and Caps Lock; the modifiers decide (Caps Lock changes nothing)
+    let key = key.to_char()?.to_ascii_lowercase();
     Some(match (key, modifiers) {
-        ('Q', KeyModifiers::CTRL_SHIFT) => KeybindCommand::new("quit"),
+        (
+            'q',
+            KeyModifiers {
+                ctrl: true,
+                shift: true,
+                alt: false,
+                logo: false,
+                ..
+            },
+        ) => KeybindCommand::new("quit"),
         // the node and everything under it in a project
-        ('p' | 'P', KeyModifiers { logo: true, .. }) => KeybindCommand::new("wrap_project"),
+        ('p', KeyModifiers { logo: true, .. }) => KeybindCommand::new("wrap_project"),
         // its children move to the parent
-        ('w', KeyModifiers { logo: true, .. }) => KeybindCommand::new("close"),
+        (
+            'w',
+            KeyModifiers {
+                logo: true,
+                shift: false,
+                ..
+            },
+        ) => KeybindCommand::new("close"),
         // #144
-        ('f' | 'F', KeyModifiers { logo: true, .. }) => KeybindCommand::new("toggle_half"),
-        ('t' | 'n' | 'T' | 'N', KeyModifiers { logo: true, .. }) => KeybindCommand {
-            // Shift, not the letter's case (Caps Lock)
+        ('f', KeyModifiers { logo: true, .. }) => KeybindCommand::new("toggle_half"),
+        ('t' | 'n', KeyModifiers { logo: true, .. }) => KeybindCommand {
             name: if modifiers.shift {
                 "spawn_sibling"
             } else {
                 "spawn"
             },
-            args: vec![Value::String(if key.eq_ignore_ascii_case(&'t') {
+            args: vec![Value::String(if key == 't' {
                 terminal()
             } else {
                 browser()
             })],
         },
         (
-            'W' | 'S',
+            'w' | 's',
             KeyModifiers {
                 alt: true,
                 shift: true,
@@ -178,7 +194,7 @@ pub fn standard_keybind(ui_event: &UIEvent) -> Option<KeybindCommand> {
             },
         ) => KeybindCommand {
             name: "swap_sibling",
-            args: vec![Value::Number(if key == 'W' { -1.0 } else { 1.0 })],
+            args: vec![Value::Number(if key == 'w' { -1.0 } else { 1.0 })],
         },
         _ => return None,
     })
