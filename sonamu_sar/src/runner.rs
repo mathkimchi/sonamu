@@ -8,7 +8,7 @@ use sonamu_common::{
     sap::{
         client_handle::ClientHandle,
         detached::DetachedTree,
-        packets::{StandardEvent, StandardRequest, StateKind, WlSurfaceId},
+        packets::{BarInput, BarRequest, StandardEvent, StandardRequest, StateKind, WlSurfaceId},
         raw_client_initializer::RawClientInitializer,
     },
 };
@@ -16,7 +16,7 @@ use sonamu_ui::{
     PointerGrab,
     display_units::{DisplayAreaPx, DisplayContainerSize, ToPx},
     ui_element::{PrimitiveScene, Style, UIElement, UITree},
-    ui_event::{KeyModifiers, KeySymbol, MouseEventKind, PinchPhase, UIEvent},
+    ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, PinchPhase, UIEvent},
 };
 
 /// The Singularity Applet Runner (SAR) is kind of just a wrapper around the Singularity UI.
@@ -27,6 +27,14 @@ use sonamu_ui::{
 pub struct AppletRunner {
     ui_handle: UIHandle,
     pub(crate) root_client: ClientHandle,
+    /// The status bar, beside the root like a layer surface (eg dms' bar): its row is kept free atop each screen
+    bar_client: ClientHandle,
+    /// Where the bar takes input, from it
+    bar_input: BarInput,
+    /// The pointer was in the bar's region at the last mouse event (so it gets one more, to clear its hover)
+    pointer_on_bar: bool,
+    /// A button went down outside the bar and is still held (eg a treeview drag): the bar gets nothing until release
+    held_outside_bar: bool,
 
     // // TODO: later
     // subsurfaces: SlotMap<TextureId, EncapsulatedLock<UIElement>>,
@@ -59,6 +67,7 @@ impl AppletRunner {
         event_loop: &LoopHandle<'static, Self>,
         loop_signal: LoopSignal,
         root_applet_initializer: Box<dyn RawClientInitializer>,
+        bar_initializer: Box<dyn RawClientInitializer<BarRequest>>,
         is_keybind: fn(&UIEvent) -> bool,
         mut smithay_state: SmithayState,
         on_tty: bool,
@@ -68,6 +77,11 @@ impl AppletRunner {
             event_loop,
             |request, runner: &mut Self| runner.handle_client_request(request),
         );
+        let bar_client = ClientHandle::spawn_new_client(
+            bar_initializer,
+            event_loop,
+            |request, runner: &mut Self| runner.handle_bar_request(request),
+        );
 
         let ui_handle = UIHandle::init_ui(PrimitiveScene::new_empty(), event_loop, on_tty);
         smithay_state.init_dmabuf(&ui_handle.device);
@@ -75,6 +89,10 @@ impl AppletRunner {
             ui_handle,
             smithay_state,
             root_client,
+            bar_client,
+            bar_input: BarInput::default(),
+            pointer_on_bar: false,
+            held_outside_bar: false,
             // subsurfaces: SlotMap::with_key(),
             // idk if there's a way to actually get this
             window_size: DisplayContainerSize {
@@ -113,9 +131,11 @@ impl AppletRunner {
     ///
     /// Runs on the monitor directly (as the actual compositor) when there's no display server to open a window in
     /// (no `WAYLAND_DISPLAY` or `DISPLAY`), or when `SONAMU_BACKEND=tty`; `SONAMU_BACKEND=winit` forces a window.
-    /// `is_keybind`: whether the applets act on a key, rather than a focused wl client
+    /// `is_keybind`: whether the applets act on a key, rather than a focused wl client.
+    /// `bar_initializer`: the status bar, run beside the root (`BarRequest`)
     pub fn run(
         root_applet_initializer: Box<dyn RawClientInitializer>,
+        bar_initializer: Box<dyn RawClientInitializer<BarRequest>>,
         is_keybind: fn(&UIEvent) -> bool,
     ) {
         let on_tty = match std::env::var("SONAMU_BACKEND").as_deref() {
@@ -160,6 +180,7 @@ impl AppletRunner {
             &event_loop.handle(),
             event_loop.get_signal(),
             root_applet_initializer,
+            bar_initializer,
             is_keybind,
             smithay_state,
             on_tty,
@@ -270,7 +291,8 @@ impl AppletRunner {
         self.smithay_state.resize_fullscreen();
     }
 
-    /// Tells the root the screens' areas: the main one less the layer surfaces' exclusive zones (it has the wl output)
+    /// Tells the bar the screens' areas: the main one less the layer surfaces' exclusive zones (it has the wl output);
+    /// and the root, less the bar's row atop each
     fn send_screens(&mut self) {
         let ([left, top], size) = self.smithay_state.content_area();
         let mut screens = self.smithay_state.screens.clone();
@@ -281,7 +303,100 @@ impl AppletRunner {
         // the output's origin is the main screen's
         let [x, y, ..] = screens[0];
         screens[0] = [x + left.to_px(), y + top.to_px(), size.width, size.height];
+        self.bar_client
+            .send_event(StandardEvent::Screens(screens.clone()));
+        let bar = self.bar_input.height;
+        for [_, y, _, height] in &mut screens {
+            let taken = bar.min(*height);
+            *y += taken;
+            *height -= taken;
+        }
         self.root_client.send_event(StandardEvent::Screens(screens));
+    }
+
+    fn handle_bar_request(&mut self, request: BarRequest) {
+        match request {
+            BarRequest::Standard(StandardRequest::Damage(StateKind::Surface)) => {
+                self.needs_redraw = true;
+            }
+            BarRequest::Standard(request) => {
+                eprintln!("The status bar sent {request:?}, which it has no use for");
+            }
+            BarRequest::Input(input) => {
+                let resized = input.height != self.bar_input.height;
+                self.bar_input = input;
+                if resized {
+                    self.send_screens();
+                }
+            }
+            BarRequest::ToggleTreeview => {
+                self.root_client.send_event(StandardEvent::ToggleTreeview)
+            }
+        }
+    }
+
+    /// Whether the bar is drawn: not under a fullscreen toplevel on the only screen
+    fn bar_shown(&self) -> bool {
+        self.smithay_state.fullscreen().is_none() || self.smithay_state.screens.len() > 1
+    }
+
+    /// Gives the bar a mouse event in its region (and a press anywhere while its popup is open, which closes it);
+    /// whether it took it. Like a layer surface's, its region comes from the bar (`BarInput`).
+    fn bar_mouse(&mut self, event: &MouseEvent) -> bool {
+        match event.kind {
+            MouseEventKind::Button { pressed: false, .. } if self.held_outside_bar => {
+                self.held_outside_bar = false;
+                return false;
+            }
+            _ if self.held_outside_bar || !self.bar_shown() => return false,
+            _ => {}
+        }
+        let [x, y] = event.position;
+        let in_region = self.bar_input.areas.iter().any(|&[ax, ay, aw, ah]| {
+            let [ax, ay, aw, ah] = [ax, ay, aw, ah].map(f64::from);
+            (ax..ax + aw).contains(&x) && (ay..ay + ah).contains(&y)
+        }) && !(self.smithay_state.fullscreen().is_some()
+            && self.on_fullscreen_screen(event.position));
+        let pressed = matches!(event.kind, MouseEventKind::Button { pressed: true, .. });
+        let took = in_region || (pressed && self.bar_input.popup);
+        // once more as it leaves, to clear its hover
+        if took || self.pointer_on_bar {
+            self.bar_client
+                .send_event(StandardEvent::UIEvent(UIEvent::Mouse(*event)));
+        }
+        self.pointer_on_bar = in_region;
+        if pressed && !took {
+            self.held_outside_bar = true;
+        }
+        took
+    }
+
+    /// Gives the bar keys while it wants them all (eg its launcher's search; not Super+Esc, the buffer line's), and a
+    /// bare Esc while its popup is open (not in buffer mode); whether it took the key
+    fn bar_key(&mut self, event: &UIEvent) -> bool {
+        let UIEvent::Key {
+            symbol,
+            modifiers,
+            pressed,
+            ..
+        } = *event
+        else {
+            return false;
+        };
+        let esc = matches!(symbol, Some(KeySymbol::Escape));
+        let took = if self.bar_input.keys {
+            !(esc && modifiers.logo)
+        } else {
+            pressed
+                && esc
+                && modifiers == KeyModifiers::NONE
+                && self.bar_input.popup
+                && !sonamu_common::BUFFER_MODE.load(std::sync::atomic::Ordering::Relaxed)
+        };
+        if took {
+            self.bar_client.send_event(StandardEvent::UIEvent(*event));
+        }
+        took
     }
 
     pub(crate) fn handle_ui_event(&mut self, mut event: UIEvent) {
@@ -344,6 +459,10 @@ impl AppletRunner {
             {
                 return;
             }
+            // over the root, like a top layer surface
+            if self.bar_mouse(mouse_event) {
+                return;
+            }
         }
 
         // a layer surface with the keyboard (eg a launcher) gets the keys
@@ -354,6 +473,9 @@ impl AppletRunner {
         } = event
             && self.layer_key_press(raw_keycode)
         {
+            return;
+        }
+        if self.bar_key(&event) {
             return;
         }
 
@@ -414,6 +536,12 @@ impl AppletRunner {
             StandardRequest::GetSettings => self.root_client.send_event(
                 StandardEvent::SettingsChanged(sonamu_common::settings::get()),
             ),
+            StandardRequest::BarState(state) => {
+                self.bar_client.send_event(StandardEvent::BarState(state));
+            }
+            StandardRequest::BarCommand { name, args, reply } => self
+                .bar_client
+                .send_event(StandardEvent::Command { name, args, reply }),
         }
     }
 
@@ -482,6 +610,17 @@ impl AppletRunner {
                         ],
                     ),
                     vec![self.root_client.get_surface()],
+                ));
+                // over the root, under top layers (like one): it draws itself atop each screen
+                layers.push(UITree::new_container_styled(
+                    Style::absolute(
+                        [0.0, 0.0],
+                        [
+                            self.window_size.width as f32,
+                            self.window_size.height as f32,
+                        ],
+                    ),
+                    vec![self.bar_client.get_surface()],
                 ));
                 layers
             };

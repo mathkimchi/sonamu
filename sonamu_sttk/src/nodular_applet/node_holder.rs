@@ -635,6 +635,10 @@ impl NodeHolder {
             NodeRequest::Standard(StandardRequest::GetSettings) => self
                 .tree
                 .send_event(id, StandardEvent::SettingsChanged(settings::get())),
+            // only the root sends these
+            NodeRequest::Standard(
+                StandardRequest::BarState(_) | StandardRequest::BarCommand { .. },
+            ) => {}
             // the applet's path is inside its inner tree
             NodeRequest::Standard(StandardRequest::RequestPluck(path)) => {
                 if let Some(path) = self.full_path(id, &path) {

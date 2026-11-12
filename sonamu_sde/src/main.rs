@@ -8,6 +8,7 @@ use sonamu_sttk::{
     nodular_applet::{
         project_applet::ProjectApplet,
         root_node_applet::{self, RootNodeApplet},
+        status_bar::applet::StatusBarApplet,
     },
     session,
 };
@@ -47,6 +48,7 @@ fn main() {
             ]),
             session::session_path(),
         ),
+        StatusBarApplet::get_initializer(),
         root_node_applet::is_keybind,
     );
 }

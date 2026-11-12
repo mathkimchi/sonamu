@@ -1,6 +1,7 @@
 //! The status bar (#150): a row at the top of every screen, drawn by the root, with popups under its segments.
 //! See `.claude/STATUS_BAR.md`.
 
+pub mod applet;
 mod calendar;
 mod controls;
 mod desktop;
@@ -1007,6 +1008,21 @@ impl StatusBar {
         // its segment may be gone
         self.set_popup(None);
         Ok(())
+    }
+
+    /// Where it takes the pointer on a screen `width` wide besides its row: the open popup and the notifications
+    /// popping up
+    pub fn popup_areas(&self, state: &BarState, palette: &Palette, width: f32) -> Vec<[f32; 4]> {
+        let mut areas: Vec<[f32; 4]> = self
+            .popup_notification_areas(width)
+            .into_iter()
+            .map(|(_, area)| area)
+            .collect();
+        if let Some(popup) = self.popup {
+            let placed = self.layout(state, palette, width);
+            areas.push(self.popup_area(popup, &placed, width));
+        }
+        areas
     }
 
     pub fn has_popup(&self) -> bool {

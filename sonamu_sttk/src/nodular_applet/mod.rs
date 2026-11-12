@@ -29,7 +29,7 @@ pub mod node_holder;
 pub mod node_tree;
 pub mod project_applet;
 pub mod root_node_applet;
-mod status_bar;
+pub mod status_bar;
 pub mod swipe;
 mod traversal;
 pub(crate) mod treeview;

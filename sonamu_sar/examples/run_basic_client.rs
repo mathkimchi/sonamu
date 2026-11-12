@@ -3,7 +3,7 @@
 
 use calloop::{EventLoop, channel::Sender};
 use sonamu_common::sap::{
-    packets::{StandardEvent, StandardRequest, StateKind, Treeview},
+    packets::{BarRequest, StandardEvent, StandardRequest, StateKind, Treeview},
     raw_client_initializer::RawClientInitializer,
     shared_state::{SharedState, StatePublisher},
 };
@@ -100,6 +100,19 @@ impl RawClientInitializer for BasicInitializer {
     }
 }
 
+/// No status bar: it ends at once, so its row stays empty
+struct NoBar;
+impl RawClientInitializer<BarRequest> for NoBar {
+    fn init(
+        self: Box<Self>,
+        _surface: SharedState<UITree>,
+        _treeview: SharedState<Treeview>,
+        _event_queue: calloop::channel::Channel<StandardEvent>,
+        _request_sender: Sender<BarRequest>,
+    ) {
+    }
+}
+
 pub fn main() {
-    AppletRunner::run(Box::new(BasicInitializer), |_| false);
+    AppletRunner::run(Box::new(BasicInitializer), Box::new(NoBar), |_| false);
 }

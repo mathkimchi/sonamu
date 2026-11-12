@@ -39,8 +39,19 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
 
 ## Architecture (my calls)
 
-- Bar and popups are drawn by `RootNodeApplet`, like the buffer line: `content_size` also subtracts the bar row and
-  the content starts under it; mouse in the bar row/popups goes to the bar first.
+- Its own client (`status_bar::applet::StatusBarApplet`, own thread, `ClientHandle<BarRequest>`) held by the runner
+  beside the root, not in the tree; handled like a layer surface (dms' bar): it publishes `BarInput` (height, input
+  areas in window px, `popup`, `keys`); the runner sends it the screens (after layer exclusive zones), gives the root
+  them less the bar's row, draws its surface over the root (under top layers; hidden under a fullscreen toplevel on
+  the only screen), and routes to it: mouse in its areas (once more on leaving, to clear hover; nothing while a
+  button pressed outside is held), any press while `popup` (closes it), all keys while `keys` (not Super+Esc), a
+  bare Esc while `popup` (not in buffer mode). Root ↔ bar via the runner: `StandardRequest::BarState` (treeview
+  shown, active screen) → `StandardEvent::BarState`; `BarRequest::ToggleTreeview` → `StandardEvent::ToggleTreeview`;
+  `sonamu.bar_layout` effect-checked by the root, then `StandardRequest::BarCommand` → `StandardEvent::Command`
+  (the bar replies). Was drawn by the root until 2026-11-12 (a bar deadlock froze everything).
+- The bar's active screen: the root's, or the one whose bar was last pressed (the root doesn't hear of that).
+- Tested headless (2026-11-12): bars on 2 screens, root content under them, arrow round trip, hub popup + hover +
+  click outside, launcher scroll, `bar_layout` (and its error), treeview right click.
 - Components are Rust structs (`Segment`-like) in `sonamu_sttk/src/nodular_applet/status_bar/`, not nodes.
 - System state comes from `sonamu_sttk::shell` services on their own threads, waking the root (calloop ping) on change:
   - notifications: `org.freedesktop.Notifications` server (`zbus`), replaces DMS's.

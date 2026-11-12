@@ -145,6 +145,55 @@ pub enum StandardRequest {
     RequestPlace(WorldTreePath, SpawnPosition),
     /// Asks for the settings, answered with `StandardEvent::SettingsChanged`
     GetSettings,
+    /// The root's state the status bar shows, when it changes; the runner passes it on (`StandardEvent::BarState`)
+    BarState(BarState),
+    /// A command for the status bar (eg `sonamu.bar_layout`), passed on as `StandardEvent::Command`
+    BarCommand {
+        name: String,
+        args: Vec<Value>,
+        reply: std::sync::mpsc::Sender<CommandResult>,
+    },
+}
+
+/// What the status bar shows of the root
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BarState {
+    pub treeview_shown: bool,
+    /// The screen with the keyboard: popups show there
+    pub active_screen: usize,
+}
+
+/// Status bar to runner. The bar runs beside the root, like a layer surface (eg dms' bar): the runner keeps its
+/// height free atop each screen, draws it over the root, and gives it the input in its region.
+#[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "like `StandardRequest`, sent a few times a second"
+)]
+pub enum BarRequest {
+    Standard(StandardRequest),
+    /// Its input region, when it changes
+    Input(BarInput),
+    /// The bar's arrow was clicked: passed to the root as `StandardEvent::ToggleTreeview`
+    ToggleTreeview,
+}
+impl From<StandardRequest> for BarRequest {
+    fn from(request: StandardRequest) -> Self {
+        Self::Standard(request)
+    }
+}
+
+/// Where the status bar takes input, like a layer surface's exclusive zone and input region
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarInput {
+    /// Kept free at the top of every screen (px)
+    pub height: u32,
+    /// `[x, y, width, height]` in the window: the bar rows, the open popup, notifications popping up
+    pub areas: Vec<[f32; 4]>,
+    /// A popup is open: a press anywhere else closes it (and goes nowhere else), so does a bare Esc
+    pub popup: bool,
+    /// Every key goes to the bar (eg its launcher's search)
+    pub keys: bool,
 }
 
 slotmap::new_key_type! {
@@ -213,6 +262,10 @@ pub enum StandardEvent {
     Swipe(Option<SwipeView>),
     /// Its node's uid (`AppletContext::uid`), when the node is made or moves into a world
     NodeUid(NodeUid),
+    /// The status bar's arrow was clicked. Only the root gets these.
+    ToggleTreeview,
+    /// The root's state, for the status bar (from `StandardRequest::BarState`). Only the bar gets these.
+    BarState(BarState),
     /// Run the applet's command (`StandardApplet::command`) and answer on `reply`
     Command {
         name: String,

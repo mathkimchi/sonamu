@@ -9,7 +9,6 @@ use crate::{
         node_holder::{NodeHolder, client_spawners},
         node_tree::{NodeId, NodeTree},
         project_applet::ProjectApplet,
-        status_bar::{self, BarAction, BarState, StatusBar},
         swipe::{Settle, Strip, Swipe},
         traversal::{self, Traversal},
         treeview::{
@@ -28,7 +27,10 @@ use calloop::{
 use sonamu_common::{
     command::{self, NodeCall, Value, World},
     sap::{
-        packets::{OpenApplet, SpawnPosition, StandardEvent, StandardRequest, StateKind, Treeview},
+        packets::{
+            BarState, OpenApplet, SpawnPosition, StandardEvent, StandardRequest, StateKind,
+            Treeview,
+        },
         raw_client_initializer::RawClientInitializer,
         session::Session,
         shared_state::{SharedState, StatePublisher},
@@ -47,10 +49,7 @@ use sonamu_ui::{
 use std::{
     collections::{BTreeMap, HashMap},
     path::PathBuf,
-    sync::{
-        Arc, RwLock,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, RwLock, atomic::Ordering},
     time::{Duration, Instant},
 };
 
@@ -121,8 +120,8 @@ pub struct RootNodeApplet {
     echo: Option<(sonamu_script::Message, Instant)>,
     /// `sonamu_script::last_message`'s count when last echoed
     echoed: u64,
-    /// The status bar's popups (#150)
-    status_bar: StatusBar,
+    /// What the status bar was last told (#150; it runs beside the root, `status_bar::applet`)
+    bar_state: BarState,
     loop_handle: LoopHandle<'static, Self>,
 }
 
@@ -162,8 +161,8 @@ impl RootNodeApplet {
         self.surface.damage();
     }
 
-    /// Super+Esc, and keys while the status bar's launcher or the buffer line takes them; whether it took the key
-    /// (releases too, so nothing else sees half a key)
+    /// Super+Esc, and keys while the buffer line takes them; whether it took the key (releases too, so nothing else
+    /// sees half a key)
     fn handle_grabbed_key(
         &mut self,
         symbol: Option<KeySymbol>,
@@ -172,27 +171,6 @@ impl RootNodeApplet {
     ) -> bool {
         if pressed && matches!(symbol, Some(KeySymbol::Escape)) && modifiers.logo {
             self.set_buffer_mode(!self.buffer_mode);
-            return true;
-        }
-        if !self.buffer_mode
-            && matches!(symbol, Some(KeySymbol::Escape))
-            && modifiers == KeyModifiers::NONE
-            && self.status_bar.has_popup()
-        {
-            if pressed {
-                self.status_bar.close_popup();
-                self.surface.damage();
-                self.sync_key_grab();
-            }
-            return true;
-        }
-        if self.status_bar.wants_keys() {
-            if let (true, Some(key)) = (pressed, symbol)
-                && self.status_bar.handle_key(key)
-            {
-                self.surface.damage();
-            }
-            self.sync_key_grab();
             return true;
         }
         if self.buffer_mode {
@@ -204,14 +182,9 @@ impl RootNodeApplet {
         false
     }
 
-    /// Every key comes to the root in buffer mode and while the status bar's launcher is open, and Esc while any of
-    /// its popups is
+    /// Every key comes to the root in buffer mode
     fn sync_key_grab(&self) {
-        sonamu_common::BUFFER_MODE.store(
-            self.buffer_mode || self.status_bar.wants_keys(),
-            Ordering::Relaxed,
-        );
-        BAR_POPUP.store(self.status_bar.has_popup(), Ordering::Relaxed);
+        sonamu_common::BUFFER_MODE.store(self.buffer_mode, Ordering::Relaxed);
     }
 
     /// A key in buffer mode: Esc clears the prompt, or leaves buffer mode if it's empty; others go to the prompt
@@ -321,7 +294,6 @@ impl RootNodeApplet {
             view_path,
             screens,
             repl,
-            status_bar,
             ..
         } = self;
         let active = holder.tree.active_screen();
@@ -356,20 +328,10 @@ impl RootNodeApplet {
                     if quit_asked && index == active {
                         content.push(notice(&settings, Self::QUIT_NOTICE, size));
                     }
-                    let bar_height = status_bar::height() as f32;
-                    // under the bar
                     let mut window = vec![UITree::new_container_styled(
-                        Style::absolute([0.0, bar_height], [size.width as f32, size.height as f32]),
+                        Style::absolute([0.0, 0.0], [size.width as f32, size.height as f32]),
                         content,
                     )];
-                    window.extend(status_bar.draw(
-                        &settings,
-                        &BarState {
-                            treeview_shown: pinned,
-                        },
-                        size.width as f32,
-                        index == active,
-                    ));
                     let full = DisplayContainerSize::new(size.width, height);
                     let echo = echo.filter(|_| index == active);
                     if index == active && buffer_mode {
@@ -655,14 +617,7 @@ impl RootNodeApplet {
             echo: None,
             buffer_scroll: 0,
             echoed: 0,
-            status_bar: {
-                // redraws when the bar's system readings change
-                let (ping, source) = calloop::ping::make_ping().unwrap();
-                event_loop
-                    .insert_source(source, |(), &mut (), root: &mut Self| root.surface.damage())
-                    .unwrap();
-                StatusBar::new(move || ping.ping())
-            },
+            bar_state: BarState::default(),
             loop_handle: event_loop.clone(),
         };
         // a clean session starts with the help shown
@@ -708,10 +663,6 @@ impl RootNodeApplet {
                     })
                     .unwrap();
 
-                event_loop
-                    .handle()
-                    .insert_source(Timer::immediate(), RootNodeApplet::tick_bar_clock)
-                    .unwrap();
                 event_loop
                     .handle()
                     .insert_source(
@@ -778,6 +729,7 @@ impl RootNodeApplet {
                         }
                         root.holder.update_wl_focus();
                         root.flush_surface();
+                        root.send_bar_state();
                     })
                     .unwrap();
             }
@@ -875,6 +827,9 @@ impl RootNodeApplet {
             StandardEvent::Screens(rects) => self.set_screens(rects),
             // it has the screens itself
             StandardEvent::ScreenViews { .. } => {}
+            StandardEvent::ToggleTreeview => self.toggle_treeview(),
+            // the status bar's
+            StandardEvent::BarState(_) => {}
             // it reads the settings when it draws
             StandardEvent::SettingsChanged(_) => {
                 self.surface.damage();
@@ -928,30 +883,6 @@ impl RootNodeApplet {
         // in the active screen's coords
         let [x, y, ..] = self.screens[self.holder.tree.active_screen()].rect;
         mouse_event.position = [pointer_x - f64::from(x), pointer_y - f64::from(y)];
-        // the status bar and its popups, unless a drag is on
-        if !self.treeview_pointer.is_pressed() && !self.holder.tree.has_pointer_grab() {
-            let state = BarState {
-                treeview_shown: self.treeview_pinned,
-            };
-            let width = self.latest_size.width as f32;
-            let palette = settings::get().palette;
-            let response = self
-                .status_bar
-                .handle_mouse(&state, &palette, &mouse_event, width);
-            if response.damaged {
-                self.surface.damage();
-            }
-            if let Some(action) = response.action {
-                self.apply_bar_action(action);
-            }
-            self.sync_key_grab();
-            if response.consumed {
-                return;
-            }
-        }
-        // under the bar
-        mouse_event.position[1] -= f64::from(status_bar::height());
-
         let settings = settings::get();
         let treeview_area = self.treeview_area(&settings);
         // a hidden treeview has no rows to hit
@@ -1022,21 +953,22 @@ impl RootNodeApplet {
         self.holder.do_zoom_action();
     }
 
-    /// Redraws when the bar's clock or popping up notifications change; checked a few times a second
-    fn tick_bar_clock(_: Instant, (): &mut (), root: &mut Self) -> TimeoutAction {
-        if root.status_bar.tick() {
-            root.surface.damage();
-        }
-        TimeoutAction::ToDuration(Duration::from_millis(200))
+    /// The status bar's arrow
+    fn toggle_treeview(&mut self) {
+        self.treeview_pinned = !self.treeview_pinned;
+        self.surface.damage();
+        self.update_treeview_visibility();
     }
 
-    fn apply_bar_action(&mut self, action: BarAction) {
-        match action {
-            BarAction::ToggleTreeview => {
-                self.treeview_pinned = !self.treeview_pinned;
-                self.surface.damage();
-                self.update_treeview_visibility();
-            }
+    /// Tells the status bar (through the runner) what it shows of the root, if it changed
+    fn send_bar_state(&mut self) {
+        let state = BarState {
+            treeview_shown: self.treeview_pinned,
+            active_screen: self.holder.tree.active_screen(),
+        };
+        if state != self.bar_state {
+            self.bar_state = state;
+            self.send_request(StandardRequest::BarState(state));
         }
     }
 
@@ -1080,22 +1012,21 @@ impl RootNodeApplet {
 
     /// A command for the root's tree or a node in it
     fn handle_node_call(&mut self, call: NodeCall) {
-        // the root's own (`sonamu.bar_layout`), so its effect limit is checked here, as the holder does for others
+        // the status bar's (`sonamu.bar_layout`), so its effect limit is checked here, as the holder does for others;
+        // the bar answers
         if call.uid.is_none() && call.name == "bar_layout" {
-            let result = if command::tree_effect(&call.name) > call.max {
-                Err(format!(
+            if command::tree_effect(&call.name) > call.max {
+                let _ = call.reply.send(Err(format!(
                     "bar_layout is above this eval's limit ({:?})",
                     call.max
-                ))
+                )));
             } else {
-                command::strings_arg(&call.args, 0)
-                    .and_then(|left| Ok((left, command::strings_arg(&call.args, 1)?)))
-                    .and_then(|(left, right)| self.status_bar.set_layout(&left, &right))
-                    .map(|()| Value::Nil)
-            };
-            self.surface.damage();
-            self.sync_key_grab();
-            let _ = call.reply.send(result);
+                self.send_request(StandardRequest::BarCommand {
+                    name: call.name,
+                    args: call.args,
+                    reply: call.reply,
+                });
+            }
             return;
         }
         match self.holder.handle_node_call(call) {
@@ -1587,16 +1518,6 @@ impl RootKeybind {
 /// The runner sends other keys straight to the client (#56).
 pub fn is_keybind(ui_event: &UIEvent) -> bool {
     sonamu_common::BUFFER_MODE.load(Ordering::Relaxed)
-        // closes it
-        || (BAR_POPUP.load(Ordering::Relaxed)
-            && matches!(
-                ui_event,
-                UIEvent::Key {
-                    symbol: Some(KeySymbol::Escape),
-                    modifiers: KeyModifiers::NONE,
-                    ..
-                }
-            ))
         || matches!(
             ui_event,
             UIEvent::Key {
@@ -1610,9 +1531,6 @@ pub fn is_keybind(ui_event: &UIEvent) -> bool {
         || Traversal::of(ui_event, false).is_some()
 }
 
-/// A status bar popup is open: Esc comes to the root (to close it)
-static BAR_POPUP: AtomicBool = AtomicBool::new(false);
-
 /// Rows the buffer line takes below the panes: one when it always shows, else none (it shows over them)
 fn buffer_line_height(settings: &Settings) -> u32 {
     match settings.buffer_line {
@@ -1621,12 +1539,10 @@ fn buffer_line_height(settings: &Settings) -> u32 {
     }
 }
 
-/// A screen's (`[x, y, width, height]`) room for the treeview and panes, under the status bar and above the buffer line
+/// A screen's (`[x, y, width, height]`, under the status bar: the runner keeps its row free) room for the treeview
+/// and panes, above the buffer line
 fn content_size(settings: &Settings, [_, _, width, height]: [u32; 4]) -> DisplayContainerSize {
-    DisplayContainerSize::new(
-        width,
-        height.saturating_sub(status_bar::height() + buffer_line_height(settings)),
-    )
+    DisplayContainerSize::new(width, height.saturating_sub(buffer_line_height(settings)))
 }
 
 /// The buffer line's bottom row

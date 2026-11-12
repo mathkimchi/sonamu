@@ -39,6 +39,8 @@ Found while debugging #60; nothing here is in the repo's code.
   `wayland-protocols-wlr` 0.3.12 `client`, `cargo build --offline`): binds `zwlr_virtual_pointer_manager_v1` + seat,
   reads `move x y` (`motion_absolute` in the output's WxH), `click`, `scroll dy`, `sleep ms` lines from stdin; pipe a
   subshell into it with `grim` calls between (the pointer stays while stdin is open). Coords include sway's title bar.
+  The first `move` only enters the window: winit's buttons carry its last cursor position (`[0, 0]` until a
+  motion), so move twice before clicking.
 - Test runs share the machine: the status bar sets the real power profile (`power-saver` at start, and on clicks).
 - 2026-11-12: `wtype f` (with a held `wtype -s` keyboard too) reached the root as `Escape`; key handling is
   unit-tested instead (eg `status_bar::launcher` tests).
