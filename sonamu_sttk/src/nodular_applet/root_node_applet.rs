@@ -1064,6 +1064,20 @@ impl RootNodeApplet {
 
     /// A command for the root's tree or a node in it
     fn handle_node_call(&mut self, call: NodeCall) {
+        // the root's own (`sonamu.bar_layout`); the limit is checked by the caller's `call`'s world below, so here
+        if call.uid.is_none() && call.name == "bar_layout" {
+            let result = if command::tree_effect(&call.name) > call.max {
+                Err(format!("bar_layout is above this eval's limit ({:?})", call.max))
+            } else {
+                command::strings_arg(&call.args, 0)
+                    .and_then(|left| Ok((left, command::strings_arg(&call.args, 1)?)))
+                    .and_then(|(left, right)| self.status_bar.set_layout(&left, &right))
+                    .map(|()| Value::Nil)
+            };
+            self.surface.damage();
+            let _ = call.reply.send(result);
+            return;
+        }
         match self.holder.handle_node_call(call) {
             None | Some(NodeRequest::FocusSelf) => {}
             Some(_) => log::warn!("The root holder has no node to pass a request to"),

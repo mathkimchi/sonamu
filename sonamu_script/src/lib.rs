@@ -500,7 +500,7 @@ fn new_lua() -> mlua::Result<Lua> {
     add_process(&lua, &globals)?;
 
     let sonamu = lua.create_table()?;
-    for name in ["open", "quit", "reload_settings"] {
+    for name in ["open", "quit", "reload_settings", "bar_layout"] {
         sonamu.set(name, tree_function(&lua, name)?)?;
     }
     sonamu.set(
@@ -761,6 +761,8 @@ clipboard.copy(text, {primary = true}?)   Sonamu's clipboard (or primary selecti
 clipboard.paste({primary = true}?): string?
 sonamu.open(applet, {args}?)   like `sonamu-msg open`
 sonamu.reload_settings()
+sonamu.bar_layout({left}, {right})   the status bar's segments by name, each left to right; default
+                               {tree, launcher, time}, {tray, bell, resources, hub}
 sonamu.quit()
 sonamu.reset()                 a fresh Luau state
 sonamu.messages(): string      prints and errors of init.luau, bindings and hooks (the last shows at the bottom)
@@ -841,6 +843,7 @@ declare sonamu: {
     open: (applet: string, args: {string}?) -> (),
     quit: () -> (),
     reload_settings: () -> (),
+    bar_layout: (left: {string}, right: {string}) -> (),
     reset: () -> (),
     messages: () -> string,
     help: () -> string,

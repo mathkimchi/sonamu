@@ -104,6 +104,8 @@ the pin button, floating treeview, and `side: right` (settings stay parseable).
   RGBA, nearest 48 px), else `IconName` via `Icons`. Left: `Activate` (menu if `ItemIsMenu`), middle:
   `SecondaryActivate`, right: its DBusMenu (`AboutToShow`, `GetLayout` parsed from `Variant`s; submenus indented;
   `_` mnemonics dropped; click → `Event(id, "clicked")`). Tested with a scratch zbus item (TESTING.md).
+- Done: 8. `sonamu.bar_layout` (COMMANDS.md); `StatusBar::layout`, `Segment::NAMES`; empty segments (a tray
+  without items) take no room. `init.luau` re-runs on `sonamu.reset()`, which is the live reload.
 - Clicks tested headless (TESTING.md's pointer client): calendar month, treeview arrow, resources sort and profile.
 
 ## Order of work

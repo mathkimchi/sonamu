@@ -15,3 +15,6 @@
 -- end)
 -- Also `open` (a new node), `close` (its node, gone), `settings`, `screens` (count);
 -- outside Sonamu: `sonamu-msg subscribe focus close`
+
+-- the status bar's segments (#150), left and right, each left to right; this is the default
+-- sonamu.bar_layout({"tree", "launcher", "time"}, {"tray", "bell", "resources", "hub"})

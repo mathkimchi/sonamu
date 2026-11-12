@@ -176,6 +176,9 @@ Deviations from the decisions below:
 - `process.spawn(program, args?)`, `process.output(program, args?, dir?): string` (or with `fn(out, err)` last: doesn't wait, like nvim's `vim.system`;
   the program runs on its own thread, then `Call::Callback` queues `fn`; not cancellable); `clipboard.copy(text, {primary}?)`, `clipboard.paste({primary}?): string?`.
 - `sonamu.open(applet, args?)`, `sonamu.reload_settings()`, `sonamu.quit()`, `sonamu.help(): string`, `sonamu.reset()`.
+- `sonamu.bar_layout({left}, {right})` (#150): the status bar's segments by name (`tree`, `launcher`, `time`, `tray`,
+  `bell`, `resources`, `hub`); a root command handled in `RootNodeApplet::handle_node_call` (effect Modify), not
+  saved: set it from `init.luau`.
 - `CommandHub`: `clear()`, `set_title(t)`, `open(applet, args?)`.
 - `file_manager`: `root(): string`, `selected(): string?`, `open(path)` (shows its document).
 - `code_editor`: `path(): string`, `text(): string`, `save()`.

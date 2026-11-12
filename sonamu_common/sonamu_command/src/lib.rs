@@ -357,7 +357,7 @@ pub fn node_effect(name: &str) -> Option<Effect> {
 pub fn tree_effect(name: &str) -> Effect {
     match name {
         "focus" | "root" => Effect::Read,
-        "open" | "reload_settings" => Effect::Modify,
+        "open" | "reload_settings" | "bar_layout" => Effect::Modify,
         "spawn" => Effect::Spawn,
         _ => Effect::Destructive,
     }

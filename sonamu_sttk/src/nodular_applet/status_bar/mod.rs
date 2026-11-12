@@ -82,7 +82,7 @@ fn spans_width(spans: &Spans) -> f32 {
 
 /// What a segment of the bar is
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Segment {
+pub enum Segment {
     /// `▾`/`▴`: shows or hides the treeview
     Tree,
     /// Opens the app launcher
@@ -98,6 +98,36 @@ enum Segment {
     /// The notifications' bell, with their count; opens their list
     Bell,
 }
+
+impl Segment {
+    /// Its name in `sonamu.bar_layout`
+    const NAMES: [(&str, Self); 7] = [
+        ("tree", Self::Tree),
+        ("launcher", Self::Launcher),
+        ("time", Self::Time),
+        ("tray", Self::Tray),
+        ("bell", Self::Bell),
+        ("resources", Self::Resources),
+        ("hub", Self::Hub),
+    ];
+
+    fn named(name: &str) -> Result<Self, String> {
+        Self::NAMES
+            .iter()
+            .find(|(known, _)| *known == name)
+            .map(|(_, segment)| *segment)
+            .ok_or_else(|| {
+                let names: Vec<&str> = Self::NAMES.iter().map(|(name, _)| *name).collect();
+                format!("no bar segment {name} (there are {})", names.join(", "))
+            })
+    }
+}
+
+/// The default layout: `[left, right]`, each left to right
+const DEFAULT_LAYOUT: [&[Segment]; 2] = [
+    &[Segment::Tree, Segment::Launcher, Segment::Time],
+    &[Segment::Tray, Segment::Bell, Segment::Resources, Segment::Hub],
+];
 
 /// What a click on the bar does, for the root
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -234,6 +264,8 @@ pub struct StatusBar {
     shown: (String, Vec<u32>, bool),
     controls: Controls,
     tray: Tray,
+    /// `[left, right]`, each left to right (`sonamu.bar_layout`)
+    layout: [Vec<Segment>; 2],
 }
 
 /// Under the bar's right end: the notifications popping up, `GAP` apart
@@ -251,6 +283,7 @@ impl StatusBar {
             notifications: Notifications::start(Arc::clone(&changed)),
             controls: Controls::start(Arc::clone(&changed)),
             tray: Tray::start(Arc::clone(&changed)),
+            layout: DEFAULT_LAYOUT.map(<[Segment]>::to_vec),
             icons: Icons::start(changed),
             launcher: None,
             shown: Default::default(),
@@ -275,26 +308,30 @@ impl StatusBar {
     /// The segments with their text and place, for both drawing and clicking
     fn layout(&self, state: &BarState, palette: &Palette, width: f32) -> Vec<Placed> {
         let fg = palette.fg;
-        let left = [
-            (
-                Segment::Tree,
-                vec![(if state.treeview_shown { "▾" } else { "▴" }.to_string(), fg)],
-            ),
-            (Segment::Launcher, vec![(launcher::ICON.to_string(), fg)]),
-            (Segment::Time, vec![(Self::time(), fg)]),
-        ];
-        let right = [
-            (Segment::Tray, self.tray_spans(palette)),
-            (Segment::Bell, self.bell(palette)),
-            (
-                Segment::Resources,
-                resources::segment(&self.system.snapshot.lock().unwrap(), palette),
-            ),
-            (
-                Segment::Hub,
-                hub::segment(&self.controls.state.lock().unwrap(), palette),
-            ),
-        ];
+        // empty ones (eg a tray without items) take no room
+        let spans = |segments: &[Segment]| -> Vec<(Segment, Spans)> {
+            segments
+                .iter()
+                .map(|&segment| {
+                    let spans = match segment {
+                        Segment::Tree => {
+                            vec![(if state.treeview_shown { "▾" } else { "▴" }.to_string(), fg)]
+                        }
+                        Segment::Launcher => vec![(launcher::ICON.to_string(), fg)],
+                        Segment::Time => vec![(Self::time(), fg)],
+                        Segment::Tray => self.tray_spans(palette),
+                        Segment::Bell => self.bell(palette),
+                        Segment::Resources => {
+                            resources::segment(&self.system.snapshot.lock().unwrap(), palette)
+                        }
+                        Segment::Hub => hub::segment(&self.controls.state.lock().unwrap(), palette),
+                    };
+                    (segment, spans)
+                })
+                .filter(|(_, spans)| !spans.is_empty())
+                .collect()
+        };
+        let [left, right] = [spans(&self.layout[0]), spans(&self.layout[1])];
         let mut placed = Vec::new();
         let mut x = GAP;
         for (segment, spans) in left {
@@ -794,6 +831,17 @@ impl StatusBar {
             hub::Click::Output(id) => controls.set_default_sink(id),
             hub::Click::Brightness(level) => controls.set_brightness(level),
         }
+    }
+
+    /// Sets the segments by name, `left` and `right` each left to right (`sonamu.bar_layout`)
+    pub fn set_layout(&mut self, left: &[String], right: &[String]) -> Result<(), String> {
+        let named = |names: &[String]| -> Result<Vec<Segment>, String> {
+            names.iter().map(|name| Segment::named(name)).collect()
+        };
+        self.layout = [named(left)?, named(right)?];
+        // its segment may be gone
+        self.set_popup(None);
+        Ok(())
     }
 
     /// Whether keys go to the bar (the launcher's search), not the focused applet
