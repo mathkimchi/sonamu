@@ -153,6 +153,10 @@ published treeviews.
   Moving the center (`set_zoom_center`: arrows, scroll, clicks) pans: `zoom_pan` starts off by where the old center
   was minus where it is now (`zoom_position`, unscaled, so the area's size cancels; a pan underway carries on) and
   springs to 0 (`pan_zoom`, measured around the change); a lateral one (center among the same siblings) leaves the rows above and the box still. Drops and swaps instead slide each pane from where it was (`move_zoom_panes`, `zoom_moves`: offsets per node and occurrence, since rows repeat nodes). `zoom_animating` covers all, for holders' redraws.
+  Free view (`zoom_out.view: free`): 2 finger scrolls move it (`zoom_free`, px and rows, faded out zooming in), not
+  the center; clicks, arrows and drops change the center while it stays put (`pan_zoom` adds the offset to
+  `zoom_free` instead of springing, but a lateral move's row still slides under its parent); a drag's edge
+  scroll stays.
   Child previews (`zoom_out.child_previews`, `zoom_previews`): under each pane of a sibling of its row's focus
   (`zoom_previewed`; a merged container row's focus is its deepest node), its first children (at most 4, as many as
   fit) as views at a quarter size, in room each row gets below it (`zoom_preview_room`). Drawn in the scaled

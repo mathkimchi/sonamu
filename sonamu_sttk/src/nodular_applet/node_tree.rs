@@ -17,7 +17,7 @@ use sonamu_common::{
         packets::{AwaitedWl, NewWlSurface, SpawnPosition, StandardEvent, SwipeView, WlSurfaceId},
         session::{SavedApplet, SavedTree, SavedWl},
     },
-    settings,
+    settings::{self, ZoomOutView},
     utils::tree::{
         recursive_tree::RecursiveTreeNode,
         tree_node_path::TreeNodePath,
@@ -152,6 +152,9 @@ pub struct NodeTree {
     zoom_scrolled: [f64; 2],
     /// A press in the zoom-out view, until its release (`zoom_button`)
     zoom_press: Option<ZoomPress>,
+    /// How far the free zoom-out view (`ZoomOutView::Free`) was moved: px (before scaling) and rows down, like
+    /// `zoom_pan`
+    zoom_free: ([f32; 2], f32),
     /// How much a pinch scales the zoom-out view (`zoom_pinch`), and what it was when the pinch began
     zoom_pinched: (f32, Option<f32>),
     /// The zoom-out view growing out of, or back into, a node's view
@@ -360,6 +363,7 @@ impl NodeTree {
             zoom_scrolled: [0.0; 2],
             zoom_press: None,
             zoom_pinched: (1.0, None),
+            zoom_free: ([0.0; 2], 0.0),
             zoom_anim: None,
             was_zoomed: None,
             zoom_pan: None,
@@ -1709,7 +1713,11 @@ impl NodeTree {
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
         if self.zoomed_out() {
             match mouse_event.kind {
-                MouseEventKind::Scroll { delta, stop, .. } => self.zoom_scroll(delta, stop),
+                MouseEventKind::Scroll { delta, stop, .. } => {
+                    if let Some(size) = self.latest_size {
+                        self.zoom_scroll(size, delta, stop);
+                    }
+                }
                 MouseEventKind::Button {
                     button: BTN_LEFT,
                     pressed,
@@ -2370,14 +2378,35 @@ impl NodeTree {
                 self.zoom_center().map(|center| self.nodes[center].parent) == Some(old_parent);
             let lateral =
                 siblings && before_row == after_row && (carried_lateral || self.zoom_pan.is_none());
-            self.zoom_pan = Some((Instant::now(), offset, rows, lateral));
+            if !Self::zoom_free_view() {
+                self.zoom_pan = Some((Instant::now(), offset, rows, lateral));
+                return;
+            }
+            // free: it stays put, but for a lateral move's row sliding under its parent
+            let (free, free_rows) = &mut self.zoom_free;
+            let x = if lateral {
+                self.zoom_pan = Some((Instant::now(), [offset[0], 0.0], 0.0, true));
+                0.0
+            } else {
+                self.zoom_pan = None;
+                offset[0]
+            };
+            free[0] += x;
+            free[1] += offset[1];
+            *free_rows += rows;
         }
+    }
+
+    /// Whether the zoom-out view floats freely (`ZoomOutView::Free`)
+    fn zoom_free_view() -> bool {
+        settings::get().zoom_out.view == ZoomOutView::Free
     }
 
     /// Changes the zoom-out view (eg moves a node), each pane sliding from where it was to its new place
     fn move_zoom_panes(&mut self, change: impl FnOnce(&mut Self)) {
         let before = self.zoom_occurrences();
-        change(self);
+        // a free view stays put
+        self.pan_zoom(change);
         // `before` has them in
         self.zoom_pan = None;
         self.zoom_moves = None;
@@ -2413,9 +2442,19 @@ impl NodeTree {
             .collect()
     }
 
-    /// A scroll in the zoom-out view: past a step, moves its center one node (sideways: siblings, down: child)
-    pub fn zoom_scroll(&mut self, [x, y]: [f64; 2], stop: [bool; 2]) {
+    /// A scroll in the zoom-out view drawn at `size`: past a step, moves its center one node (sideways: siblings,
+    /// down: child); a free one (`ZoomOutView::Free`) just moves
+    pub fn zoom_scroll(&mut self, size: DisplayContainerSize, [x, y]: [f64; 2], stop: [bool; 2]) {
         const STEP: f64 = 50.0;
+        if Self::zoom_free_view() {
+            if let Some(scale) = self.zoom_full_scale(size) {
+                let (free, _) = &mut self.zoom_free;
+                free[0] -= x as f32 / scale;
+                free[1] -= y as f32 / scale;
+                self.damaged = true;
+            }
+            return;
+        }
         let [moved_x, moved_y] = &mut self.zoom_scrolled;
         *moved_x += x;
         *moved_y += y;
@@ -2791,7 +2830,15 @@ impl NodeTree {
         // the center view's middle at the middle of `size`, from its top left; off by the pan left
         let (pan, pan_rows, lateral) = self.zoom_pan_offset();
         let pan = [pan[0], pan[1] + pan_rows * step];
-        let scroll = self.zoom_press.map_or([0.0; 2], |press| press.scroll);
+        // dragged at the edges, and floated (gone once zoomed in)
+        let (free, free_rows) = self.zoom_free;
+        let free = if Self::zoom_free_view() {
+            [free[0], free[1] + free_rows * step].map(|value| value * zoomed)
+        } else {
+            [0.0; 2]
+        };
+        let dragged = self.zoom_press.map_or([0.0; 2], |press| press.scroll);
+        let scroll = [0, 1].map(|axis| dragged[axis] + free[axis]);
         let [[x, x_still], [y, _]] = [
             [size.width as f32, width, pan[0], scroll[0]],
             [size.height as f32, height, pan[1], scroll[1]],
@@ -2924,7 +2971,7 @@ impl NodeTree {
 
     /// A left press or release at `position` of the zoom-out view drawn at `size`. A click on the center focuses it
     /// (going in), on another node makes that the center. A drag to a pane's edge (`zoom_drop`) moves the node there, as
-    /// the center. Anything else springs back from where dragging at the edges scrolled it.
+    /// the center. Anything else springs back from where dragging at the edges scrolled it (a free view stays).
     pub fn zoom_button(&mut self, size: DisplayContainerSize, position: [f64; 2], pressed: bool) {
         if pressed {
             self.zoom_press = self
@@ -2954,13 +3001,24 @@ impl NodeTree {
             // from where it scrolled to
             self.move_zoom_panes(|tree| {
                 tree.zoom_press = None;
+                // a free view keeps where it scrolled to
+                if Self::zoom_free_view() {
+                    for (free, scroll) in tree.zoom_free.0.iter_mut().zip(scroll) {
+                        *free += scroll;
+                    }
+                }
                 tree.move_node(id, target, side);
                 tree.remember_zoom_center(id);
             });
             return;
         }
         self.zoom_press = None;
-        if scroll.iter().any(|value| value.abs() > f32::EPSILON) {
+        if Self::zoom_free_view() {
+            // floats where it scrolled to
+            for (free, scroll) in self.zoom_free.0.iter_mut().zip(scroll) {
+                *free += scroll;
+            }
+        } else if scroll.iter().any(|value| value.abs() > f32::EPSILON) {
             let (carried, carried_rows, _) = self.zoom_pan_offset();
             let offset = [0, 1].map(|axis| carried[axis] + scroll[axis]);
             self.zoom_pan = Some((Instant::now(), offset, carried_rows, false));

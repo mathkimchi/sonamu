@@ -30,7 +30,7 @@
     "stiffness": 1000.0,
     "damping_ratio": 1.0
   },
-  "zoom_out": { "child_previews": true },
+  "zoom_out": { "child_previews": true, "view": "center" },
   "keybinds": [],
   "restore_programs": [],
   "startup": [],

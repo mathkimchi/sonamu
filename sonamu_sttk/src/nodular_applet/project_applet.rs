@@ -390,6 +390,14 @@ impl ProjectApplet {
 
     /// Where the overview's zoom-out view of its tree starts (#145), below the rows.
     /// None while setting the directory or icon, whose options take those rows.
+    /// Of the zoom-out view below `zoom_top`
+    fn zoom_size(&self, top: f32) -> DisplayContainerSize {
+        DisplayContainerSize::new(
+            self.size.width,
+            self.size.height.saturating_sub(top.to_px()),
+        )
+    }
+
     fn zoom_top(&self) -> Option<f32> {
         if self.setting_directory.is_some() || self.picking_icon.is_some() {
             return None;
@@ -540,7 +548,12 @@ impl ProjectApplet {
             UIEvent::Mouse(MouseEvent {
                 kind: MouseEventKind::Scroll { delta, stop, .. },
                 ..
-            }) => self.holder.tree.zoom_scroll(delta, stop),
+            }) => {
+                if let Some(top) = self.zoom_top() {
+                    let size = self.zoom_size(top);
+                    self.holder.tree.zoom_scroll(size, delta, stop);
+                }
+            }
             // a drag in its tree's zoom-out view
             UIEvent::Mouse(MouseEvent {
                 position: [x, y],
@@ -577,10 +590,7 @@ impl ProjectApplet {
         if let Some(top) = self.zoom_top()
             && (y >= f64::from(top) || !pressed)
         {
-            let size = DisplayContainerSize::new(
-                self.size.width,
-                self.size.height.saturating_sub(top.to_px()),
-            );
+            let size = self.zoom_size(top);
             self.holder
                 .tree
                 .zoom_button(size, [x, y - f64::from(top)], pressed);

@@ -193,6 +193,18 @@ pub struct SwipeSettings {
 pub struct ZoomOutSettings {
     /// Tiny previews of the children of the nodes beside each row's own, under their panes
     pub child_previews: bool,
+    /// Whether the view keeps its center in the middle, or floats freely
+    pub view: ZoomOutView,
+}
+
+/// How the zoom-out view moves
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZoomOutView {
+    /// It pans to keep its center (where clicks, arrows and 2 finger scrolls move it) in the middle
+    Center,
+    /// 2 finger scrolls move it freely; clicks and arrows still move its center, but it stays put
+    Free,
 }
 
 /// When the buffer line shows

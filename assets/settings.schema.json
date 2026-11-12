@@ -313,8 +313,27 @@
         "child_previews": {
           "description": "Tiny previews of the children of the nodes beside each row's own, under their panes",
           "type": "boolean"
+        },
+        "view": {
+          "description": "Whether the view keeps its center in the middle, or floats freely",
+          "$ref": "#/$defs/ZoomOutView"
         }
       }
+    },
+    "ZoomOutView": {
+      "description": "How the zoom-out view moves",
+      "oneOf": [
+        {
+          "description": "It pans to keep its center (where clicks, arrows and 2 finger scrolls move it) in the middle",
+          "type": "string",
+          "const": "center"
+        },
+        {
+          "description": "2 finger scrolls move it freely; clicks and arrows still move its center, but it stays put",
+          "type": "string",
+          "const": "free"
+        }
+      ]
     }
   }
 }
