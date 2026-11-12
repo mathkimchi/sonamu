@@ -2290,7 +2290,10 @@ impl NodeTree {
         match phase {
             PinchPhase::Begin { .. } => *began = Some(*pinched),
             PinchPhase::Update { scale, .. } => {
-                if let Some(began) = began {
+                if let Some(began) = began
+                    && scale > 0.0
+                    && scale.is_finite()
+                {
                     *pinched =
                         (*began * scale as f32).clamp(Self::ZOOM_PINCH[0], Self::ZOOM_PINCH[1]);
                 }
@@ -3116,7 +3119,10 @@ impl NodeTree {
         let [width, height] = [view.width, view.height].map(|length| length.max(1) as f32);
         let fit = (size.width as f32 / (across * width)).min(size.height as f32 / (down * height));
         let most = (size.width as f32 / width).min(size.height as f32 / height);
-        Some((fit * self.zoom_pinch_now().max(LEAST)).min(most))
+        let scale = (fit * self.zoom_pinch_now().max(LEAST)).min(most);
+        // drawn with no room (eg a small project's view): dividing by it would make NaN positions, drawn at the
+        // top left, that no scroll moves
+        (scale > 0.0 && scale.is_finite()).then_some(scale)
     }
 
     /// Where `zoom_window(size)` draws everything, before scaling, `zoomed` of the way (0 to 1) from the center's
