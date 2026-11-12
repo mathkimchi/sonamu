@@ -27,10 +27,7 @@ const CLEAR_ALL: &str = "Clear all";
 const DO_NOT_DISTURB: Button = Button::row(1, COLUMNS);
 
 fn clear_all() -> Button {
-    Button {
-        line: 0,
-        columns: [COLUMNS - columns(CLEAR_ALL), COLUMNS],
-    }
+    Button::new(0, [COLUMNS - columns(CLEAR_ALL), COLUMNS])
 }
 
 #[derive(Clone)]
@@ -127,29 +124,70 @@ pub fn size(store: &Store) -> [f32; 2] {
     Lines::size(HEADER_LINES + (2 * listed(store)).max(1), COLUMNS)
 }
 
+/// A button, its label, and what a click does
+type Entry = (Button, Spans, Click);
+
+/// A notification's buttons, from line `top`, `height` lines tall: itself (its title on the first line; activates
+/// it) and its ✕ (dismisses it)
+fn notification_buttons(
+    notification: &Notification,
+    top: usize,
+    height: usize,
+    palette: &Palette,
+) -> [Entry; 2] {
+    let title = cut(&title(notification), COLUMNS - TEXT_COLUMN - 4);
+    [
+        (
+            Button::new(top, [0, COLUMNS - 3]).tall(height),
+            vec![(format!("{:TEXT_COLUMN$}{title}", ""), palette.fg)],
+            Click::Activate(notification.id),
+        ),
+        (
+            Button::new(top, [COLUMNS - 2, COLUMNS]),
+            vec![(CLOSE.to_string(), palette.fg)],
+            Click::Dismiss(notification.id),
+        ),
+    ]
+}
+
+/// The list's buttons: clear all, Do not disturb, and each listed notification's
+fn list_buttons(store: &Store, palette: &Palette) -> Vec<Entry> {
+    let on = store.do_not_disturb;
+    let (icon, state) = if on { (BELL_OFF, "on") } else { (BELL, "off") };
+    let mut entries = vec![
+        (
+            clear_all(),
+            vec![(CLEAR_ALL.to_string(), palette.fg)],
+            Click::ClearAll,
+        ),
+        (
+            DO_NOT_DISTURB,
+            vec![(
+                justified(&format!("{icon} Do not disturb"), state),
+                label_color(palette, on),
+            )],
+            Click::DoNotDisturb,
+        ),
+    ];
+    for (index, notification) in store.list.iter().rev().take(LISTED).enumerate() {
+        entries.extend(notification_buttons(
+            notification,
+            HEADER_LINES + 2 * index,
+            2,
+            palette,
+        ));
+    }
+    entries
+}
+
 pub fn draw(settings: &Settings, store: &Store, icons: &Icons, hover: Option<Cell>) -> Vec<UITree> {
     let palette = &settings.palette;
     let lines = Lines::new();
     let mut items = vec![lines.text(0, 0, vec![("Notifications".to_string(), palette.fg)])];
-    items.extend(clear_all().draw(
-        &lines,
-        palette,
-        vec![(CLEAR_ALL.to_string(), palette.fg)],
-        false,
-        hover,
-    ));
-    let on = store.do_not_disturb;
-    let (icon, state) = if on { (BELL_OFF, "on") } else { (BELL, "off") };
-    items.extend(DO_NOT_DISTURB.draw(
-        &lines,
-        palette,
-        vec![(
-            justified(&format!("{icon} Do not disturb"), state),
-            label_color(palette, on),
-        )],
-        on,
-        hover,
-    ));
+    for (button, spans, click) in list_buttons(store, palette) {
+        let on = matches!(click, Click::DoNotDisturb) && store.do_not_disturb;
+        items.extend(button.draw(&lines, palette, spans, on, hover));
+    }
     if store.list.is_empty() {
         items.push(lines.text(
             HEADER_LINES,
@@ -162,114 +200,114 @@ pub fn draw(settings: &Settings, store: &Store, icons: &Icons, hover: Option<Cel
         if let Some(icon) = app_icon(notification, icons) {
             items.push(lines.icon(line, 0, icon));
         }
-        let width = COLUMNS - TEXT_COLUMN;
-        items.push(lines.text(
-            line,
-            TEXT_COLUMN,
-            vec![(justified_in(width, &title(notification), CLOSE), palette.fg)],
-        ));
-        let body = wrap(&notification.body, width, 1).pop().unwrap_or_default();
+        let body = wrap(&notification.body, COLUMNS - TEXT_COLUMN, 1)
+            .pop()
+            .unwrap_or_default();
         items.push(lines.text(line + 1, TEXT_COLUMN, vec![(body, palette.inactive)]));
     }
     items
 }
 
-pub fn click(store: &Store, (line, column): Cell) -> Option<Click> {
-    if clear_all().contains((line, column)) {
-        return Some(Click::ClearAll);
-    }
-    if DO_NOT_DISTURB.contains((line, column)) {
-        return Some(Click::DoNotDisturb);
-    }
-    match line {
-        0 | 1 => None,
-        _ => {
-            let index = line.checked_sub(HEADER_LINES)? / 2;
-            let notification = store.list.iter().rev().take(LISTED).nth(index)?;
-            // the ✕ at the end of its first line
-            if (line - HEADER_LINES).is_multiple_of(2) && column + 3 >= COLUMNS {
-                Some(Click::Dismiss(notification.id))
-            } else {
-                Some(Click::Activate(notification.id))
-            }
-        }
-    }
+pub fn click(store: &Store, cell: Cell) -> Option<Click> {
+    list_buttons(store, &Palette::default())
+        .into_iter()
+        .find(|(button, ..)| button.contains(cell))
+        .map(|(.., click)| click)
 }
 
-/// A popping up one's lines (after its icon): title, then its body
-fn popup_lines(notification: &Notification, palette: &Palette) -> Vec<Spans> {
-    let width = COLUMNS - TEXT_COLUMN;
-    let mut lines = vec![vec![(
-        justified_in(width, &title(notification), CLOSE),
-        palette.fg,
-    )]];
-    lines.extend(
-        wrap(&notification.body, width, BODY_LINES)
-            .into_iter()
-            .filter(|line| !line.is_empty())
-            .map(|line| vec![(line, palette.inactive)]),
-    );
-    let buttons = action_buttons(notification);
-    if !buttons.is_empty() {
-        lines.push(
-            buttons
-                .into_iter()
-                .map(|(_, label, _)| (format!("[{label}]  "), palette.accent))
-                .collect(),
-        );
-    }
-    lines
-}
-
-/// Its actions other than `default`, as buttons: key, label and columns (from `TEXT_COLUMN`), while they fit
-fn action_buttons(notification: &Notification) -> Vec<(String, String, [usize; 2])> {
-    let mut column = 0;
-    notification
-        .actions
-        .iter()
-        .filter(|(key, _)| key != "default")
-        .map_while(|(key, label)| {
-            let label = cut(label, 16);
-            // `[label]  `
-            let end = column + columns(&label) + 2;
-            (end <= COLUMNS - TEXT_COLUMN).then(|| {
-                let button = (key.clone(), label, [column, end]);
-                column = end + 2;
-                button
-            })
-        })
+/// A popping up one's body lines, shown under its title
+fn popup_body(notification: &Notification) -> Vec<String> {
+    wrap(&notification.body, COLUMNS - TEXT_COLUMN, BODY_LINES)
+        .into_iter()
+        .filter(|line| !line.is_empty())
         .collect()
 }
 
-/// Its height in lines
-pub fn popup_line_count(notification: &Notification, palette: &Palette) -> usize {
-    popup_lines(notification, palette).len()
+/// A popping up one's buttons: itself and its ✕ over its title and body, then its actions other than `default`
+/// on the last line, `[label]`, while they fit
+fn popup_buttons(notification: &Notification, palette: &Palette) -> Vec<Entry> {
+    let height = 1 + popup_body(notification).len();
+    let mut entries = notification_buttons(notification, 0, height, palette).to_vec();
+    let mut column = TEXT_COLUMN;
+    entries.extend(
+        notification
+            .actions
+            .iter()
+            .filter(|(key, _)| key != "default")
+            .map_while(|(key, label)| {
+                let label = format!("[{}]", cut(label, 16));
+                let end = column + columns(&label);
+                (end <= COLUMNS).then(|| {
+                    let button = Button::new(height, [column, end]);
+                    column = end + 2;
+                    (
+                        button,
+                        vec![(label, palette.accent)],
+                        Click::Action(notification.id, key.clone()),
+                    )
+                })
+            }),
+    );
+    entries
 }
 
-pub fn draw_popup(notification: &Notification, palette: &Palette, icons: &Icons) -> Vec<UITree> {
+/// Its height in lines: title, body, and its actions' line if any
+pub fn popup_line_count(notification: &Notification) -> usize {
+    let actions = popup_buttons(notification, &Palette::default()).len() > 2;
+    1 + popup_body(notification).len() + usize::from(actions)
+}
+
+pub fn draw_popup(
+    notification: &Notification,
+    palette: &Palette,
+    icons: &Icons,
+    hover: Option<Cell>,
+) -> Vec<UITree> {
     let lines = Lines::new();
-    let mut items: Vec<UITree> = popup_lines(notification, palette)
-        .into_iter()
-        .enumerate()
-        .map(|(index, spans)| lines.text(index, TEXT_COLUMN, spans))
-        .collect();
+    let mut items = Vec::new();
+    for (button, spans, _) in popup_buttons(notification, palette) {
+        items.extend(button.draw(&lines, palette, spans, false, hover));
+    }
+    for (index, body) in popup_body(notification).into_iter().enumerate() {
+        items.push(lines.text(1 + index, TEXT_COLUMN, vec![(body, palette.inactive)]));
+    }
     items.extend(app_icon(notification, icons).map(|icon| lines.icon(0, 0, icon)));
     items
 }
 
-pub fn click_popup(notification: &Notification, line: usize, column: usize) -> Click {
-    let palette = Palette::default();
-    let buttons_line = popup_line_count(notification, &palette) - 1;
-    let buttons = action_buttons(notification);
-    if line == 0 && column + 3 >= COLUMNS {
-        return Click::Dismiss(notification.id);
+pub fn click_popup(notification: &Notification, cell: Cell) -> Option<Click> {
+    popup_buttons(notification, &Palette::default())
+        .into_iter()
+        .find(|(button, ..)| button.contains(cell))
+        .map(|(.., click)| click)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn popup_clicks_hit_the_drawn_buttons() {
+        let notification = Notification {
+            id: 7,
+            app_name: "app".to_string(),
+            icon: String::new(),
+            desktop_entry: None,
+            summary: "hi".to_string(),
+            body: "body".to_string(),
+            actions: vec![
+                ("default".to_string(), String::new()),
+                ("reply".to_string(), "Reply".to_string()),
+            ],
+            critical: false,
+            popup_until: None,
+        };
+        // title, body, actions
+        assert_eq!(popup_line_count(&notification), 3);
+        let click = |cell| click_popup(&notification, cell);
+        assert!(matches!(click((0, COLUMNS - 1)), Some(Click::Dismiss(7))));
+        assert!(matches!(click((1, 5)), Some(Click::Activate(7))));
+        assert!(matches!(click((2, TEXT_COLUMN)), Some(Click::Action(7, key)) if key == "reply"));
+        assert!(click((2, COLUMNS - 1)).is_none());
     }
-    if line == buttons_line
-        && let Some((key, ..)) = buttons
-            .into_iter()
-            .find(|(_, _, [from, to])| (from + TEXT_COLUMN..to + TEXT_COLUMN).contains(&column))
-    {
-        return Click::Action(notification.id, key);
-    }
-    Click::Activate(notification.id)
 }

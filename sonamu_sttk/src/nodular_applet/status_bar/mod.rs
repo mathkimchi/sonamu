@@ -282,6 +282,8 @@ pub struct StatusBar {
     hovered: Option<Segment>,
     /// The open popup's line and column under the pointer, for its buttons
     hovered_cell: Option<Cell>,
+    /// The notification popping up under the pointer (by id), and its line and column there
+    hovered_notification: Option<(u32, Cell)>,
 }
 
 /// Under the bar's right end: the notifications popping up, `GAP` apart
@@ -303,6 +305,7 @@ impl StatusBar {
             scrolled: 0.0,
             hovered: None,
             hovered_cell: None,
+            hovered_notification: None,
             icons: Icons::start(changed),
             launcher: None,
             shown: Default::default(),
@@ -486,9 +489,22 @@ impl StatusBar {
             children,
         )];
         if active {
-            for (area, items) in self.popup_notifications(&settings.palette, width) {
+            let store = self.notifications.store.lock().unwrap();
+            for (notification, (id, area)) in
+                store.popups().zip(self.popup_notification_areas(width))
+            {
+                let hover = self
+                    .hovered_notification
+                    .and_then(|(hovered, cell)| (hovered == id).then_some(cell));
+                let items = notification_list::draw_popup(
+                    notification,
+                    &settings.palette,
+                    &self.icons,
+                    hover,
+                );
                 trees.push(popup_frame(settings, area, items));
             }
+            drop(store);
             // not over the hub, which shows the same
             let osd = hub::osd(&self.controls.state.lock().unwrap(), &settings.palette)
                 .filter(|_| !matches!(self.popup, Some(Popup::Hub(_))));
@@ -519,8 +535,8 @@ impl StatusBar {
         trees
     }
 
-    /// The notifications popping up: each one's `[x, y, width, height]` and items, top down
-    fn popup_notifications(&self, palette: &Palette, width: f32) -> Vec<([f32; 4], Vec<UITree>)> {
+    /// The notifications popping up: each one's id and `[x, y, width, height]`, top down
+    fn popup_notification_areas(&self, width: f32) -> Vec<(u32, [f32; 4])> {
         let store = self.notifications.store.lock().unwrap();
         let [w, _] = Lines::size(0, notification_list::COLUMNS);
         let mut y = height() as f32 + POPUP_NOTIFICATION_GAP;
@@ -529,23 +545,31 @@ impl StatusBar {
             .take(notification_list::POPUPS)
             .map(|notification| {
                 let [_, h] = Lines::size(
-                    notification_list::popup_line_count(notification, palette),
+                    notification_list::popup_line_count(notification),
                     notification_list::COLUMNS,
                 );
                 let area = [(width - GAP - w).max(0.0), y, w, h];
                 y += h + POPUP_NOTIFICATION_GAP;
-                (
-                    area,
-                    notification_list::draw_popup(notification, palette, &self.icons),
-                )
+                (notification.id, area)
             })
             .collect()
+    }
+
+    /// The notification popping up at `[x, y]`, and the line and column there
+    fn notification_at(&self, [x, y]: [f64; 2], width: f32) -> Option<(u32, Option<Cell>)> {
+        self.popup_notification_areas(width)
+            .into_iter()
+            .find_map(|(id, area)| {
+                let [ax, ay, aw, ah] = area.map(f64::from);
+                ((ax..ax + aw).contains(&x) && (ay..ay + ah).contains(&y))
+                    .then(|| (id, Lines::new().at([x - ax, y - ay])))
+            })
     }
 
     fn popup_items(&self, settings: &Settings, popup: Popup) -> Vec<UITree> {
         let hover = self.hovered_cell;
         match popup {
-            Popup::Calendar(month) => calendar::draw(settings, month),
+            Popup::Calendar(month) => calendar::draw(settings, month, hover),
             Popup::Resources(sort, list) => resources::draw(
                 settings,
                 &self.system.snapshot.lock().unwrap(),
@@ -566,7 +590,9 @@ impl StatusBar {
             Popup::Hub(open) => {
                 hub::draw(settings, &self.controls.state.lock().unwrap(), open, hover)
             }
-            Popup::TrayMenu => tray::draw_menu(settings, self.tray.menu.lock().unwrap().as_ref()),
+            Popup::TrayMenu => {
+                tray::draw_menu(settings, self.tray.menu.lock().unwrap().as_ref(), hover)
+            }
         }
     }
 
@@ -626,7 +652,7 @@ impl StatusBar {
             .flatten();
         let hover_changed = hovered != self.hovered;
         self.hovered = hovered;
-        let mut response = self.mouse(&placed, palette, event, width);
+        let mut response = self.mouse(&placed, event, width);
         // after: the popup may have changed
         let cell = self.popup.and_then(|popup| {
             let [ax, ay, aw, ah] = self.popup_area(popup, &placed, width).map(f64::from);
@@ -634,19 +660,17 @@ impl StatusBar {
                 .then(|| Lines::new().at([x - ax, y - ay]))
                 .flatten()
         });
-        let cell_changed = cell != self.hovered_cell;
+        let notification = self
+            .notification_at([x, y], width)
+            .and_then(|(id, cell)| Some((id, cell?)));
+        let cell_changed = cell != self.hovered_cell || notification != self.hovered_notification;
         self.hovered_cell = cell;
+        self.hovered_notification = notification;
         response.damaged |= hover_changed || cell_changed;
         response
     }
 
-    fn mouse(
-        &mut self,
-        placed: &[Placed],
-        palette: &Palette,
-        event: &MouseEvent,
-        width: f32,
-    ) -> BarResponse {
+    fn mouse(&mut self, placed: &[Placed], event: &MouseEvent, width: f32) -> BarResponse {
         let [x, y] = event.position;
         let on_bar = y < f64::from(height());
         if let MouseEventKind::Scroll { delta, v120, .. } = event.kind {
@@ -688,7 +712,7 @@ impl StatusBar {
                 }
             }
         }
-        if let Some(response) = self.mouse_on_popup_notification(palette, [x, y], width, pressed) {
+        if let Some(response) = self.mouse_on_popup_notification([x, y], width, pressed) {
             return response;
         }
         if !on_bar {
@@ -817,28 +841,18 @@ impl StatusBar {
     /// A mouse event at `[x, y]` over a notification popping up (a click dismisses or activates it)
     fn mouse_on_popup_notification(
         &self,
-        palette: &Palette,
-        [x, y]: [f64; 2],
+        position: [f64; 2],
         width: f32,
         pressed: bool,
     ) -> Option<BarResponse> {
-        let ([ax, ay, ..], index) = self
-            .popup_notifications(palette, width)
-            .into_iter()
-            .enumerate()
-            .find_map(|(index, ([ax, ay, aw, ah], _))| {
-                let [ax, ay, aw, ah] = [ax, ay, aw, ah].map(f64::from);
-                ((ax..ax + aw).contains(&x) && (ay..ay + ah).contains(&y))
-                    .then_some(([ax, ay, aw, ah], index))
-            })?;
+        let (id, cell) = self.notification_at(position, width)?;
         if pressed {
             let click = {
                 let store = self.notifications.store.lock().unwrap();
-                let notification = store.popups().nth(index);
-                let at = Lines::new().at([x - ax, y - ay]);
+                let notification = store.popups().find(|n| n.id == id);
                 notification
-                    .zip(at)
-                    .map(|(n, (line, column))| notification_list::click_popup(n, line, column))
+                    .zip(cell)
+                    .and_then(|(n, cell)| notification_list::click_popup(n, cell))
             };
             if let Some(click) = click {
                 self.apply_notification_click(click);
@@ -895,9 +909,8 @@ impl StatusBar {
         let Some(cell) = Lines::new().at(position) else {
             return false;
         };
-        let (line, column) = cell;
         let popup = match popup {
-            Popup::Calendar(month) => calendar::click(month, line, column).map(Popup::Calendar),
+            Popup::Calendar(month) => calendar::click(month, cell).map(Popup::Calendar),
             Popup::Resources(sort, list) => {
                 // not matched on directly: the lock would be held through `set_profile`'s
                 let click = resources::click(&self.system.snapshot.lock().unwrap(), sort, cell);
@@ -920,7 +933,7 @@ impl StatusBar {
                 return true;
             }
             Popup::TrayMenu => {
-                let id = tray::menu_click(self.tray.menu.lock().unwrap().as_ref(), line);
+                let id = tray::menu_click(self.tray.menu.lock().unwrap().as_ref(), cell);
                 let Some(id) = id else {
                     return false;
                 };
@@ -941,7 +954,7 @@ impl StatusBar {
                 let launched = self
                     .launcher
                     .as_ref()
-                    .is_some_and(|launcher| launcher.click(line));
+                    .is_some_and(|launcher| launcher.click(cell.0));
                 if launched {
                     self.set_popup(None);
                 }

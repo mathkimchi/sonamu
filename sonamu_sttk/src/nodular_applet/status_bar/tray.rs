@@ -424,6 +424,7 @@ pub fn menu_size(menu: Option<&Menu>) -> [f32; 2] {
 pub fn draw_menu(
     settings: &sonamu_common::settings::Settings,
     menu: Option<&Menu>,
+    hover: Option<super::widgets::Cell>,
 ) -> Vec<sonamu_ui::ui_element::UITree> {
     let palette = &settings.palette;
     let lines = super::Lines::new();
@@ -433,13 +434,13 @@ pub fn draw_menu(
     menu.entries
         .iter()
         .enumerate()
-        .map(|(index, entry)| {
+        .flat_map(|(index, entry)| {
             if entry.separator {
-                return lines.text(
+                return vec![lines.text(
                     index,
                     0,
                     vec![("─".repeat(MENU_COLUMNS), palette.raised(30))],
-                );
+                )];
             }
             let check = match entry.checked {
                 Some(true) => "✓ ",
@@ -447,22 +448,26 @@ pub fn draw_menu(
                 None => "",
             };
             let label = format!("{}{check}{}", "  ".repeat(entry.depth), entry.label);
-            let color = if entry.enabled {
-                palette.fg
-            } else {
-                palette.inactive
-            };
-            lines.text(
-                index,
-                0,
-                vec![(super::notification_list::cut(&label, MENU_COLUMNS), color)],
+            let label = super::notification_list::cut(&label, MENU_COLUMNS);
+            if !entry.enabled {
+                return vec![lines.text(index, 0, vec![(label, palette.inactive)])];
+            }
+            super::widgets::Button::row(index, MENU_COLUMNS).draw(
+                &lines,
+                palette,
+                vec![(label, palette.fg)],
+                false,
+                hover,
             )
         })
         .collect()
 }
 
-/// The clickable entry on `line`
-pub fn menu_click(menu: Option<&Menu>, line: usize) -> Option<i32> {
+/// The clickable entry at `cell`
+pub fn menu_click(menu: Option<&Menu>, cell: super::widgets::Cell) -> Option<i32> {
+    let (line, _) = cell;
     let entry = menu?.entries.get(line)?;
-    (entry.enabled && !entry.separator).then_some(entry.id)
+    let clickable = entry.enabled && !entry.separator;
+    (clickable && super::widgets::Button::row(line, MENU_COLUMNS).contains(cell))
+        .then_some(entry.id)
 }

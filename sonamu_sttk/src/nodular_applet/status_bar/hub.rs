@@ -332,10 +332,7 @@ pub fn draw(
             items.push(text.text(index, 0, spans));
         }
         for (columns, spans, on, _) in buttons {
-            let button = Button {
-                line: index,
-                columns,
-            };
+            let button = Button::new(index, columns);
             items.extend(button.draw(&text, palette, spans, on, hover));
         }
     }
@@ -345,13 +342,9 @@ pub fn draw(
 pub fn click(state: &State, open: Option<Section>, (line, column): Cell) -> Option<Click> {
     let shown = lines(state, open).into_iter().nth(line)?;
     let (_, buttons) = line_parts(shown.clone(), state, open, &Palette::default());
-    let button = buttons.into_iter().find(|(columns, ..)| {
-        Button {
-            line,
-            columns: *columns,
-        }
-        .contains((line, column))
-    });
+    let button = buttons
+        .into_iter()
+        .find(|(columns, ..)| Button::new(line, *columns).contains((line, column)));
     if let Some((.., click)) = button {
         return Some(click);
     }

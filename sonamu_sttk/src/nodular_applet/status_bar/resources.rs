@@ -162,10 +162,7 @@ pub fn draw(
     if let Some(profile) = &snapshot.profile {
         for ((label, columns), name) in PROFILE_BUTTONS.iter().zip(PROFILES) {
             let on = profile == name;
-            let button = Button {
-                line: PROFILE_LINE,
-                columns: *columns,
-            };
+            let button = Button::new(PROFILE_LINE, *columns);
             items.extend(button.draw(
                 &lines,
                 palette,
@@ -183,10 +180,7 @@ pub fn draw(
     for (label, by, columns) in SORT_BUTTONS {
         let on = by == sort;
         let label = format!("{label}{}", if on { "▾" } else { " " });
-        let button = Button {
-            line: SORT_LINE,
-            columns,
-        };
+        let button = Button::new(SORT_LINE, columns);
         let color = if on { palette.accent } else { palette.inactive };
         items.extend(button.draw(&lines, palette, vec![(label, color)], false, hover));
     }
@@ -245,22 +239,12 @@ pub fn click(snapshot: &Snapshot, sort: Sort, cell: Cell) -> Option<Click> {
         && let Some((_, name)) = PROFILE_BUTTONS
             .iter()
             .zip(PROFILES)
-            .find(|((_, columns), _)| {
-                Button {
-                    line: PROFILE_LINE,
-                    columns: *columns,
-                }
-                .contains(cell)
-            })
+            .find(|((_, columns), _)| Button::new(PROFILE_LINE, *columns).contains(cell))
     {
         return Some(Click::Profile(name));
     }
-    let (_, by, _) = SORT_BUTTONS.into_iter().find(|(_, _, columns)| {
-        Button {
-            line: SORT_LINE,
-            columns: *columns,
-        }
-        .contains(cell)
-    })?;
+    let (_, by, _) = SORT_BUTTONS
+        .into_iter()
+        .find(|(_, _, columns)| Button::new(SORT_LINE, *columns).contains(cell))?;
     (by != sort).then_some(Click::Sort(by))
 }

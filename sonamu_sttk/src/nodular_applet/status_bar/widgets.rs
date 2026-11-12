@@ -9,23 +9,37 @@ use std::ops::Range;
 /// A popup's line and column, eg under the pointer
 pub type Cell = (usize, usize);
 
-/// A clickable label: `columns` (from..to) of line `line`. The same one draws and hit-tests, so they agree.
+/// A clickable label: `columns` (from..to) of `height` lines from `line`. The same one draws and hit-tests, so they
+/// agree.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Button {
-    pub line: usize,
-    pub columns: [usize; 2],
+    line: usize,
+    columns: [usize; 2],
+    height: usize,
 }
 impl Button {
-    /// Across the popup's `width` columns
-    pub const fn row(line: usize, width: usize) -> Self {
+    pub const fn new(line: usize, columns: [usize; 2]) -> Self {
         Self {
             line,
-            columns: [0, width],
+            columns,
+            height: 1,
         }
     }
 
+    /// Across the popup's `width` columns
+    pub const fn row(line: usize, width: usize) -> Self {
+        Self::new(line, [0, width])
+    }
+
+    /// `height` lines tall (its label is on the first)
+    #[must_use]
+    pub const fn tall(self, height: usize) -> Self {
+        Self { height, ..self }
+    }
+
     pub fn contains(&self, (line, column): Cell) -> bool {
-        line == self.line && (self.columns[0]..self.columns[1]).contains(&column)
+        (self.line..self.line + self.height).contains(&line)
+            && (self.columns[0]..self.columns[1]).contains(&column)
     }
 
     /// `spans` from its start, lit while `on` (eg the current choice), lighter while `hover` is on it
@@ -45,8 +59,11 @@ impl Button {
             (false, false) => None,
         };
         let mut items: Vec<UITree> = background
-            .map(|color| lines.highlight(self.line, self.columns, color))
             .into_iter()
+            .flat_map(|color| {
+                (self.line..self.line + self.height)
+                    .map(move |line| lines.highlight(line, self.columns, color))
+            })
             .collect();
         items.push(lines.text(self.line, self.columns[0], spans).with_pointer());
         items
@@ -148,12 +165,11 @@ mod tests {
 
     #[test]
     fn buttons_hit_their_columns() {
-        let button = Button {
-            line: 2,
-            columns: [4, 8],
-        };
+        let button = Button::new(2, [4, 8]);
         assert!(button.contains((2, 4)));
         assert!(!button.contains((2, 8)));
         assert!(!button.contains((1, 5)));
+        assert!(button.tall(2).contains((3, 5)));
+        assert!(!button.tall(2).contains((4, 5)));
     }
 }
