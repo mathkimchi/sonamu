@@ -827,6 +827,7 @@ impl ProjectApplet {
     fn overview_header(width: f32, count: usize, options: bool) -> Vec<UITree> {
         let settings = settings::get();
         let layout = overview_rows();
+        // darker inside, cut to its rounded corners
         let header = ui::frame(
             settings.border.unfocused,
             settings.radius,
@@ -835,7 +836,10 @@ impl ProjectApplet {
                 [PAD / 2.0; 2],
                 [(width - PAD).max(0.0), count as f32 * row_height() + PAD],
             ),
-            Vec::new(),
+            vec![UITree::leaf_styled(
+                UIElement::Backgrounded(with_opacity(settings.palette.sunken(30))),
+                Style::full_size(),
+            )],
         );
         let cell = NEW_CELL * font_size();
         let new_cells = (0..)

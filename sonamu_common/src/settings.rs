@@ -265,6 +265,12 @@ impl Palette {
         mix(self.bg, self.fg, percent)
     }
 
+    /// `bg` moved `percent` toward black: darker shades of the background (eg the project overview's header 30)
+    #[must_use]
+    pub fn sunken(&self, percent: u8) -> Color {
+        mix(self.bg, Color::BLACK, percent)
+    }
+
     /// `bg` moved `percent` toward `accent` (eg a selected row)
     #[must_use]
     pub fn tinted(&self, percent: u8) -> Color {
