@@ -21,34 +21,16 @@
 
 -- Beeper starts in the tray: settings' `startup` leaves a flag and starts it; its first window is closed, which hides
 -- it to the tray (unless Beeper's quit_on_close is set). Only once: the flag is gone after, even on sonamu.reset().
-local function find_window(node, name)
-	local window = wl_surface.from_node(node)
-	if window and (window:app_id() or ""):lower():find(name, 1, true) then
-		return node
-	end
-	local inner = node:inner()
-	local found = inner and find_window(inner, name)
-	if found then
-		return found
-	end
-	for _, child in node:children() do
-		found = find_window(child, name)
-		if found then
-			return found
-		end
-	end
-	return nil
-end
-events.on("window", function(app_id)
-	if not app_id or not app_id:lower():find("beeper", 1, true) then
+events.on("open", function(node)
+	-- only wl tiles have `app_id`
+	local ok, app_id = pcall(function()
+		return node:app_id()
+	end)
+	if not ok or not app_id or not app_id:lower():find("beeper", 1, true) then
 		return
 	end
 	local flag = process.output("sh", { "-c", 'rm "$XDG_RUNTIME_DIR/sonamu-hide-beeper" 2>/dev/null && echo yes; true' })
-	if flag ~= "yes\n" then
-		return
-	end
-	local window = find_window(context.root(), "beeper")
-	if window then
-		window:close()
+	if flag == "yes\n" then
+		node:close()
 	end
 end)

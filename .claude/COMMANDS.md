@@ -205,6 +205,8 @@ Untested:
 - `sonamu.definitions()` not checked with luau-lsp.
 
 Gaps:
+- Hibernated stand-ins keep their saved type (eg `wl_surface`), so `from_node`/`cast` pass but their commands fail
+  ("no command `app_id`"); `pcall` them.
 - One queue: evals, completions, bindings and hooks run one at a time, so a slow `sonamu-msg eval` or sync
   `process.output` delays the buffer line and Luau keybinds (decided: keep it; Ctrl+C, and the callback form).
 - Clipboard: the code editor can't copy (it has no selection yet; add a copy key once it has one).
