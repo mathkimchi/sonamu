@@ -1,4 +1,5 @@
 mod capture;
+mod floating;
 pub(crate) mod dmabuf;
 mod layer_shell;
 
@@ -198,8 +199,10 @@ pub struct SmithayState {
     layer_placements: Vec<layer_shell::LayerPlacement>,
     /// Output minus the exclusive zones, in logical units: where the root's content goes
     usable_area: Rectangle<i32, Logical>,
-    /// The layer surface (not an exclusive one) that a click gave the keyboard
+    /// The layer surface (not an exclusive one) or floating toplevel that a click gave the keyboard
     layer_focus: Option<WlSurface>,
+    /// Floating toplevels (`floating`), topmost last, with the screen each is centered on
+    floating: Vec<(ToplevelSurface, [u32; 4])>,
     /// The tile that Sonamu focus asked the keyboard to be on
     pub(crate) wl_target: Option<WlSurfaceId>,
     /// The screens' areas (`[x, y, width, height]`, window px): the monitors', or the whole window
@@ -210,7 +213,7 @@ pub struct SmithayState {
     /// The pointer is on a layer surface, or a button pressed on one is still held
     pointer_on_layer: bool,
     layer_buttons_down: u32,
-    /// Toplevels not yet told to the root: they are on their first commit, once they have set their app id
+    /// Toplevels not yet told to the root (or floated): they are once they map (`register_toplevel`)
     unregistered: Vec<WlSurfaceId>,
     // image: Arc<Mutex<Option<RgbaImage>>>,
     // // I think it might be more efficient to share the seat
@@ -481,6 +484,7 @@ impl SmithayState {
             .filter(|(surface_id, _)| self.tile_areas.contains_key(surface_id))
             .map(|(_, surface)| surface)
             .chain(self.layer_surfaces.iter().map(LayerSurface::wl_surface))
+            .chain(self.floating_roots())
         {
             send_frames_surface_tree(root, &presentation);
             for (popup, _) in PopupManager::popups_for_surface(root) {
@@ -546,6 +550,7 @@ impl SmithayState {
             .surfaces
             .values()
             .chain(self.layer_surfaces.iter().map(LayerSurface::wl_surface))
+            .chain(self.floating_roots())
         {
             self.send_scale(root);
             for (popup, _) in PopupManager::popups_for_surface(root) {
@@ -838,6 +843,7 @@ impl SmithayState {
             wl_event_queues: SecondaryMap::new(),
             unregistered: Vec::new(),
             layer_surfaces: Vec::new(),
+            floating: Vec::new(),
             layer_placements: Vec::new(),
             usable_area: Rectangle::default(),
             layer_focus: None,
@@ -1519,8 +1525,9 @@ impl AppletRunner {
         }
     }
 
-    /// Tells the root about a new toplevel on its first commit, when its app id is set
-    /// (it is matched by pid and app id to a restored tile)
+    /// Tells the root about a new toplevel (or floats it) once it maps (commits a buffer): its app id is set
+    /// (it is matched by pid and app id to a restored tile), and so are its parent and size limits (GTK 3 sets
+    /// a fixed size only then)
     fn register_toplevel(&mut self, surface: &WlSurface) {
         let state = &mut self.smithay_state;
         let Some(index) = state
@@ -1530,7 +1537,24 @@ impl AppletRunner {
         else {
             return;
         };
+        let mapped = with_states(surface, |states| {
+            states
+                .data_map
+                .get::<RendererSurfaceStateUserData>()
+                .is_some_and(|data| data.lock().unwrap().buffer().is_some())
+        });
+        if !mapped {
+            return;
+        }
         let surface_id = state.unregistered.remove(index);
+        if let Some(toplevel) = state
+            .toplevel_of(surface)
+            .filter(floating::floats)
+        {
+            state.surfaces.remove(surface_id);
+            self.float(toplevel);
+            return;
+        }
         let (app_id, title) = with_states(surface, |states| {
             states
                 .data_map
@@ -1782,7 +1806,7 @@ impl XdgShellHandler for AppletRunner {
 
         // keyboard focus is given once Sonamu focus reaches the new tile (`StandardRequest::WlKeyboardFocus`)
 
-        // add surface to list of surfaces; the root is told on its first commit (`register_toplevel`)
+        // add surface to list of surfaces; the root is told once it maps (`register_toplevel`)
         let surface_id = self
             .smithay_state
             .surfaces
@@ -1827,6 +1851,9 @@ impl XdgShellHandler for AppletRunner {
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        if self.floating_destroyed(&surface) {
+            return;
+        }
         // Without this the slotmap keeps a dead `WlSurface` forever
         let wl_surface = surface.wl_surface();
         let Some(surface_id) = self

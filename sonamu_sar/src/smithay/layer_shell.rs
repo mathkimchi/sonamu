@@ -239,18 +239,52 @@ impl SmithayState {
         layers
     }
 
-    /// Where the layer surface is in the output, if `root` is one that has been placed
+    /// Where the layer surface (or floating toplevel) is in the output, if `root` is one that has been placed
     pub(super) fn layer_rect(&self, root: &WlSurface) -> Option<Rectangle<i32, Logical>> {
         self.layer_placements
             .iter()
             .find(|placement| placement.surface.wl_surface() == root)
             .map(|placement| placement.rect)
+            .or_else(|| self.floating_rect(root))
     }
 
-    /// The topmost layer surface surface under `position` (window px), and its origin (output logical units).
-    /// Background and bottom layers are only hit outside the root's content.
+    /// The topmost of `layers` under `point` that takes input there, and its origin
+    fn layer_hit(
+        layers: Vec<SurfaceLayer>,
+        point: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        layers
+            .into_iter()
+            .rev()
+            .find(|layer| {
+                let local = point - layer.location.to_f64();
+                Rectangle::new(layer.location, layer.view.dst)
+                    .to_f64()
+                    .contains(point)
+                    && with_states(&layer.surface, |states| {
+                        states
+                            .cached_state
+                            .get::<SurfaceAttributes>()
+                            .current()
+                            .input_region
+                            .as_ref()
+                            .is_none_or(|region| region.contains(local.to_i32_floor()))
+                    })
+            })
+            .map(|layer| (layer.surface, layer.location.to_f64()))
+    }
+
+    /// The topmost floating toplevel or layer surface surface under `position` (window px), and its origin
+    /// (output logical units). Background and bottom layers are only hit outside the root's content.
     fn layer_surface_under(&self, position: [f64; 2]) -> Option<(WlSurface, Point<f64, Logical>)> {
         let point = Point::<f64, Physical>::from((position[0], position[1])).to_logical(self.scale);
+        if let Some(hit) = self
+            .floating_roots()
+            .rev()
+            .find_map(|root| Self::layer_hit(self.floating_layers(root), point))
+        {
+            return Some(hit);
+        }
         let in_content = self.usable_area.to_f64().contains(point);
         self.layer_placements.iter().find_map(|placement| {
             if in_content && matches!(placement.layer, Layer::Background | Layer::Bottom) {
@@ -260,29 +294,11 @@ impl SmithayState {
             if self.fullscreen.is_some() && placement.layer != Layer::Overlay {
                 return None;
             }
-            Self::layer_tree_layers(placement)
-                .into_iter()
-                .rev()
-                .find(|layer| {
-                    let local = point - layer.location.to_f64();
-                    Rectangle::new(layer.location, layer.view.dst)
-                        .to_f64()
-                        .contains(point)
-                        && with_states(&layer.surface, |states| {
-                            states
-                                .cached_state
-                                .get::<SurfaceAttributes>()
-                                .current()
-                                .input_region
-                                .as_ref()
-                                .is_none_or(|region| region.contains(local.to_i32_floor()))
-                        })
-                })
-                .map(|layer| (layer.surface, layer.location.to_f64()))
+            Self::layer_hit(Self::layer_tree_layers(placement), point)
         })
     }
 
-    /// Whether the layer surface (not an exclusive one) can take the keyboard when clicked
+    /// Whether the layer surface (not an exclusive one) or floating toplevel can take the keyboard when clicked
     fn takes_keyboard(&self, root: &WlSurface) -> bool {
         self.layer_placements.iter().any(|placement| {
             placement.surface.wl_surface() == root
@@ -290,7 +306,7 @@ impl SmithayState {
                     .surface
                     .with_cached_state(|state| state.keyboard_interactivity)
                     != KeyboardInteractivity::None
-        })
+        }) || self.floating_roots().any(|floating| floating == root)
     }
 
     /// The layer surface that has the keyboard: the topmost exclusive one on the top or overlay layer,
@@ -384,7 +400,7 @@ impl AppletRunner {
 
     /// Gives the keyboard to the layer surface that should have it,
     /// or back to Sonamu's focus if a layer surface has it and shouldn't
-    fn refresh_keyboard_focus(&mut self) {
+    pub(super) fn refresh_keyboard_focus(&mut self) {
         if let Some(layer) = self.smithay_state.keyboard_layer() {
             self.focus_wl_keyboard_on(layer);
             return;

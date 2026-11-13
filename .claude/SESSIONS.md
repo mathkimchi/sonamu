@@ -34,7 +34,7 @@ Sonamu owns the session; apps' own session restore should be off.
 - **Wl clients**:
   - Saved from `/proc/<pid>`: `cmdline`, and the cwd of its first child (eg a terminal's shell), else its own.
     The pid comes from the client's socket credentials.
-  - The compositor now tells the root about a toplevel on its **first commit** (`register_toplevel`), not in
+  - The compositor now tells the root about a toplevel once it **maps** (first buffer, `register_toplevel`; #148), not in
     `new_toplevel`, so its app id is set. Its title is sent right after, since `title_changed` came before the root knew.
   - Restoring spawns the command (on the holder's thread). The node gets `awaiting: AwaitedWl { pid, app_id }`
     and a `RestoringApplet` ("Starting ..."). The child is reaped on a thread.

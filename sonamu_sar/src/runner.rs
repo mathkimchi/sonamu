@@ -603,7 +603,7 @@ impl AppletRunner {
     fn redraw_ui(&mut self) {
         // background and bottom layers, the root's content in the area left by the exclusive zones
         // (or a fullscreen toplevel over the whole window instead of them),
-        // then top (unless fullscreen) and overlay layers, then what's plucked
+        // then top (unless fullscreen) and overlay layers, floating toplevels, then what's plucked
         // other screens still show the root
         let mut layers =
             if self.smithay_state.fullscreen().is_some() && self.smithay_state.screens.len() <= 1 {
@@ -652,6 +652,11 @@ impl AppletRunner {
             &self.ui_handle.device,
             &self.ui_handle.queue,
         ));
+        // floating toplevels (#148) over all of them
+        layers.extend(
+            self.smithay_state
+                .floating_elements(&self.ui_handle.device, &self.ui_handle.queue),
+        );
         layers.extend(self.plucked_ghost());
         let mut content = UITree::new_container(layers);
         if self.magnification > 1.0 {

@@ -22,7 +22,7 @@ Delete a line when done.
 Done: save and restore the tree (`.claude/SESSIONS.md`). Left, from its "Issues found":
 
 - [ ] Keep `awaiting` when a "Starting ..." tile is plucked or wrapped
-- [ ] Skip or nest dialogs (toplevels with a parent)
+- [x] Skip or nest dialogs (toplevels with a parent): they float (#148)
 - [ ] Try qutebrowser, firefox and foot
 
 ## Wayland
