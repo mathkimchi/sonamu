@@ -2150,11 +2150,17 @@ impl NodeTree {
         };
         let ends = [Some(swipe.from), swipe.to];
         // siblings: the strip they are in
-        let parent = self.nodes[swipe.from].parent.filter(|&parent| {
-            swipe
-                .to
-                .is_some_and(|to| self.nodes[to].parent == Some(parent))
-        });
+        // an end may have closed during the swipe
+        let parent = self
+            .nodes
+            .get(swipe.from)
+            .and_then(|node| node.parent)
+            .filter(|&parent| {
+                swipe
+                    .to
+                    .and_then(|to| self.nodes.get(to))
+                    .is_some_and(|node| node.parent == Some(parent))
+            });
         let mut scrolls = [0; 2];
         let panes = ends.map(|end| {
             end.filter(|&id| self.nodes.contains_key(id))
