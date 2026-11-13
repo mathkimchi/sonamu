@@ -50,3 +50,15 @@ Found while debugging #60; nothing here is in the repo's code.
   (`GetLayout` children as `zbus::Structure::from((id, props, children))` variants) and calling the watcher's
   `RegisterStatusNotifierItem` stands in for an app (`cargo build --offline` once zbus is cached); run it inside the
   same `dbus-run-session` as Sonamu. Right click: `click 273` (BTN_RIGHT) in the pointer client.
+- Lost wl tabs (2026-11-12): a client the server drops has no protocol error, just `ConnectionClosed` in Sonamu's log
+  and `Broken pipe` from the client: its buffer filled (wayland-backend kills it), eg a resize flood. The real
+  session logs to `~/.local/state/sonamu.log` (has the monitors' sizes). Reproduced headless with a temporary
+  env-gated timer in `AppletRunner::run` feeding `handle_ui_event` mouse moves/clicks and swipes, screens forced to
+  the user's sizes (different sizes mattered), and a log line per `WlSurfaceRequest::Resize`. Unit fuzz:
+  `root_node_applet::tests::swipes_keep_every_tab` (its tabs fail on sizes flipping back and forth).
+- Lost wl tabs (2026-11-12): a client the server drops has no protocol error, just `ConnectionClosed` in Sonamu's log
+  and `Broken pipe` from the client: its buffer filled (wayland-backend kills it), eg a resize flood. The real
+  session logs to `~/.local/state/sonamu.log` (has the monitors' sizes). Reproduced headless with a temporary
+  env-gated timer in `AppletRunner::run` feeding `handle_ui_event` mouse moves/clicks and swipes, screens forced to
+  the user's sizes (different sizes mattered), and a log line per `WlSurfaceRequest::Resize`. Unit fuzz:
+  `root_node_applet::tests::swipes_keep_every_tab` (its tabs fail on sizes flipping back and forth).

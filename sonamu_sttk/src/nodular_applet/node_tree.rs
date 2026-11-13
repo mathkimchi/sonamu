@@ -1862,6 +1862,11 @@ impl NodeTree {
             shown.extend(panes.iter().map(|pane| pane.node));
             self.panes = panes;
             self.layout_swipe(size);
+            // the swipe sized its ends' applets too; resizing them back for another screen each batch floods
+            // wl clients with configures until they're dropped (closing their tabs)
+            if let Some(swipe) = &self.swipe {
+                shown.extend(swipe.panes.iter().flatten().map(|pane| pane.node));
+            }
         }
         for index in 0..self.screens.len() {
             if index == self.active_screen {
