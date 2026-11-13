@@ -710,27 +710,8 @@ impl RootNodeApplet {
                 // the user's `init.luau`, now that the tree's commands work
                 sonamu_script::start();
 
-                // after each batch of events, since any of them may move focus or damage
                 event_loop
-                    .run(None, &mut root, |root| {
-                        root.holder.finish();
-                        if std::mem::take(&mut root.holder.quit) {
-                            root.ask_quit();
-                        }
-                        root.holder.tree.update_view_root();
-                        root.update_view_path();
-                        root.remember_focus();
-                        root.damage_if_tree_changed();
-                        root.update_treeview_visibility();
-                        root.holder.tree.update_layout();
-                        // a frame each time the runner reads the last one
-                        if root.holder.tree.zoom_animating() {
-                            root.surface.damage();
-                        }
-                        root.holder.update_wl_focus();
-                        root.flush_surface();
-                        root.send_bar_state();
-                    })
+                    .run(None, &mut root, RootNodeApplet::after_batch)
                     .unwrap();
             }
         }
@@ -739,6 +720,27 @@ impl RootNodeApplet {
             applet_spawner_registry,
             session_path,
         })
+    }
+
+    /// After each batch of events, since any of them may move focus or damage
+    fn after_batch(&mut self) {
+        self.holder.finish();
+        if std::mem::take(&mut self.holder.quit) {
+            self.ask_quit();
+        }
+        self.holder.tree.update_view_root();
+        self.update_view_path();
+        self.remember_focus();
+        self.damage_if_tree_changed();
+        self.update_treeview_visibility();
+        self.holder.tree.update_layout();
+        // a frame each time the runner reads the last one
+        if self.holder.tree.zoom_animating() {
+            self.surface.damage();
+        }
+        self.holder.update_wl_focus();
+        self.flush_surface();
+        self.send_bar_state();
     }
 
     /// From the runner
@@ -1612,4 +1614,377 @@ fn buffer_line(
             grid.element().into(),
         ],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nodular_applet::{
+        AppletContext, AppletSpawner, AppletSpawnerTrait, NodularAppletInitializer, StandardApplet,
+    };
+    use calloop::EventLoop;
+    use sonamu_common::sap::session::{SavedApplet, SavedTree};
+    use sonamu_ui::ui_element::PrimitiveScene;
+
+    /// A tab that saves itself, like a code editor
+    struct Tab {
+        name: String,
+        /// Its last two sizes, and how many times in a row it went back to the one before
+        sizes: [Option<DisplayContainerSize>; 2],
+        flips: u32,
+    }
+    impl StandardApplet for Tab {
+        /// A wl client sized like this crashes or is flooded with configures and dropped, closing its tab
+        fn handle_standard_event(&mut self, event: StandardEvent) {
+            if let StandardEvent::UIEvent(UIEvent::WindowResized(size)) = event {
+                // no bigger than a screen, nor collapsed
+                assert!(
+                    (20..=2560).contains(&size.width) && (20..=1600).contains(&size.height),
+                    "{} resized to {size:?}",
+                    self.name
+                );
+                // switching screens back and forth flips it too, but not this often in a row
+                self.flips = if self.sizes[0] == Some(size) {
+                    self.flips + 1
+                } else {
+                    0
+                };
+                assert!(
+                    self.flips < 8,
+                    "{} resized back and forth: {:?}",
+                    self.name,
+                    self.sizes
+                );
+                self.sizes = [self.sizes[1], Some(size)];
+            }
+        }
+
+        fn get_window_standard_applet(&self, _size: DisplayContainerSize) -> UITree {
+            ui::text(self.name.clone(), settings::get().palette.inactive).into()
+        }
+
+        fn get_treeview(&self) -> WorldTree<String> {
+            WorldTree::new_base(self.name.clone())
+        }
+
+        fn save(&self) -> Option<SavedApplet> {
+            Some(SavedApplet::Spawner {
+                name: "tab".to_string(),
+                args: vec![self.name.clone()],
+                inner: None,
+            })
+        }
+    }
+
+    struct TabSpawner;
+    impl AppletSpawnerTrait for TabSpawner {
+        fn create_initializer(&self, args: &[&str]) -> Option<NodularAppletInitializer> {
+            let name = (*args.first()?).to_string();
+            Some(NodularAppletInitializer::new(move |_: AppletContext| {
+                Box::new(Tab {
+                    name,
+                    sizes: [None; 2],
+                    flips: 0,
+                }) as Box<dyn StandardApplet>
+            }))
+        }
+
+        fn duplicate(&self) -> AppletSpawner {
+            Box::new(Self)
+        }
+    }
+
+    fn tab(name: &str, children: Vec<SavedTree>) -> SavedTree {
+        SavedTree {
+            main: Some(SavedApplet::Spawner {
+                name: "tab".to_string(),
+                args: vec![name.to_string()],
+                inner: None,
+            }),
+            children,
+            half: false,
+            label: None,
+            directory: None,
+            icon: None,
+        }
+    }
+
+    fn container(label: Option<&str>, children: Vec<SavedTree>) -> SavedTree {
+        SavedTree {
+            main: None,
+            children,
+            half: false,
+            label: label.map(str::to_string),
+            directory: None,
+            icon: None,
+        }
+    }
+
+    fn project(name: &str, children: Vec<SavedTree>) -> SavedTree {
+        SavedTree {
+            main: Some(SavedApplet::Spawner {
+                name: ProjectApplet::SPAWNER.to_string(),
+                args: Vec::new(),
+                inner: Some(Box::new(container(Some(name), children))),
+            }),
+            ..container(None, Vec::new())
+        }
+    }
+
+    /// Random children, like a real session: projects nested deep, tabs with layers of children, half width
+    /// ones, containers; tabs are numbered from `tabs`
+    fn random_children(rng: &mut Rng, depth: u32, tabs: &mut usize) -> Vec<SavedTree> {
+        let count = if depth == 0 { 0 } else { 1 + rng.below(3) };
+        (0..count)
+            .map(|_| {
+                let children = random_children(rng, depth - 1, tabs);
+                let mut tree = match rng.below(6) {
+                    0 => project(&format!("p{}", rng.below(100)), children),
+                    1 => container(None, children),
+                    _ => {
+                        *tabs += 1;
+                        tab(&(*tabs - 1).to_string(), children)
+                    }
+                };
+                tree.half = rng.below(4) == 0;
+                tree
+            })
+            .collect()
+    }
+
+    /// How many times each tab is in the saved tree (running or not, also inside projects)
+    fn tab_counts(tree: &SavedTree, counts: &mut [usize]) {
+        match &tree.main {
+            Some(SavedApplet::Spawner { name, args, .. }) if name == "tab" => {
+                counts[args[0].parse::<usize>().unwrap()] += 1;
+            }
+            Some(SavedApplet::Spawner {
+                inner: Some(inner), ..
+            }) => tab_counts(inner, counts),
+            _ => {}
+        }
+        for child in &tree.children {
+            tab_counts(child, counts);
+        }
+    }
+
+    /// xorshift, so a failing seed can be run again
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+
+        #[expect(clippy::cast_precision_loss, reason = "small")]
+        fn px(&mut self) -> f64 {
+            self.below(240) as f64 - 120.0
+        }
+    }
+
+    /// Two screens of different sizes, side by side
+    #[expect(clippy::cast_possible_truncation, reason = "small")]
+    fn screens(rng: &mut Rng) -> Vec<[u32; 4]> {
+        let mut size = || [800 + rng.below(1760) as u32, 600 + rng.below(1000) as u32];
+        let [[width, height], [width2, height2]] = [size(), size()];
+        vec![[0, 0, width, height], [width, 0, width2, height2]]
+    }
+
+    /// Runs the root's loop (and its applets) for `ms`, as the runner's thread would
+    fn pump(
+        event_loop: &mut EventLoop<'static, RootNodeApplet>,
+        root: &mut RootNodeApplet,
+        ms: u64,
+    ) {
+        let end = Instant::now() + Duration::from_millis(ms);
+        while Instant::now() < end {
+            event_loop
+                .dispatch(Some(Duration::from_millis(1)), root)
+                .unwrap();
+            root.after_batch();
+        }
+    }
+
+    fn send(
+        event_loop: &mut EventLoop<'static, RootNodeApplet>,
+        root: &mut RootNodeApplet,
+        event: StandardEvent,
+    ) {
+        root.handle_event(event);
+        pump(event_loop, root, 3);
+    }
+
+    fn swipe(fingers: u32, phase: SwipePhase) -> StandardEvent {
+        StandardEvent::UIEvent(UIEvent::Swipe { fingers, phase })
+    }
+
+    /// Random swipes, screen switches and focus jumps on two screens never lose a tab: no applet panics, and no
+    /// tab is sized past a screen or flooded with resizes (a wl client is dropped when it can't keep up)
+    #[test]
+    #[expect(clippy::too_many_lines, reason = "the fuzz's actions")]
+    fn swipes_keep_every_tab() {
+        // an applet's thread panicking (eg a project's) freezes it, its tabs gone from the screen
+        let panicked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hook = std::panic::take_hook();
+        std::panic::set_hook({
+            let panicked = Arc::clone(&panicked);
+            Box::new(move |info| {
+                panicked.store(true, Ordering::Relaxed);
+                hook(info);
+            })
+        });
+        for seed in 1..=3_u64 {
+            let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            let mut tabs = 0;
+            let children = random_children(&mut rng, 6, &mut tabs);
+            let mut event_loop = EventLoop::<RootNodeApplet>::try_new().unwrap();
+            let (world, _calls) = calloop::channel::channel();
+            let (request_sender, _requests) = calloop::channel::channel();
+            let surface = SharedState::new(StateKind::Surface, UITree::leaf(UIElement::Nothing));
+            let mut root = RootNodeApplet::new(
+                ProjectApplet::restorer(container(Some("p"), children)),
+                BTreeMap::from([("tab".to_string(), Box::new(TabSpawner) as AppletSpawner)]),
+                None,
+                surface.clone(),
+                request_sender,
+                &event_loop.handle(),
+                world,
+            );
+            send(
+                &mut event_loop,
+                &mut root,
+                StandardEvent::Screens(screens(&mut rng)),
+            );
+            pump(&mut event_loop, &mut root, 100);
+            let mut counts = vec![0; tabs];
+            tab_counts(&root.holder.tree.save(), &mut counts);
+            assert_eq!(counts, vec![1; tabs], "seed {seed}: before swiping");
+            let mut log = Vec::new();
+            for _ in 0..40 {
+                match rng.below(10) {
+                    // like clicking a row of the treeview, to get deep quickly
+                    8 | 9 => {
+                        let rows = view_tree_rows(
+                            &root.holder.tree,
+                            None,
+                            root.holder.tree.active_screen(),
+                            false,
+                        );
+                        let path = rows[rng.below(rows.len() as u64) as usize].path.clone();
+                        log.push(format!("focus {:?}", path.0));
+                        send(&mut event_loop, &mut root, StandardEvent::Focus(path));
+                    }
+                    0 => {
+                        let screen = rng.below(2) as usize;
+                        log.push(format!("activate {screen}"));
+                        send(
+                            &mut event_loop,
+                            &mut root,
+                            StandardEvent::ActivateScreen(screen),
+                        );
+                    }
+                    1 => {
+                        let down = rng.below(2) == 0;
+                        log.push(format!("4 fingers {}", if down { "down" } else { "up" }));
+                        send(&mut event_loop, &mut root, swipe(4, SwipePhase::Begin));
+                        let y = if down { 80.0 } else { -80.0 };
+                        send(
+                            &mut event_loop,
+                            &mut root,
+                            swipe(4, SwipePhase::Update([0.0, y])),
+                        );
+                        let end = SwipePhase::End { cancelled: false };
+                        send(&mut event_loop, &mut root, swipe(4, end));
+                    }
+                    // what lost tabs: switching screens, then from a child to its parent
+                    2 | 3 => {
+                        let screen = 1 - root.holder.tree.active_screen();
+                        let updates = 1 + rng.below(6);
+                        log.push(format!(
+                            "activate {screen}, 3 fingers to parent, {updates} updates"
+                        ));
+                        send(
+                            &mut event_loop,
+                            &mut root,
+                            StandardEvent::ActivateScreen(screen),
+                        );
+                        send(&mut event_loop, &mut root, swipe(3, SwipePhase::Begin));
+                        for _ in 0..updates {
+                            let delta = [rng.px() / 8.0, rng.px() + 180.0];
+                            send(
+                                &mut event_loop,
+                                &mut root,
+                                swipe(3, SwipePhase::Update(delta)),
+                            );
+                        }
+                        let end = SwipePhase::End { cancelled: false };
+                        send(&mut event_loop, &mut root, swipe(3, end));
+                    }
+                    _ => {
+                        let vertical = rng.below(2) == 0;
+                        let updates = 1 + rng.below(8);
+                        let cancelled = rng.below(10) == 0;
+                        let sign = if rng.below(2) == 0 { 1.0 } else { -1.0 };
+                        log.push(format!(
+                            "3 fingers vertical {vertical}, {updates} updates, cancelled {cancelled}"
+                        ));
+                        send(&mut event_loop, &mut root, swipe(3, SwipePhase::Begin));
+                        for _ in 0..updates {
+                            // mostly one way, as fingers do
+                            let main = sign * (rng.px() + 60.0);
+                            let cross = rng.px() / 8.0;
+                            let delta = if vertical {
+                                [cross, main]
+                            } else {
+                                [main, cross]
+                            };
+                            send(
+                                &mut event_loop,
+                                &mut root,
+                                swipe(3, SwipePhase::Update(delta)),
+                            );
+                        }
+                        send(
+                            &mut event_loop,
+                            &mut root,
+                            swipe(3, SwipePhase::End { cancelled }),
+                        );
+                    }
+                }
+                // sometimes let the settle finish, else interrupt it
+                pump(&mut event_loop, &mut root, rng.below(2) * 100);
+                // as the runner draws it
+                PrimitiveScene::from_ui_tree(
+                    surface.get(),
+                    DisplayContainerSize::new(5120, 1600),
+                    |_| UITree::leaf(UIElement::Nothing),
+                );
+                assert!(
+                    !panicked.load(Ordering::Relaxed),
+                    "seed {seed}: an applet panicked after\n{}",
+                    log.join("\n")
+                );
+            }
+            pump(&mut event_loop, &mut root, 200);
+            assert!(
+                !panicked.load(Ordering::Relaxed),
+                "seed {seed}: an applet panicked after\n{}",
+                log.join("\n")
+            );
+            let mut counts = vec![0; tabs];
+            tab_counts(&root.holder.tree.save(), &mut counts);
+            assert_eq!(
+                counts,
+                vec![1; tabs],
+                "seed {seed}: tabs (by number) after\n{}",
+                log.join("\n")
+            );
+        }
+    }
 }
