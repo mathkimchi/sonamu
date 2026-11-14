@@ -81,6 +81,7 @@ const MAN_PAGE: &[ManSection] = &[
             entry("3-finger swipe up/down", "previous/next sibling"),
             entry("3-finger swipe left/right", "child/parent"),
             entry("4-finger swipe up/down", "focus tree view/main content"),
+            entry("Ctrl+Super+arrow", "3-finger swipe by one node"),
         ],
     },
 ];

@@ -786,6 +786,7 @@ impl RootNodeApplet {
                     parent.0.pop();
                     self.set_view_root(&parent);
                 }
+                RootKeybind::Swipe { vertical, forward } => self.swipe_key(vertical, forward),
             }
             self.damage_if_tree_changed();
             return;
@@ -1112,20 +1113,7 @@ impl RootNodeApplet {
                     return;
                 };
                 let view = swipe.update(delta, &settings, |vertical| {
-                    let tree = &holder.tree;
-                    let rows =
-                        view_tree_rows(tree, view_path.as_ref(), tree.active_screen(), false);
-                    let focus = focused_row(&rows, &tree.get_focus_path());
-                    let from = rows.iter().position(|row| row.path == focus)?;
-                    Some(if vertical {
-                        Strip::lineage(&rows, from, remembered)
-                    } else {
-                        let mut strip = Strip::siblings(&rows, from);
-                        let mut parent = focus;
-                        parent.0.pop();
-                        strip.reversed = tree.shown_at_once().contains(&parent);
-                        strip
-                    })
+                    swipe_strip(&holder.tree, view_path.as_ref(), remembered, vertical)
                 });
                 if let Some(view) = view {
                     self.holder.tree.set_swipe(Some(view));
@@ -1141,19 +1129,44 @@ impl RootNodeApplet {
                     self.holder.tree.set_swipe(None);
                     return;
                 };
-                if settle.target != settle.strip.start {
-                    self.holder.focus(&settle.strip.paths[settle.target]);
-                    self.surface.damage();
-                }
-                self.settle = Some(settle);
-                if !std::mem::replace(&mut self.settling, true) {
-                    self.loop_handle
-                        .insert_source(Timer::immediate(), |_, &mut (), root: &mut Self| {
-                            root.tick_settle()
-                        })
-                        .unwrap();
-                }
+                self.start_settle(settle);
             }
+        }
+    }
+
+    /// Ctrl+Super+arrow: a 3 finger swipe by one row (`forward`: right / down)
+    fn swipe_key(&mut self, vertical: bool, forward: bool) {
+        // it carries on from where a settle it interrupts was
+        let offset = match self
+            .settle
+            .as_ref()
+            .map(|settle| settle.carried(Instant::now()))
+        {
+            Some((carried_vertical, offset)) if carried_vertical == vertical => offset,
+            _ => 0.0,
+        };
+        let Some(settle) =
+            swipe_strip(&self.holder.tree, self.view_path.as_ref(), &self.remembered, vertical)
+                .and_then(|strip| Settle::step(strip, offset, forward, &settings::get().swipe))
+        else {
+            return;
+        };
+        self.start_settle(settle);
+    }
+
+    /// Focuses where `settle` goes, and springs the view there a frame at a time
+    fn start_settle(&mut self, settle: Settle) {
+        if settle.target != settle.strip.start {
+            self.holder.focus(&settle.strip.paths[settle.target]);
+            self.surface.damage();
+        }
+        self.settle = Some(settle);
+        if !std::mem::replace(&mut self.settling, true) {
+            self.loop_handle
+                .insert_source(Timer::immediate(), |_, &mut (), root: &mut Self| {
+                    root.tick_settle()
+                })
+                .unwrap();
         }
     }
 
@@ -1491,6 +1504,28 @@ fn view_rows(
     (view_tree_rows(tree, view_path, screen, true), general)
 }
 
+/// The rows a 3 finger swipe (or Ctrl+Super+arrow) moves along from focus: parent and child (`vertical`), else
+/// siblings; `None` if focus isn't shown
+fn swipe_strip(
+    tree: &NodeTree,
+    view_path: Option<&WorldTreePath>,
+    remembered: &HashMap<WorldTreePath, WorldTreePath>,
+    vertical: bool,
+) -> Option<Strip> {
+    let rows = view_tree_rows(tree, view_path, tree.active_screen(), false);
+    let focus = focused_row(&rows, &tree.get_focus_path());
+    let from = rows.iter().position(|row| row.path == focus)?;
+    Some(if vertical {
+        Strip::lineage(&rows, from, remembered)
+    } else {
+        let mut strip = Strip::siblings(&rows, from);
+        let mut parent = focus;
+        parent.0.pop();
+        strip.reversed = tree.shown_at_once().contains(&parent);
+        strip
+    })
+}
+
 /// The root's own keybinds
 enum RootKeybind {
     /// Super+?
@@ -1499,16 +1534,31 @@ enum RootKeybind {
     ViewRoot,
     /// Alt+r
     ViewParent,
+    /// Ctrl+Super+arrow: like a 3 finger swipe, by one row
+    Swipe { vertical: bool, forward: bool },
 }
 impl RootKeybind {
     fn of(ui_event: &UIEvent) -> Option<Self> {
         let UIEvent::Key {
-            symbol: Some(KeySymbol::Char(c)),
+            symbol: Some(symbol),
             modifiers,
             pressed: true,
             ..
         } = *ui_event
         else {
+            return None;
+        };
+        if modifiers.ctrl && modifiers.logo && !modifiers.alt && !modifiers.shift {
+            let (vertical, forward) = match symbol {
+                KeySymbol::ArrowKeyLeft => (false, false),
+                KeySymbol::ArrowKeyRight => (false, true),
+                KeySymbol::ArrowKeyUp => (true, false),
+                KeySymbol::ArrowKeyDown => (true, true),
+                _ => return None,
+            };
+            return Some(Self::Swipe { vertical, forward });
+        }
+        let KeySymbol::Char(c) = symbol else {
             return None;
         };
         match c {

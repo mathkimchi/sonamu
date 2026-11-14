@@ -71,6 +71,8 @@ Applets have no traversal of their own.
     it never skips rows), focuses it, then springs there (`Settle`: a damped harmonic oscillator, `swipe.stiffness` /
     `damping_ratio`, starting at the fingers' speed; ticked by a calloop timer). A new
     swipe during that carries on from where it was.
+  - Ctrl+Super+arrow (#147, `RootKeybind::Swipe`, `RootNodeApplet::swipe_key`): one row along the same strip
+    (`swipe_strip`; right/down = next, left/up = previous), settling from rest (`Settle::step`); carries on a settle on its axis.
   - Rows whose children are all shown at once (`Treeview::shown_at_once`; `NodeTree::shown_at_once` gathers its
     mains' lists; nothing publishes any now) are swiped `reversed`: the focus ring follows the fingers. Half width
     siblings side by side aren't: a swipe goes the same way whatever the widths (#144).

@@ -226,17 +226,7 @@ impl Swipe {
         } else {
             settle_target(shown, velocity, strip.last())
         };
-        Some(Settle {
-            strip,
-            from: shown,
-            velocity,
-            target,
-            started: Instant::now(),
-            spring: Spring {
-                stiffness: f64::from(settings.stiffness.max(1.0)),
-                damping_ratio: f64::from(settings.damping_ratio.max(0.01)),
-            },
-        })
+        Some(Settle::new(strip, shown, velocity, target, settings))
     }
 }
 
@@ -373,6 +363,32 @@ pub struct Settle {
     spring: Spring,
 }
 impl Settle {
+    fn new(strip: Strip, from: f64, velocity: f64, target: usize, settings: &SwipeSettings) -> Self {
+        Self {
+            strip,
+            from,
+            velocity,
+            target,
+            started: Instant::now(),
+            spring: Spring {
+                stiffness: f64::from(settings.stiffness.max(1.0)),
+                damping_ratio: f64::from(settings.damping_ratio.max(0.01)),
+            },
+        }
+    }
+
+    /// A key's swipe (Ctrl+Super+arrow): onto the row after (`forward`) or before focus, from `offset` (rows) away
+    /// from it (eg where a settle it interrupts was); `None` at the strip's end
+    pub fn step(strip: Strip, offset: f64, forward: bool, settings: &SwipeSettings) -> Option<Self> {
+        let target = if forward {
+            strip.start + 1
+        } else {
+            strip.start.checked_sub(1)?
+        };
+        let from = strip.start as f64 + offset;
+        (target < strip.paths.len()).then(|| Self::new(strip, from, 0.0, target, settings))
+    }
+
     /// Where the view is at `now`, and whether it arrived
     fn position(&self, now: Instant) -> (f64, bool) {
         let t = (now - self.started).as_secs_f64();
@@ -492,6 +508,18 @@ mod tests {
         // past the ends
         assert_eq!(super::settle_target(5.1, 3.0, 5.0), 5);
         assert_eq!(super::settle_target(-0.1, -3.0, 5.0), 0);
+    }
+
+    #[test]
+    fn key_steps_one_row() {
+        let rows = rows();
+        let settings = sonamu_common::settings::Settings::default().swipe;
+        let strip = || Strip::siblings(&rows, index(&rows, &[Child(0), Child(0)]));
+        assert_eq!(super::Settle::step(strip(), 0.0, true, &settings).unwrap().target, 3);
+        assert_eq!(super::Settle::step(strip(), 0.0, false, &settings).unwrap().target, 1);
+        // past the last: nothing
+        let last = Strip::siblings(&rows, index(&rows, &[Child(0), Child(1)]));
+        assert!(super::Settle::step(last, 0.0, true, &settings).is_none());
     }
 
     #[test]
