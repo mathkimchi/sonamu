@@ -13,7 +13,7 @@ use smithay::{
     },
 };
 use sonamu_ui::{
-    ui_element::{Style, UITree},
+    ui_element::{Cursor, CursorIcon, Style, UITree},
     ui_event::{MouseEvent, MouseEventKind},
 };
 
@@ -93,9 +93,15 @@ impl SmithayState {
             .current_mode()
             .map_or([0.0; 2], |mode| [mode.size.w as f32, mode.size.h as f32]);
         self.floating_roots()
-            .map(|root| {
+            .enumerate()
+            .map(|(index, root)| {
                 let layers = self.floating_layers(root);
-                let cursor = self.wl_cursor(&layers);
+                // being dragged: over the whole output, so wherever the pointer goes
+                let cursor = if self.floating_drag == Some(index) {
+                    Some(Cursor::Named(CursorIcon::Grabbing))
+                } else {
+                    self.wl_cursor(&layers)
+                };
                 // like a tile, the root's surfaces are cut to the window geometry
                 let clip = window_geometry(root).and(self.floating_rect(root));
                 UITree::new_container_styled(
@@ -177,7 +183,11 @@ impl AppletRunner {
                 MouseEventKind::Button {
                     button: BTN_LEFT,
                     pressed: false,
-                } => state.floating_drag = None,
+                } => {
+                    state.floating_drag = None;
+                    // the cursor goes back
+                    self.needs_redraw = true;
+                }
                 _ => {}
             }
             return true;
