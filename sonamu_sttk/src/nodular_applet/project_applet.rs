@@ -918,7 +918,7 @@ impl ProjectApplet {
         let count = OPTIONS_ROW + below.len().max(1);
         let options = !below.is_empty();
         let rows = [
-            (title, text),
+            (title, self.color.unwrap_or(text)),
             directory,
             icon_row,
             ("color:".to_string(), self.color.unwrap_or(text)),
@@ -941,7 +941,7 @@ impl ProjectApplet {
                 }
             })
             .collect::<Vec<_>>();
-        let header = Self::overview_header(width, count, options);
+        let header = self.overview_header(width, count, options);
         let rows = header
             .into_iter()
             .chain(rows)
@@ -957,12 +957,12 @@ impl ProjectApplet {
 
     /// The box around the overview's `count` rows, apart from the zoom-out view, and unless `options` show,
     /// `NEW_ROWS` on one line
-    fn overview_header(width: f32, count: usize, options: bool) -> Vec<UITree> {
+    fn overview_header(&self, width: f32, count: usize, options: bool) -> Vec<UITree> {
         let settings = settings::get();
         let layout = overview_rows();
-        // darker inside, cut to its rounded corners
+        // darker inside, cut to its rounded corners; bordered in its color (#76)
         let header = ui::frame(
-            settings.border.unfocused,
+            self.color.unwrap_or(settings.border.unfocused),
             settings.radius,
             settings.gap_and_border_px().1 as f32,
             Style::absolute(
