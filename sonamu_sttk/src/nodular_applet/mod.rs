@@ -17,7 +17,7 @@ use sonamu_common::{
     settings::{self, Settings},
     utils::tree::world_tree::{WorldTree, WorldTreePath},
 };
-use sonamu_ui::{display_units::DisplayContainerSize, ui_element::UITree, ui_event::UIEvent};
+use sonamu_ui::{color::Color, display_units::DisplayContainerSize, ui_element::UITree, ui_event::UIEvent};
 use std::{
     cell::Cell,
     collections::BTreeMap,
@@ -81,6 +81,11 @@ pub trait StandardApplet {
 
     /// Paths of its inner tree whose children are all shown at once (`Treeview::shown_at_once`)
     fn shown_at_once(&self) -> Vec<WorldTreePath> {
+        Vec::new()
+    }
+
+    /// Paths of its inner tree whose treeview rows are in a color (`Treeview::colors`)
+    fn treeview_colors(&self) -> Vec<(WorldTreePath, Color)> {
         Vec::new()
     }
 
@@ -652,6 +657,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         screen_focus: state.applet.screen_focus(),
                         shown_at_once: state.applet.shown_at_once(),
                         zoom_focus: state.applet.zoom_focus(),
+                        colors: state.applet.treeview_colors(),
                     },
                     &state.request_sender,
                 );

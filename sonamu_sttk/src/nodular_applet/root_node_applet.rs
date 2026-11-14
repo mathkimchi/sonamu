@@ -1466,7 +1466,22 @@ fn notice(settings: &Settings, text: &str, size: DisplayContainerSize) -> UITree
     )
 }
 
+/// The view's rows, in their colors (`NodeTree::treeview_colors`)
 fn view_tree_rows(
+    tree: &NodeTree,
+    view_path: Option<&WorldTreePath>,
+    screen: usize,
+    up: bool,
+) -> Vec<TreeviewRow> {
+    let mut rows = uncolored_rows(tree, view_path, screen, up);
+    let colors: HashMap<_, _> = tree.treeview_colors().into_iter().collect();
+    for row in &mut rows {
+        row.color = colors.get(&row.path).copied();
+    }
+    rows
+}
+
+fn uncolored_rows(
     tree: &NodeTree,
     view_path: Option<&WorldTreePath>,
     screen: usize,
@@ -1752,10 +1767,7 @@ mod tests {
                 inner: None,
             }),
             children,
-            half: false,
-            label: None,
-            directory: None,
-            icon: None,
+            ..SavedTree::default()
         }
     }
 
@@ -1763,10 +1775,8 @@ mod tests {
         SavedTree {
             main: None,
             children,
-            half: false,
             label: label.map(str::to_string),
-            directory: None,
-            icon: None,
+            ..SavedTree::default()
         }
     }
 

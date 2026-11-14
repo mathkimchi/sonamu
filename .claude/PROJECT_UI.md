@@ -9,11 +9,15 @@
   then `NEW_ROWS` on one line, in `NEW_CELL` font sizes wide cells (#154: no row per child, the zoom-out view shows them; project `p`, terminal `t`, browser `b`; no command hub since the buffer line). Rows are a fixed height so the project hit-tests clicks itself. A box (`overview_header`, unfocused border, filled with `Palette::sunken(30)`) surrounds the rows, apart from the zoom-out view.
 - `p` (#81) adds an empty project (`ProjectApplet::empty`, no contents, this project's directory) to the inner
   root and focuses inside it, so its own overview shows, ready to rename and fill.
-- Icon: a row after the directory (so the hint is row 3, `NEW_ROWS` from `OPTIONS_ROW` 4). `i` or a click on it opens a
+- Icon: a row after the directory (the hint is row 4, `NEW_ROWS` from `OPTIONS_ROW` 5). `i` or a click on it opens a
   picker listing `ICONS` (Nerd Font) where `NEW_ROWS` were: Up/Down + Enter or a click picks one, any typed
   character (eg an emoji) is used as is, Backspace goes back to the default (`PROJECT_ICON`), Esc cancels. Also shown
   before the name. Saved as `SavedTree::icon` on the inner root (like `label`), and the treeview's `icon` reads it
   from the published `project` spawner's `inner`.
+- Color (#76): a row after the icon, in its color; `c` or a click cycles `COLORS` then none. Saved as
+  `SavedTree::color`. Treeview: `Treeview::colors` (paths → color, like `shown_at_once`), gathered by
+  `NodeTree::treeview_colors` (projects' own from their published `saved`, plus their applets' joined); the root's
+  `view_tree_rows` sets `TreeviewRow::color` (text; dragged/inactive rows stay `inactive`). Labels stay `String`.
 - Zoom-out view (#145, replaced #82's preview cards): below the rows, `NodeTree::zoom_window` of its tree fills the
   rest (`zoom_top`), live since a child's `Damage` damages the project's window. Left presses and releases there go to `NodeTree::zoom_button`. Hidden while
   setting the directory or icon (their options take those rows).
@@ -45,9 +49,6 @@
 
 ## Questions for the user
 
-- Color: not done, tracked in #76. Treeview labels are `WorldTree<String>`, so a color needs a protocol
-  change (eg a label struct with an optional color, through `Treeview`, `NodeTree::applet_treeview` and the treeview
-  renderer).
 - Should the overview also show while focus is on a child of the project (eg beside the panes), or only at its root?
 
 ## Issues found

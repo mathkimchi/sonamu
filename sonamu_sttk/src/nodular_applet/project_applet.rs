@@ -42,14 +42,26 @@ use std::{
 /// Its name until it is renamed: its inner tree root's label
 const LABEL: &str = "Project";
 
-// The overview's rows (`overview_rows`), in a box: the name, its directory, its icon, a hint, then `NEW_ROWS` on one
-// line (its contents are in the zoom-out view below, #154)
+// The overview's rows (`overview_rows`), in a box: the name, its directory, its icon, its color, a hint, then
+// `NEW_ROWS` on one line (its contents are in the zoom-out view below, #154)
 const DIRECTORY_ROW: usize = 1;
 const ICON_ROW: usize = 2;
+const COLOR_ROW: usize = 3;
 /// The only row a click does nothing on
-const HINT_ROW: usize = 3;
+const HINT_ROW: usize = 4;
 /// Rows before `NEW_ROWS` (or the directory or icon options, while setting one)
-const OPTIONS_ROW: usize = 4;
+const OPTIONS_ROW: usize = 5;
+/// The treeview colors `c` cycles through (then none, #76)
+const COLORS: [(&str, Color); 8] = [
+    ("red", Color([0xF3, 0x8B, 0xA8, 0xFF])),
+    ("orange", Color([0xFA, 0xB3, 0x87, 0xFF])),
+    ("yellow", Color([0xF9, 0xE2, 0xAF, 0xFF])),
+    ("green", Color([0xA6, 0xE3, 0xA1, 0xFF])),
+    ("teal", Color([0x94, 0xE2, 0xD5, 0xFF])),
+    ("blue", Color([0x89, 0xB4, 0xFA, 0xFF])),
+    ("purple", Color([0xCB, 0xA6, 0xF7, 0xFF])),
+    ("pink", Color([0xF5, 0xC2, 0xE7, 0xFF])),
+];
 /// Of each of `NEW_ROWS`' cells on their line, in font sizes
 const NEW_CELL: f32 = 10.0;
 /// The icons the picker lists (any typed character works too)
@@ -256,6 +268,8 @@ pub struct ProjectApplet {
     icon: Option<String>,
     /// Picking an icon: the index in `ICONS` selected with the arrows
     picking_icon: Option<usize>,
+    /// Its treeview color (`None`: the palette's)
+    color: Option<Color>,
     size: DisplayContainerSize,
 }
 impl ProjectApplet {
@@ -277,11 +291,13 @@ impl ProjectApplet {
             let name = contents.label.take().unwrap_or_else(|| LABEL.to_string());
             let directory = contents.directory.take();
             let icon = contents.icon.take();
+            let color = contents.color.take();
             let mut project = Self::with_tree(hook, |spawn_client, attach_client, world| {
                 NodeTree::restore(contents, spawn_client, attach_client, world)
             });
             project.name = name;
             project.icon = icon;
+            project.color = color;
             project.holder.directory = directory;
             Box::new(project) as Box<dyn StandardApplet>
         })
@@ -385,6 +401,7 @@ impl ProjectApplet {
             setting_directory: None,
             icon: None,
             picking_icon: None,
+            color: None,
             // until it gets one
             size: DisplayContainerSize::new(800, 600),
         }
@@ -460,6 +477,30 @@ impl ProjectApplet {
             _ => return false,
         }
         true
+    }
+
+    /// The next of `COLORS` (none after the last)
+    fn cycle_color(&mut self) {
+        let next = match self.color {
+            None => 0,
+            Some(color) => COLORS
+                .iter()
+                .position(|&(_, listed)| listed == color)
+                .map_or(0, |index| index + 1),
+        };
+        self.color = COLORS.get(next).map(|&(_, color)| color);
+    }
+
+    /// The overview's color row, in its color
+    fn color_row(&self) -> (String, Color) {
+        let Some(color) = self.color else {
+            return ("color: none".to_string(), hint());
+        };
+        let name = COLORS
+            .iter()
+            .find(|&&(_, listed)| listed == color)
+            .map_or("custom", |&(name, _)| name);
+        (format!("color: {name}"), color)
     }
 
     /// Its icon as shown
@@ -637,6 +678,7 @@ impl ProjectApplet {
             }
             Some(DIRECTORY_ROW) => self.start_setting_directory(),
             Some(ICON_ROW) => self.start_picking_icon(),
+            Some(COLOR_ROW) => self.cycle_color(),
             Some(OPTIONS_ROW) => {
                 let cell = NEW_CELL * font_size();
                 if let Some(index) = (0..NEW_ROWS.len()).find(|&index| {
@@ -693,6 +735,7 @@ impl ProjectApplet {
             (None, KeySymbol::Char('i')) if modifiers == KeyModifiers::NONE => {
                 self.start_picking_icon();
             }
+            (None, KeySymbol::Char('c')) if modifiers == KeyModifiers::NONE => self.cycle_color(),
             (None, KeySymbol::Char(key_char))
                 if modifiers == KeyModifiers::NONE
                     && let Some(index) =
@@ -790,7 +833,7 @@ impl ProjectApplet {
                     )
                 } else {
                     (
-                        "r: rename, d: set directory, i: set icon, 1-9: select",
+                        "r: rename, d: set directory, i: set icon, c: color, 1-9: select",
                         hint(),
                     )
                 },
@@ -803,6 +846,7 @@ impl ProjectApplet {
             (title, text),
             directory,
             icon_row,
+            self.color_row(),
             (hint.0.to_string(), hint.1),
         ]
         .into_iter()
@@ -1113,6 +1157,7 @@ impl StandardApplet for ProjectApplet {
         contents.label = Some(self.name.clone());
         contents.directory.clone_from(&self.holder.directory);
         contents.icon.clone_from(&self.icon);
+        contents.color = self.color;
         Some(session::saved_with_inner(
             Self::SPAWNER,
             Vec::new(),

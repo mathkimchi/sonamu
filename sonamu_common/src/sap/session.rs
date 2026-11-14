@@ -48,6 +48,9 @@ pub struct SavedTree {
     /// A project's icon in the treeview (`None`: the default); only a project's inner root has one
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// A project's color in the treeview (#76); only a project's inner root has one
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<sonamu_ui::color::Color>,
 }
 
 /// How to make a node's main again

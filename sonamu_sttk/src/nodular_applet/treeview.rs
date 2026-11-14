@@ -83,6 +83,8 @@ pub struct TreeviewRow {
     pub path: WorldTreePath,
     pub(crate) depth: usize,
     label: String,
+    /// Its text's color (`Treeview::colors`), else the palette's
+    pub color: Option<Color>,
     /// Has a close button (shown while hovered): not the root, nor a `‹` row
     closable: bool,
 }
@@ -108,6 +110,7 @@ pub fn treeview_rows(
                 path,
                 depth: 0,
                 label: format!("‹ {label}"),
+                color: None,
                 closable: false,
             },
         );
@@ -143,6 +146,7 @@ fn push_rows(
             path: full_path.clone(),
             depth: row_depth,
             label: value.get_root_value().clone(),
+            color: None,
             closable,
         });
         push_rows(value, &full_path, row_depth, true, rows);
@@ -664,7 +668,7 @@ impl TreeviewPointer {
         let text_color = with_opacity(if is_dragged || is_inactive(row) {
             settings.palette.inactive
         } else {
-            settings.palette.fg
+            row.color.unwrap_or(settings.palette.fg)
         });
         let label = if row.label.is_empty() {
             "…".to_string()

@@ -12,8 +12,8 @@ Sonamu owns the session; apps' own session restore should be off.
 - **Applets with an inner tree** (#130) save it as `Spawner::inner` (`session::saved_with_inner`), restored by
   `AppletSpawnerTrait::restore_initializer(args, inner)` (default: `create_initializer`, so other spawners never see it).
   JSON is only used to read and write the file; published saved forms stay structured.
-  - `project`: no args, inner = its `NodeTree::save()` with label/directory/icon on the inner root (the treeview's
-    icon reads `inner.icon`). Registered by `RootNodeApplet` itself; with no args (not restoring) it is an empty
+  - `project`: no args, inner = its `NodeTree::save()` with label/directory/icon/color on the inner root (the treeview's
+    icon reads `inner.icon`, its color `inner.color`, `#rrggbbaa`). Registered by `RootNodeApplet` itself; with no args (not restoring) it is an empty
     project. A saved `split` (removed) restores as a container of its inner tree's panes (`NodeTree::restore_subtree`);
     an old `layout` key is ignored.
   - `file_manager`: args = its root (none when it follows its tree's directory), inner's children = its documents,

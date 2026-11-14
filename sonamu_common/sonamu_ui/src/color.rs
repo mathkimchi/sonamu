@@ -75,6 +75,12 @@ impl<'de> serde::Deserialize<'de> for Color {
             .map_err(serde::de::Error::custom)
     }
 }
+impl serde::Serialize for Color {
+    /// `#rrggbbaa`, as read back by `Deserialize`
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&format!("#{:08x}", self.to_rgba_u32()))
+    }
+}
 #[cfg(feature = "winit_backend")]
 impl From<Color> for glyphon::Color {
     /// TODO: figure out most idiomatic way of dealing with these references for copy-able types.

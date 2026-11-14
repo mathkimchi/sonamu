@@ -30,6 +30,7 @@ use sonamu_common::{
     },
 };
 use sonamu_ui::{
+    color::Color,
     display_units::{DisplayContainerSize, ToPx},
     ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{KeySymbol, MouseEvent, MouseEventKind, PinchPhase, UIEvent},
@@ -562,9 +563,7 @@ impl NodeTree {
             main,
             children,
             half: node.half,
-            label: None,
-            directory: None,
-            icon: None,
+            ..SavedTree::default()
         }]
     }
 
@@ -3531,6 +3530,32 @@ impl NodeTree {
             }
         }
         paths
+    }
+
+    /// Paths whose treeview rows are in a color (`Treeview::colors`): projects' own, and its applets'
+    pub fn treeview_colors(&self) -> Vec<(WorldTreePath, Color)> {
+        let mut colors = Vec::new();
+        for (id, node) in &self.nodes {
+            let (Some(main), Some(path)) = (&node.main, self.path_of(id)) else {
+                continue;
+            };
+            let published = main.get_treeview();
+            if let Some(SavedApplet::Spawner {
+                inner: Some(contents),
+                ..
+            }) = &published.saved
+                && let Some(color) = contents.color
+            {
+                colors.push((WorldTreePath::from_tree_path(&path), color));
+            }
+            colors.extend(
+                published
+                    .colors
+                    .iter()
+                    .map(|(inner, color)| (WorldTreePath::join(&path, inner), *color)),
+            );
+        }
+        colors
     }
 
     /// Like `get_window`, for the screen (an inactive one shows no focus)

@@ -6,6 +6,7 @@ use crate::{
 };
 use slotmap::KeyData;
 use sonamu_ui::{
+    color::Color,
     display_units::DisplayContainerSize,
     ui_event::{MouseEvent, UIEvent},
 };
@@ -84,6 +85,8 @@ pub struct Treeview {
     pub shown_at_once: Vec<WorldTreePath>,
     /// Where going in (4 fingers down) goes from its focus, in its inner tree; `None`: nowhere (#145)
     pub zoom_focus: Option<WorldTreePath>,
+    /// Paths of `tree` whose treeview rows are in a color (eg projects', #76)
+    pub colors: Vec<(WorldTreePath, Color)>,
 }
 impl Treeview {
     /// Focus inside the root, not traversing, not saved
@@ -101,6 +104,7 @@ impl Treeview {
             screen_focus: Vec::new(),
             shown_at_once: Vec::new(),
             zoom_focus: None,
+            colors: Vec::new(),
         }
     }
 }
