@@ -12,7 +12,21 @@ use smithay::{
         shell::xdg::{SurfaceCachedState, ToplevelSurface},
     },
 };
-use sonamu_ui::ui_element::{Style, UITree};
+use sonamu_ui::{
+    ui_element::{Style, UITree},
+    ui_event::{MouseEvent, MouseEventKind},
+};
+
+const BTN_LEFT: u32 = 0x110;
+
+/// A floating toplevel, centered on its screen (read when drawn: it may map before the screens are known)
+/// and moved by `offset` (Super+drag)
+#[derive(Debug)]
+pub(super) struct Floating {
+    toplevel: ToplevelSurface,
+    screen: usize,
+    offset: Point<f64, Logical>,
+}
 
 /// Whether the toplevel floats instead of tiling
 pub(super) fn floats(toplevel: &ToplevelSurface) -> bool {
@@ -27,12 +41,12 @@ pub(super) fn floats(toplevel: &ToplevelSurface) -> bool {
 }
 
 impl SmithayState {
-    /// Where the floating toplevel is in the output: its window geometry, centered on its screen
+    /// Where the floating toplevel is in the output: its window geometry, centered on its screen, then moved
     pub(super) fn floating_rect(&self, root: &WlSurface) -> Option<Rectangle<i32, Logical>> {
-        let &(_, screen) = self
+        let &Floating { screen, offset, .. } = self
             .floating
             .iter()
-            .find(|(toplevel, _)| toplevel.wl_surface() == root)?;
+            .find(|floating| floating.toplevel.wl_surface() == root)?;
         let [x, y, width, height] = self
             .screens
             .get(screen)
@@ -46,10 +60,9 @@ impl SmithayState {
             f64::from(x) + f64::from(width) / 2.0,
             f64::from(y) + f64::from(height) / 2.0,
         ))
-        .to_logical(self.scale)
-        .to_i32_round();
+        .to_logical(self.scale);
         Some(Rectangle::new(
-            center - Point::from((size.w / 2, size.h / 2)),
+            (center + offset).to_i32_round() - Point::from((size.w / 2, size.h / 2)),
             size,
         ))
     }
@@ -70,7 +83,7 @@ impl SmithayState {
     pub(super) fn floating_roots(&self) -> impl DoubleEndedIterator<Item = &WlSurface> {
         self.floating
             .iter()
-            .map(|(toplevel, _)| toplevel.wl_surface())
+            .map(|floating| floating.toplevel.wl_surface())
     }
 
     /// Drawn in the window's px, over everything
@@ -117,7 +130,11 @@ impl AppletRunner {
         });
         toplevel.send_configure();
         let root = toplevel.wl_surface().clone();
-        state.floating.push((toplevel, screen));
+        state.floating.push(Floating {
+            toplevel,
+            screen,
+            offset: Point::default(),
+        });
         state.layer_focus = Some(root);
         self.refresh_keyboard_focus();
         self.needs_redraw = true;
@@ -129,16 +146,66 @@ impl AppletRunner {
         let Some(index) = state
             .floating
             .iter()
-            .position(|(floating, _)| floating == toplevel)
+            .position(|floating| floating.toplevel == *toplevel)
         else {
             return false;
         };
         state.floating.remove(index);
+        if state.floating_drag == Some(index) {
+            state.floating_drag = None;
+        }
         if state.layer_focus.as_ref() == Some(toplevel.wl_surface()) {
             state.layer_focus = None;
         }
         // the keyboard goes back to Sonamu's focus (or a layer surface)
         self.focus_wl_keyboard(self.smithay_state.wl_target);
+        self.needs_redraw = true;
+        true
+    }
+
+    /// Super+left drag moves a floating toplevel (raising it); returns whether the event was taken
+    pub(crate) fn floating_drag_mouse(&mut self, event: &MouseEvent, last_position: [f64; 2]) -> bool {
+        let state = &mut self.smithay_state;
+        if let Some(index) = state.floating_drag {
+            match event.kind {
+                MouseEventKind::Motion => {
+                    let [x, y] = [0, 1].map(|axis| event.position[axis] - last_position[axis]);
+                    state.floating[index].offset +=
+                        Point::<f64, Physical>::from((x, y)).to_logical(state.scale);
+                    self.needs_redraw = true;
+                }
+                MouseEventKind::Button {
+                    button: BTN_LEFT,
+                    pressed: false,
+                } => state.floating_drag = None,
+                _ => {}
+            }
+            return true;
+        }
+        if !(self.super_held
+            && event.kind
+                == (MouseEventKind::Button {
+                    button: BTN_LEFT,
+                    pressed: true,
+                }))
+        {
+            return false;
+        }
+        let point = Point::<f64, Physical>::from((event.position[0], event.position[1]))
+            .to_logical(state.scale);
+        let Some(index) = state.floating.iter().rposition(|floating| {
+            state
+                .floating_rect(floating.toplevel.wl_surface())
+                .is_some_and(|rect| rect.to_f64().contains(point))
+        }) else {
+            return false;
+        };
+        let floating = state.floating.remove(index);
+        let root = floating.toplevel.wl_surface().clone();
+        state.floating.push(floating);
+        state.floating_drag = Some(state.floating.len() - 1);
+        state.layer_focus = Some(root.clone());
+        self.focus_wl_keyboard_on(root);
         self.needs_redraw = true;
         true
     }

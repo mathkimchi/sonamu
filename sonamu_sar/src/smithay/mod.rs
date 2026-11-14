@@ -201,9 +201,10 @@ pub struct SmithayState {
     usable_area: Rectangle<i32, Logical>,
     /// The layer surface (not an exclusive one) or floating toplevel that a click gave the keyboard
     layer_focus: Option<WlSurface>,
-    /// Floating toplevels (`floating`), topmost last, with the index of the screen each is centered on
-    /// (its area is read when drawn: one may map before the screens are known)
-    floating: Vec<(ToplevelSurface, usize)>,
+    /// Floating toplevels, topmost last
+    floating: Vec<floating::Floating>,
+    /// The index of the floating toplevel being dragged
+    floating_drag: Option<usize>,
     /// The tile that Sonamu focus asked the keyboard to be on
     pub(crate) wl_target: Option<WlSurfaceId>,
     /// The screens' areas (`[x, y, width, height]`, window px): the monitors', or the whole window
@@ -845,6 +846,7 @@ impl SmithayState {
             unregistered: Vec::new(),
             layer_surfaces: Vec::new(),
             floating: Vec::new(),
+            floating_drag: None,
             layer_placements: Vec::new(),
             usable_area: Rectangle::default(),
             layer_focus: None,

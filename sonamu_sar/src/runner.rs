@@ -55,6 +55,8 @@ pub struct AppletRunner {
     pub(crate) pluck_place: PluckPlace,
     /// In window px, for drawing what's plucked under the pointer
     pub(crate) pointer_position: [f64; 2],
+    /// Super is held (Super+drag moves floating toplevels)
+    pub(crate) super_held: bool,
     /// Whether the applets act on a key. Other keys go straight to the focused wl client
     is_keybind: fn(&UIEvent) -> bool,
     /// Whether the current pinch goes to the root, no wl surface being under the pointer when it began
@@ -106,6 +108,7 @@ impl AppletRunner {
             plucked: None,
             pluck_place: PluckPlace::Idle,
             pointer_position: [0.0, 0.0],
+            super_held: false,
             is_keybind,
             pinch_to_root: false,
             magnification: 1.0,
@@ -413,7 +416,26 @@ impl AppletRunner {
         took
     }
 
+    /// Tracks `super_held`
+    fn track_super(&mut self, event: &UIEvent) {
+        if let &UIEvent::Key {
+            raw_keycode,
+            pressed,
+            modifiers,
+            ..
+        } = event
+        {
+            // evdev KEY_LEFTMETA, KEY_RIGHTMETA
+            self.super_held = if matches!(raw_keycode, 125 | 126) {
+                pressed
+            } else {
+                modifiers.logo
+            };
+        }
+    }
+
     pub(crate) fn handle_ui_event(&mut self, mut event: UIEvent) {
+        self.track_super(&event);
         if let UIEvent::Key {
             raw_keycode,
             pressed: false,
@@ -445,7 +467,10 @@ impl AppletRunner {
         }
 
         if let UIEvent::Mouse(mouse_event) = &mut event {
-            self.pointer_position = mouse_event.position;
+            let last_position = std::mem::replace(&mut self.pointer_position, mouse_event.position);
+            if self.floating_drag_mouse(mouse_event, last_position) {
+                return;
+            }
             // what's plucked follows the pointer, and so does the magnified view
             if self.plucked.is_some() || self.magnification > 1.0 {
                 self.needs_redraw = true;
