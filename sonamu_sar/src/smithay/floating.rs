@@ -29,10 +29,16 @@ pub(super) fn floats(toplevel: &ToplevelSurface) -> bool {
 impl SmithayState {
     /// Where the floating toplevel is in the output: its window geometry, centered on its screen
     pub(super) fn floating_rect(&self, root: &WlSurface) -> Option<Rectangle<i32, Logical>> {
-        let &(_, [x, y, width, height]) = self
+        let &(_, screen) = self
             .floating
             .iter()
             .find(|(toplevel, _)| toplevel.wl_surface() == root)?;
+        let [x, y, width, height] = self
+            .screens
+            .get(screen)
+            .or(self.screens.first())
+            .copied()
+            .unwrap_or_default();
         let size = window_geometry(root)
             .unwrap_or_else(|| bbox_from_surface_tree(root, (0, 0)))
             .size;
@@ -97,12 +103,10 @@ impl AppletRunner {
         let screen = state
             .screens
             .iter()
-            .copied()
-            .find(|&[x, y, width, height]| {
+            .position(|&[x, y, width, height]| {
                 (f64::from(x)..f64::from(x + width)).contains(&px)
                     && (f64::from(y)..f64::from(y + height)).contains(&py)
             })
-            .or_else(|| state.screens.first().copied())
             .unwrap_or_default();
         // its own size, not a tile's
         toplevel.with_pending_state(|state| {
