@@ -2047,4 +2047,40 @@ mod tests {
             );
         }
     }
+
+    /// Projects' colors reach the root's treeview rows through the projects holding them (#76)
+    #[test]
+    fn project_colors_in_treeview() {
+        use sonamu_ui::color::Color;
+        let red = Color([0xFF, 0, 0, 0xFF]);
+        let colored = |name, color, children| {
+            let mut tree = project(name, children);
+            if let Some(SavedApplet::Spawner {
+                inner: Some(inner), ..
+            }) = &mut tree.main
+            {
+                inner.color = Some(color);
+            }
+            tree
+        };
+        let inner = colored("b", Color([0, 0, 0xFF, 0xFF]), vec![tab("1", Vec::new())]);
+        let outer = colored("a", red, vec![inner]);
+        let mut event_loop = EventLoop::<RootNodeApplet>::try_new().unwrap();
+        let (world, _calls) = calloop::channel::channel();
+        let (request_sender, _requests) = calloop::channel::channel();
+        let surface = SharedState::new(StateKind::Surface, UITree::leaf(UIElement::Nothing));
+        let mut root = RootNodeApplet::new(
+            ProjectApplet::restorer(container(Some("p"), vec![outer, tab("0", Vec::new())])),
+            BTreeMap::from([("tab".to_string(), Box::new(TabSpawner) as AppletSpawner)]),
+            None,
+            surface,
+            request_sender,
+            &event_loop.handle(),
+            world,
+        );
+        pump(&mut event_loop, &mut root, 200);
+        let rows = view_tree_rows(&root.holder.tree, None, 0, false);
+        // the root's tree is a project too, so `a`'s color crossed one; `b` is inside `a`, hibernated
+        assert_eq!(rows[1].color, Some(red));
+    }
 }

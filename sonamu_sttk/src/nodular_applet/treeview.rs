@@ -665,11 +665,14 @@ impl TreeviewPointer {
         let rows = self.rows();
         // like a browser tab's, only on the hovered row
         let shows_close = row.closable && is_hovered && dragging.is_none();
-        let text_color = with_opacity(if is_dragged || is_inactive(row) {
-            settings.palette.inactive
-        } else {
-            row.color.unwrap_or(settings.palette.fg)
-        });
+        let dim = is_dragged || is_inactive(row);
+        let text_color = match row.color {
+            // its color, dimmed
+            Some(Color([r, g, b, _])) if dim => Color([r, g, b, 0x80]),
+            Some(color) => with_opacity(color),
+            None if dim => with_opacity(settings.palette.inactive),
+            None => with_opacity(settings.palette.fg),
+        };
         let label = if row.label.is_empty() {
             "…".to_string()
         } else {

@@ -51,17 +51,49 @@ const COLOR_ROW: usize = 3;
 const HINT_ROW: usize = 4;
 /// Rows before `NEW_ROWS` (or the directory or icon options, while setting one)
 const OPTIONS_ROW: usize = 5;
-/// The treeview colors `c` cycles through (then none, #76)
-const COLORS: [(&str, Color); 8] = [
-    ("red", Color([0xF3, 0x8B, 0xA8, 0xFF])),
-    ("orange", Color([0xFA, 0xB3, 0x87, 0xFF])),
-    ("yellow", Color([0xF9, 0xE2, 0xAF, 0xFF])),
-    ("green", Color([0xA6, 0xE3, 0xA1, 0xFF])),
-    ("teal", Color([0x94, 0xE2, 0xD5, 0xFF])),
-    ("blue", Color([0x89, 0xB4, 0xFA, 0xFF])),
-    ("purple", Color([0xCB, 0xA6, 0xF7, 0xFF])),
-    ("pink", Color([0xF5, 0xC2, 0xE7, 0xFF])),
-];
+// The color row (#76): `color:`, a button for none (plain), then a hue slider to the row's end, in font sizes
+const PLAIN_LEFT: f32 = 5.0;
+const PLAIN_WIDTH: f32 = 4.0;
+const HUE_LEFT: f32 = 10.0;
+/// Rects the hue slider is drawn with
+const HUE_STEPS: usize = 60;
+
+/// The hue slider's left and right ends in a window `width` wide
+fn hue_bar(width: f32) -> (f32, f32) {
+    let left = PAD + HUE_LEFT * font_size();
+    (left, (width - PAD).max(left + 1.0))
+}
+
+/// A pastel color of the hue (0..1, around the wheel)
+fn hue_color(hue: f32) -> Color {
+    // HSL with saturation 0.8, lightness 0.75
+    let (saturation, lightness) = (0.8, 0.75);
+    let chroma = (1.0 - (2.0 * lightness - 1.0_f32).abs()) * saturation;
+    let channel = |n: f32| {
+        let k = (n + hue * 12.0) % 12.0;
+        let value = lightness - chroma / 2.0 * (k - 3.0).min(9.0 - k).clamp(-1.0, 1.0);
+        (value * 255.0).round().to_px() as u8
+    };
+    Color([channel(0.0), channel(8.0), channel(4.0), 0xFF])
+}
+
+/// The color's hue (0..1); 0 for grays
+fn hue_of(Color([r, g, b, _]): Color) -> f32 {
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    if max == min {
+        return 0.0;
+    }
+    let delta = f32::from(max - min);
+    let [rf, gf, bf] = [r, g, b].map(f32::from);
+    let sixths = if max == r {
+        (gf - bf) / delta
+    } else if max == g {
+        (bf - rf) / delta + 2.0
+    } else {
+        (rf - gf) / delta + 4.0
+    };
+    (sixths / 6.0).rem_euclid(1.0)
+}
 /// Of each of `NEW_ROWS`' cells on their line, in font sizes
 const NEW_CELL: f32 = 10.0;
 /// The icons the picker lists (any typed character works too)
@@ -270,6 +302,8 @@ pub struct ProjectApplet {
     picking_icon: Option<usize>,
     /// Its treeview color (`None`: the palette's)
     color: Option<Color>,
+    /// The hue slider is being dragged
+    dragging_hue: bool,
     size: DisplayContainerSize,
 }
 impl ProjectApplet {
@@ -402,6 +436,7 @@ impl ProjectApplet {
             icon: None,
             picking_icon: None,
             color: None,
+            dragging_hue: false,
             // until it gets one
             size: DisplayContainerSize::new(800, 600),
         }
@@ -479,28 +514,54 @@ impl ProjectApplet {
         true
     }
 
-    /// The next of `COLORS` (none after the last)
-    fn cycle_color(&mut self) {
-        let next = match self.color {
-            None => 0,
-            Some(color) => COLORS
-                .iter()
-                .position(|&(_, listed)| listed == color)
-                .map_or(0, |index| index + 1),
-        };
-        self.color = COLORS.get(next).map(|&(_, color)| color);
+    /// Sets the color from the hue slider at `x`
+    fn set_hue_at(&mut self, x: f64) {
+        let (left, right) = hue_bar(self.size.width as f32);
+        let hue = ((x as f32 - left) / (right - left)).clamp(0.0, 0.999);
+        self.color = Some(hue_color(hue));
     }
 
-    /// The overview's color row, in its color
-    fn color_row(&self) -> (String, Color) {
-        let Some(color) = self.color else {
-            return ("color: none".to_string(), hint());
-        };
-        let name = COLORS
-            .iter()
-            .find(|&&(_, listed)| listed == color)
-            .map_or("custom", |&(name, _)| name);
-        (format!("color: {name}"), color)
+    /// The color row's plain button and hue slider (its `color:` is a row of text)
+    fn color_controls(&self, width: f32) -> Vec<UITree> {
+        let settings = settings::get();
+        let layout = overview_rows();
+        let top = layout.top_of(COLOR_ROW);
+        let font = font_size();
+        let plain_left = PAD + PLAIN_LEFT * font;
+        let plain = ui::frame(
+            if self.color.is_none() {
+                settings.palette.accent
+            } else {
+                settings.border.unfocused
+            },
+            settings.radius.min(font / 2.0),
+            1.0,
+            Style::absolute([plain_left, top], [PLAIN_WIDTH * font, font]),
+            vec![UITree::leaf_styled(
+                ui::text("plain", settings.palette.fg),
+                Style::absolute([font / 2.0, 0.0], [PLAIN_WIDTH * font, font]),
+            )],
+        )
+        .with_pointer();
+        let (left, right) = hue_bar(width);
+        let step = (right - left) / HUE_STEPS as f32;
+        let mut parts: Vec<UITree> = (0..HUE_STEPS)
+            .map(|index| {
+                let hue = index as f32 / HUE_STEPS as f32;
+                ui::rect(
+                    hue_color(hue),
+                    [left + index as f32 * step, top],
+                    [step.ceil(), font],
+                )
+                .with_pointer()
+            })
+            .collect();
+        parts.push(plain);
+        if let Some(color) = self.color {
+            let x = left + hue_of(color) * (right - left);
+            parts.push(ui::rect(settings.palette.fg, [x - 2.0, top - 2.0], [4.0, font + 4.0]));
+        }
+        parts
     }
 
     /// Its icon as shown
@@ -618,7 +679,9 @@ impl ProjectApplet {
                 kind: MouseEventKind::Motion,
                 ..
             }) => {
-                if let Some(top) = self.zoom_top() {
+                if self.dragging_hue {
+                    self.set_hue_at(x);
+                } else if let Some(top) = self.zoom_top() {
                     self.holder.tree.zoom_motion([x, y - f64::from(top)]);
                 }
             }
@@ -645,6 +708,10 @@ impl ProjectApplet {
     /// Damages what it changed
     /// A left press or release; releases are only the zoom-out view's (eg the end of a drag there)
     fn handle_overview_button(&mut self, [x, y]: [f64; 2], pressed: bool) {
+        if !pressed && self.dragging_hue {
+            self.dragging_hue = false;
+            return;
+        }
         if let Some(top) = self.zoom_top()
             && (y >= f64::from(top) || !pressed)
         {
@@ -678,7 +745,16 @@ impl ProjectApplet {
             }
             Some(DIRECTORY_ROW) => self.start_setting_directory(),
             Some(ICON_ROW) => self.start_picking_icon(),
-            Some(COLOR_ROW) => self.cycle_color(),
+            Some(COLOR_ROW) => {
+                let font = f64::from(font_size());
+                let plain_left = f64::from(PAD) + f64::from(PLAIN_LEFT) * font;
+                if (plain_left..plain_left + f64::from(PLAIN_WIDTH) * font).contains(&x) {
+                    self.color = None;
+                } else if x >= f64::from(hue_bar(self.size.width as f32).0) {
+                    self.dragging_hue = true;
+                    self.set_hue_at(x);
+                }
+            }
             Some(OPTIONS_ROW) => {
                 let cell = NEW_CELL * font_size();
                 if let Some(index) = (0..NEW_ROWS.len()).find(|&index| {
@@ -735,7 +811,6 @@ impl ProjectApplet {
             (None, KeySymbol::Char('i')) if modifiers == KeyModifiers::NONE => {
                 self.start_picking_icon();
             }
-            (None, KeySymbol::Char('c')) if modifiers == KeyModifiers::NONE => self.cycle_color(),
             (None, KeySymbol::Char(key_char))
                 if modifiers == KeyModifiers::NONE
                     && let Some(index) =
@@ -833,7 +908,7 @@ impl ProjectApplet {
                     )
                 } else {
                     (
-                        "r: rename, d: set directory, i: set icon, c: color, 1-9: select",
+                        "r: rename, d: set directory, i: set icon, 1-9: select",
                         hint(),
                     )
                 },
@@ -846,7 +921,7 @@ impl ProjectApplet {
             (title, text),
             directory,
             icon_row,
-            self.color_row(),
+            ("color:".to_string(), self.color.unwrap_or(text)),
             (hint.0.to_string(), hint.1),
         ]
         .into_iter()
@@ -870,6 +945,7 @@ impl ProjectApplet {
         let rows = header
             .into_iter()
             .chain(rows)
+            .chain(self.color_controls(width))
             .chain(self.zoom_view(size))
             .collect();
         UITree::new_styled(
@@ -1054,6 +1130,13 @@ impl StandardApplet for ProjectApplet {
             return Vec::new();
         }
         self.holder.tree.shown_at_once()
+    }
+
+    fn treeview_colors(&self) -> Vec<(WorldTreePath, Color)> {
+        if self.dissolved {
+            return Vec::new();
+        }
+        self.holder.tree.treeview_colors()
     }
 
     /// Its tree, whose root (a container) is labeled with the project's name
@@ -1243,5 +1326,21 @@ impl StandardApplet for ProjectApplet {
             self.hook.damage_window();
         }
         self.holder.update_wl_focus();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{hue_color, hue_of};
+
+    /// The slider's marker sits where it was clicked
+    #[test]
+    fn hue_round_trips() {
+        for step in 0..100 {
+            let hue = step as f32 / 100.0;
+            let back = hue_of(hue_color(hue));
+            let off = (back - hue).abs().min(1.0 - (back - hue).abs());
+            assert!(off < 0.01, "{hue} came back as {back}");
+        }
     }
 }

@@ -14,10 +14,12 @@
   character (eg an emoji) is used as is, Backspace goes back to the default (`PROJECT_ICON`), Esc cancels. Also shown
   before the name. Saved as `SavedTree::icon` on the inner root (like `label`), and the treeview's `icon` reads it
   from the published `project` spawner's `inner`.
-- Color (#76): a row after the icon, in its color; `c` or a click cycles `COLORS` then none. Saved as
-  `SavedTree::color`. Treeview: `Treeview::colors` (paths → color, like `shown_at_once`), gathered by
-  `NodeTree::treeview_colors` (projects' own from their published `saved`, plus their applets' joined); the root's
-  `view_tree_rows` sets `TreeviewRow::color` (text; dragged/inactive rows stay `inactive`). Labels stay `String`.
+- Color (#76): a row after the icon: `color:` (in its color), a `plain` button (none: the palette's `fg`), then a
+  hue slider to the row's end (click or drag, `dragging_hue`; pastel HSL s 0.8 l 0.75, `hue_color`/`hue_of`). No keys.
+  Saved as `SavedTree::color`. Treeview: `Treeview::colors` (paths → color, like `shown_at_once`), gathered by
+  `NodeTree::treeview_colors` (projects' own from their published `saved`, plus their applets' joined; projects
+  forward their tree's, and the root's tree is a project too); the root's `view_tree_rows` sets `TreeviewRow::color`
+  (text; dragged/inactive ones at half alpha). Zoom-out titles: `NodeTree::title_color`. Labels stay `String`.
 - Zoom-out view (#145, replaced #82's preview cards): below the rows, `NodeTree::zoom_window` of its tree fills the
   rest (`zoom_top`), live since a child's `Damage` damages the project's window. Left presses and releases there go to `NodeTree::zoom_button`. Hidden while
   setting the directory or icon (their options take those rows).

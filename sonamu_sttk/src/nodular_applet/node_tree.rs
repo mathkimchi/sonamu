@@ -1502,6 +1502,15 @@ impl NodeTree {
             .map_or_else(|| label.clone(), |icon| format!("{icon} {label}"))
     }
 
+    /// Its title's color: a project's own (#76), else the palette's
+    fn title_color(&self, id: NodeId) -> Color {
+        self.nodes[id]
+            .main
+            .as_ref()
+            .and_then(|main| project_color(main.get_treeview().saved.as_ref()))
+            .unwrap_or(settings::get().palette.fg)
+    }
+
     /// Starts the focused node's wl client if it is hibernating
     pub fn wake_focused(&mut self) {
         let id = self.focused_node();
@@ -2951,7 +2960,7 @@ impl NodeTree {
                 panes.iter().map(|pane| {
                     let [x, y, width, _] = pane.rect.map(|value| value as f32 * scale);
                     UITree::leaf_styled(
-                        ui::text(self.title(pane.node), settings.palette.fg),
+                        ui::text(self.title(pane.node), self.title_color(pane.node)),
                         Style::absolute(
                             [x + INSET, y - f32::midpoint(ui::row_height(), font_size())],
                             [(width - 2.0 * INSET).max(0.0), font_size()],
@@ -3540,12 +3549,7 @@ impl NodeTree {
                 continue;
             };
             let published = main.get_treeview();
-            if let Some(SavedApplet::Spawner {
-                inner: Some(contents),
-                ..
-            }) = &published.saved
-                && let Some(color) = contents.color
-            {
+            if let Some(color) = project_color(published.saved.as_ref()) {
                 colors.push((WorldTreePath::from_tree_path(&path), color));
             }
             colors.extend(
@@ -3704,6 +3708,17 @@ const WL_ICONS: [(&[&str], char); 4] = [
     (&["dolphin", "nautilus", "thunar", "nemo"], '\u{f07b}'),
     (&["okular", "zathura", "evince"], '\u{f1c1}'),
 ];
+
+/// A project's color (#76), by how it is saved
+fn project_color(saved: Option<&SavedApplet>) -> Option<Color> {
+    match saved? {
+        SavedApplet::Spawner {
+            inner: Some(contents),
+            ..
+        } => contents.color,
+        _ => None,
+    }
+}
 
 /// A project's icon until one is picked
 pub(crate) const PROJECT_ICON: char = '\u{f0b1}';
