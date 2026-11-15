@@ -28,6 +28,13 @@
       "description": "Border, gap and radius also on a pane alone in its tree, and on the treeview",
       "type": "boolean"
     },
+    "opacity": {
+      "description": "Of Sonamu's own translucent backgrounds and treeview (applets, panels, rows), so what's behind shows through:\n1 is opaque. Menus and popups are always opaque",
+      "type": "number",
+      "format": "float",
+      "minimum": 0,
+      "maximum": 1
+    },
     "font_size": {
       "description": "Text height in px (Sonamu's own UI isn't scaled)",
       "type": "number",

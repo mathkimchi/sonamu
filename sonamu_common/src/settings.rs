@@ -19,6 +19,7 @@ use std::{
     process::{Command, ExitStatus, Stdio},
     sync::{
         LazyLock, Mutex, PoisonError, RwLock,
+        atomic::{AtomicU8, Ordering},
         mpsc::{self, Receiver},
     },
     thread,
@@ -62,6 +63,10 @@ pub struct Settings {
     pub radius: f32,
     /// Border, gap and radius also on a pane alone in its tree, and on the treeview
     pub always_frame: bool,
+    /// Of Sonamu's own translucent backgrounds and treeview (applets, panels, rows), so what's behind shows through:
+    /// 1 is opaque. Menus and popups are always opaque
+    #[schemars(range(min = 0, max = 1))]
+    pub opacity: f32,
     /// Text height in px (Sonamu's own UI isn't scaled)
     #[schemars(range(min = 8, max = 64))]
     pub font_size: f32,
@@ -100,6 +105,17 @@ impl Settings {
     #[must_use]
     pub fn gap_and_border_px(&self) -> (u32, u32) {
         (self.gap.round().to_px(), self.border.width.round().to_px())
+    }
+
+    /// `opacity` as a color's alpha
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamped to 0..=255"
+    )]
+    pub fn alpha(&self) -> u8 {
+        (self.opacity.clamp(0.0, 1.0) * 255.0).round() as u8
     }
 
     /// Every keybind: groups in order, then binds in order
@@ -503,6 +519,14 @@ impl From<serde_json::Error> for LoadError {
     }
 }
 
+/// `Settings::alpha` of the current settings, read without cloning them (drawing asks for it often)
+static ALPHA: AtomicU8 = AtomicU8::new(0xCC);
+
+/// `Settings::alpha` of the current settings
+pub fn alpha() -> u8 {
+    ALPHA.load(Ordering::Relaxed)
+}
+
 /// Whether `a` and `b` differ, keybind groups' order too (maps compare without it)
 #[must_use]
 pub fn differs(a: &Settings, b: &Settings) -> bool {
@@ -644,6 +668,7 @@ fn reload_from(dir: &Path, reloading: bool) -> Option<Vec<PathBuf>> {
             // read by sonamu_ui itself (eg char grid sizes), which can't see the settings
             sonamu_ui::ui_element::set_font_size(settings.font_size);
             sonamu_ui::mipmaps::set_enabled(settings.mipmaps);
+            ALPHA.store(settings.alpha(), Ordering::Relaxed);
             let changed = {
                 let mut current = CURRENT.write().unwrap_or_else(PoisonError::into_inner);
                 let old = std::mem::replace(&mut *current, settings);
@@ -928,6 +953,19 @@ mod tests {
         assert_eq!(settings, reordered);
         assert!(differs(&settings, &reordered));
         assert!(!differs(&settings, &settings.clone()));
+    }
+
+    /// `opacity` (0..=1) as a color's alpha byte; the default matches the old fixed 0xCC
+    #[test]
+    fn opacity_to_alpha() {
+        let with = |opacity| Settings {
+            opacity,
+            ..Settings::default()
+        };
+        assert_eq!(Settings::default().alpha(), 0xCC);
+        assert_eq!(with(1.0).alpha(), 0xFF);
+        assert_eq!(with(0.0).alpha(), 0);
+        assert_eq!(with(2.0).alpha(), 0xFF);
     }
 
     #[test]

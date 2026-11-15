@@ -22,16 +22,14 @@ pub fn dragged([x1, y1]: [f64; 2], [x2, y2]: [f64; 2]) -> bool {
     (x2 - x1).hypot(y2 - y1) > DRAG_THRESHOLD
 }
 
-/// The alpha of applets' backgrounds (about 80%), so what is behind them shows through
-const OPACITY: u8 = 0xCC;
-
-pub const fn with_opacity(Color([r, g, b, _]): Color) -> Color {
-    Color([r, g, b, OPACITY])
+/// `color` at the setting `opacity`, so what is behind it shows through
+pub fn with_opacity(Color([r, g, b, _]): Color) -> Color {
+    Color([r, g, b, sonamu_common::settings::alpha()])
 }
 
 // Backgrounds: translucent shades of the palette's `bg`, the same in every applet; text is the palette's
 /// Behind an applet (hub, man page, editor, project overview, file manager header)
-pub const fn bg(palette: &Palette) -> Color {
+pub fn bg(palette: &Palette) -> Color {
     with_opacity(palette.bg)
 }
 /// Behind a panel or list (treeview, file list)
