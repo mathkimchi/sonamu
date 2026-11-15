@@ -1884,10 +1884,97 @@ mod tests {
         StandardEvent::UIEvent(UIEvent::Swipe { fingers, phase })
     }
 
+    /// A swipe with `fingers` through `deltas`
+    fn swipe_through(
+        event_loop: &mut EventLoop<'static, RootNodeApplet>,
+        root: &mut RootNodeApplet,
+        fingers: u32,
+        deltas: impl IntoIterator<Item = [f64; 2]>,
+        cancelled: bool,
+    ) {
+        send(event_loop, root, swipe(fingers, SwipePhase::Begin));
+        for delta in deltas {
+            send(event_loop, root, swipe(fingers, SwipePhase::Update(delta)));
+        }
+        send(
+            event_loop,
+            root,
+            swipe(fingers, SwipePhase::End { cancelled }),
+        );
+    }
+
+    /// One random step of `swipes_keep_every_tab`, described in `log` first
+    fn random_action(
+        rng: &mut Rng,
+        event_loop: &mut EventLoop<'static, RootNodeApplet>,
+        root: &mut RootNodeApplet,
+        log: &mut Vec<String>,
+    ) {
+        match rng.below(10) {
+            // like clicking a row of the treeview, to get deep quickly
+            8 | 9 => {
+                let rows = view_tree_rows(
+                    &root.holder.tree,
+                    None,
+                    root.holder.tree.active_screen(),
+                    false,
+                );
+                let path = rows[rng.below(rows.len() as u64) as usize].path.clone();
+                log.push(format!("focus {:?}", path.0));
+                send(event_loop, root, StandardEvent::Focus(path));
+            }
+            0 => {
+                let screen = rng.below(2) as usize;
+                log.push(format!("activate {screen}"));
+                send(event_loop, root, StandardEvent::ActivateScreen(screen));
+            }
+            1 => {
+                let down = rng.below(2) == 0;
+                log.push(format!("4 fingers {}", if down { "down" } else { "up" }));
+                let y = if down { 80.0 } else { -80.0 };
+                swipe_through(event_loop, root, 4, [[0.0, y]], false);
+            }
+            // what lost tabs: switching screens, then from a child to its parent
+            2 | 3 => {
+                let screen = 1 - root.holder.tree.active_screen();
+                let updates = 1 + rng.below(6);
+                log.push(format!(
+                    "activate {screen}, 3 fingers to parent, {updates} updates"
+                ));
+                send(event_loop, root, StandardEvent::ActivateScreen(screen));
+                let deltas: Vec<_> = (0..updates)
+                    .map(|_| [rng.px() / 8.0, rng.px() + 180.0])
+                    .collect();
+                swipe_through(event_loop, root, 3, deltas, false);
+            }
+            _ => {
+                let vertical = rng.below(2) == 0;
+                let updates = 1 + rng.below(8);
+                let cancelled = rng.below(10) == 0;
+                let sign = if rng.below(2) == 0 { 1.0 } else { -1.0 };
+                log.push(format!(
+                    "3 fingers vertical {vertical}, {updates} updates, cancelled {cancelled}"
+                ));
+                let deltas: Vec<_> = (0..updates)
+                    .map(|_| {
+                        // mostly one way, as fingers do
+                        let main = sign * (rng.px() + 60.0);
+                        let cross = rng.px() / 8.0;
+                        if vertical {
+                            [cross, main]
+                        } else {
+                            [main, cross]
+                        }
+                    })
+                    .collect();
+                swipe_through(event_loop, root, 3, deltas, cancelled);
+            }
+        }
+    }
+
     /// Random swipes, screen switches and focus jumps on two screens never lose a tab: no applet panics, and no
     /// tab is sized past a screen or flooded with resizes (a wl client is dropped when it can't keep up)
     #[test]
-    #[expect(clippy::too_many_lines, reason = "the fuzz's actions")]
     fn swipes_keep_every_tab() {
         // an applet's thread panicking (eg a project's) freezes it, its tabs gone from the screen
         let panicked = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1927,96 +2014,7 @@ mod tests {
             assert_eq!(counts, vec![1; tabs], "seed {seed}: before swiping");
             let mut log = Vec::new();
             for _ in 0..40 {
-                match rng.below(10) {
-                    // like clicking a row of the treeview, to get deep quickly
-                    8 | 9 => {
-                        let rows = view_tree_rows(
-                            &root.holder.tree,
-                            None,
-                            root.holder.tree.active_screen(),
-                            false,
-                        );
-                        let path = rows[rng.below(rows.len() as u64) as usize].path.clone();
-                        log.push(format!("focus {:?}", path.0));
-                        send(&mut event_loop, &mut root, StandardEvent::Focus(path));
-                    }
-                    0 => {
-                        let screen = rng.below(2) as usize;
-                        log.push(format!("activate {screen}"));
-                        send(
-                            &mut event_loop,
-                            &mut root,
-                            StandardEvent::ActivateScreen(screen),
-                        );
-                    }
-                    1 => {
-                        let down = rng.below(2) == 0;
-                        log.push(format!("4 fingers {}", if down { "down" } else { "up" }));
-                        send(&mut event_loop, &mut root, swipe(4, SwipePhase::Begin));
-                        let y = if down { 80.0 } else { -80.0 };
-                        send(
-                            &mut event_loop,
-                            &mut root,
-                            swipe(4, SwipePhase::Update([0.0, y])),
-                        );
-                        let end = SwipePhase::End { cancelled: false };
-                        send(&mut event_loop, &mut root, swipe(4, end));
-                    }
-                    // what lost tabs: switching screens, then from a child to its parent
-                    2 | 3 => {
-                        let screen = 1 - root.holder.tree.active_screen();
-                        let updates = 1 + rng.below(6);
-                        log.push(format!(
-                            "activate {screen}, 3 fingers to parent, {updates} updates"
-                        ));
-                        send(
-                            &mut event_loop,
-                            &mut root,
-                            StandardEvent::ActivateScreen(screen),
-                        );
-                        send(&mut event_loop, &mut root, swipe(3, SwipePhase::Begin));
-                        for _ in 0..updates {
-                            let delta = [rng.px() / 8.0, rng.px() + 180.0];
-                            send(
-                                &mut event_loop,
-                                &mut root,
-                                swipe(3, SwipePhase::Update(delta)),
-                            );
-                        }
-                        let end = SwipePhase::End { cancelled: false };
-                        send(&mut event_loop, &mut root, swipe(3, end));
-                    }
-                    _ => {
-                        let vertical = rng.below(2) == 0;
-                        let updates = 1 + rng.below(8);
-                        let cancelled = rng.below(10) == 0;
-                        let sign = if rng.below(2) == 0 { 1.0 } else { -1.0 };
-                        log.push(format!(
-                            "3 fingers vertical {vertical}, {updates} updates, cancelled {cancelled}"
-                        ));
-                        send(&mut event_loop, &mut root, swipe(3, SwipePhase::Begin));
-                        for _ in 0..updates {
-                            // mostly one way, as fingers do
-                            let main = sign * (rng.px() + 60.0);
-                            let cross = rng.px() / 8.0;
-                            let delta = if vertical {
-                                [cross, main]
-                            } else {
-                                [main, cross]
-                            };
-                            send(
-                                &mut event_loop,
-                                &mut root,
-                                swipe(3, SwipePhase::Update(delta)),
-                            );
-                        }
-                        send(
-                            &mut event_loop,
-                            &mut root,
-                            swipe(3, SwipePhase::End { cancelled }),
-                        );
-                    }
-                }
+                random_action(&mut rng, &mut event_loop, &mut root, &mut log);
                 // sometimes let the settle finish, else interrupt it
                 pump(&mut event_loop, &mut root, rng.below(2) * 100);
                 // as the runner draws it

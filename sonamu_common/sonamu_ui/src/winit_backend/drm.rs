@@ -234,7 +234,6 @@ pub fn run_drm_display(
 }
 
 impl DrmDisplay {
-    #[expect(clippy::too_many_lines, reason = "sequential DRM setup")]
     fn new(
         is_running: Arc<AtomicBool>,
         event_queue: Sender<UIEvent>,
@@ -246,58 +245,13 @@ impl DrmDisplay {
         let (mut session, notifier) =
             LibSeatSession::new().map_err(|err| format!("no session (logind or seatd): {err}"))?;
         let seat = session.seat();
-
-        let gpu_path = primary_gpu(&seat)
-            .ok()
-            .flatten()
-            .or_else(|| all_gpus(&seat).ok()?.into_iter().next())
-            .ok_or("no GPU found")?;
-        let fd = session
-            .open(
-                &gpu_path,
-                OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
-            )
-            .map_err(|err| format!("can't open {}: {err}", gpu_path.display()))?;
-        let drm = DrmDeviceFd::new(DeviceFd::from(fd));
-        log::info!(
-            "Using {} ({:?})",
-            gpu_path.display(),
-            DrmNode::from_file(&drm).ok()
-        );
+        let drm = open_gpu(&mut session, &seat)?;
         // starting from every monitor off
         let (drm_device, drm_notifier) =
             DrmDevice::new(drm.clone(), true).map_err(|err| format!("can't use DRM: {err}"))?;
         let gbm = GbmDevice::new(drm).map_err(|err| format!("can't use GBM: {err}"))?;
-        // SAFETY: only queries
-        let formats = unsafe { gpu.device.as_hal::<Vulkan>() }
-            .map(|hal_device| unsafe { dmabuf::modifiers(&hal_device, SCANOUT_USAGE) })
-            .unwrap_or_default()
-            .into_iter()
-            .flat_map(|modifier| {
-                [Fourcc::Xrgb8888, Fourcc::Argb8888].map(|code| Format {
-                    code,
-                    modifier: modifier.into(),
-                })
-            })
-            .collect::<Vec<_>>();
-        if formats.is_empty() {
-            return Err("wgpu can't draw into dmabufs (it needs Vulkan with \
-                `VK_EXT_image_drm_format_modifier`)"
-                .to_string());
-        }
-
-        // keymap from the XKB_DEFAULT_* environment variables, like smithay's seat keyboard
-        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
-        let keymap = xkb::Keymap::new_from_names(
-            &context,
-            "",
-            "",
-            "",
-            "",
-            None,
-            xkb::KEYMAP_COMPILE_NO_FLAGS,
-        )
-        .ok_or("can't load the keymap")?;
+        let formats = scanout_formats(gpu)?;
+        let keymap = default_keymap()?;
 
         let mut libinput = Libinput::new_with_udev(LibinputSessionInterface::from(session.clone()));
         libinput
@@ -312,33 +266,8 @@ impl DrmDisplay {
             )
             .map_err(|err| err.to_string())?;
         handle
-            .insert_source(notifier, |event, &mut (), display: &mut Self| match event {
-                SessionEvent::PauseSession => {
-                    display.libinput.suspend();
-                    display.stop_repeat();
-                    display.drm_device.pause();
-                }
-                SessionEvent::ActivateSession => {
-                    if display.libinput.resume().is_err() {
-                        log::error!("Couldn't resume libinput");
-                    }
-                    // the monitors showed something else meanwhile, so from a known state
-                    if let Err(err) = display.drm_device.activate(true) {
-                        log::error!("Couldn't take the monitors back: {err}");
-                    }
-                    for output in &mut display.outputs {
-                        if let Err(err) = output.surface.surface().reset_state() {
-                            log::warn!("Couldn't reset {:?}: {err}", output.connector);
-                        }
-                        output.surface.reset_buffers();
-                        output.textures.clear();
-                        // its vblank won't come
-                        output.pending = false;
-                    }
-                    // monitors may have been plugged in meanwhile
-                    display.update_outputs();
-                    display.needs_draw = true;
-                }
+            .insert_source(notifier, |event, &mut (), display: &mut Self| {
+                display.handle_session(event);
             })
             .map_err(|err| err.to_string())?;
         handle
@@ -411,6 +340,37 @@ impl DrmDisplay {
             }))
             .unwrap();
         Ok(display)
+    }
+
+    fn handle_session(&mut self, event: SessionEvent) {
+        match event {
+            SessionEvent::PauseSession => {
+                self.libinput.suspend();
+                self.stop_repeat();
+                self.drm_device.pause();
+            }
+            SessionEvent::ActivateSession => {
+                if self.libinput.resume().is_err() {
+                    log::error!("Couldn't resume libinput");
+                }
+                // the monitors showed something else meanwhile, so from a known state
+                if let Err(err) = self.drm_device.activate(true) {
+                    log::error!("Couldn't take the monitors back: {err}");
+                }
+                for output in &mut self.outputs {
+                    if let Err(err) = output.surface.surface().reset_state() {
+                        log::warn!("Couldn't reset {:?}: {err}", output.connector);
+                    }
+                    output.surface.reset_buffers();
+                    output.textures.clear();
+                    // its vblank won't come
+                    output.pending = false;
+                }
+                // monitors may have been plugged in meanwhile
+                self.update_outputs();
+                self.needs_draw = true;
+            }
+        }
     }
 
     /// Shows on the connected monitors (at startup, and when they may have changed, eg one was plugged in):
@@ -1039,6 +999,63 @@ fn connected_outputs(drm: &DrmDevice) -> Result<Vec<(connector::Info, Mode)>, St
         return Err("no connected monitor".to_string());
     }
     Ok(outputs)
+}
+
+fn open_gpu(session: &mut LibSeatSession, seat: &str) -> Result<DrmDeviceFd, String> {
+    let gpu_path = primary_gpu(seat)
+        .ok()
+        .flatten()
+        .or_else(|| all_gpus(seat).ok()?.into_iter().next())
+        .ok_or("no GPU found")?;
+    let fd = session
+        .open(
+            &gpu_path,
+            OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
+        )
+        .map_err(|err| format!("can't open {}: {err}", gpu_path.display()))?;
+    let drm = DrmDeviceFd::new(DeviceFd::from(fd));
+    log::info!(
+        "Using {} ({:?})",
+        gpu_path.display(),
+        DrmNode::from_file(&drm).ok()
+    );
+    Ok(drm)
+}
+
+/// The formats wgpu can draw into as dmabufs for scanout
+fn scanout_formats(gpu: &Gpu) -> Result<Vec<Format>, String> {
+    // SAFETY: only queries
+    let formats = unsafe { gpu.device.as_hal::<Vulkan>() }
+        .map(|hal_device| unsafe { dmabuf::modifiers(&hal_device, SCANOUT_USAGE) })
+        .unwrap_or_default()
+        .into_iter()
+        .flat_map(|modifier| {
+            [Fourcc::Xrgb8888, Fourcc::Argb8888].map(|code| Format {
+                code,
+                modifier: modifier.into(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if formats.is_empty() {
+        return Err("wgpu can't draw into dmabufs (it needs Vulkan with \
+            `VK_EXT_image_drm_format_modifier`)"
+            .to_string());
+    }
+    Ok(formats)
+}
+
+/// From the XKB_DEFAULT_* environment variables, like smithay's seat keyboard
+fn default_keymap() -> Result<xkb::Keymap, String> {
+    xkb::Keymap::new_from_names(
+        &xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
+        "",
+        "",
+        "",
+        "",
+        None,
+        xkb::KEYMAP_COMPILE_NO_FLAGS,
+    )
+    .ok_or_else(|| "can't load the keymap".to_string())
 }
 
 #[expect(clippy::cast_sign_loss, reason = "mode timings are non-negative")]
