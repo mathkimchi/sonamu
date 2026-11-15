@@ -52,8 +52,7 @@ const MAN_PAGE: &[ManSection] = &[
 /// The setting `keybinds` as keys and descriptions
 fn keybind_rows(settings: &Settings) -> Vec<(String, String)> {
     settings
-        .keybinds
-        .iter()
+        .all_keybinds()
         .map(|keybind| (keys_label(keybind), describe(&keybind.action)))
         .collect()
 }

@@ -734,8 +734,7 @@ fn run_binding(event: &UIEvent) -> bool {
     let settings = sonamu_common::settings::get();
     // Sonamu commands go to the applets (`is_keybind`), after Luau's bindings
     if let Some(Action::Shell { shell }) = settings
-        .keybinds
-        .iter()
+        .all_keybinds()
         .find(|keybind| keybind.matches(symbol, raw_keycode, mods))
         .map(|keybind| &keybind.action)
     {

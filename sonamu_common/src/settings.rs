@@ -1,6 +1,7 @@
 //! User settings, read from the config dir. See `.claude/SETTINGS.md`.
 
 use crate::notification::Replacing;
+use indexmap::IndexMap;
 use notify::Watcher as _;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::Deserialize;
@@ -72,8 +73,9 @@ pub struct Settings {
     pub zoom_out: ZoomOutSettings,
     /// Desktop notifications, shown by the status bar (#150)
     pub notifications: NotificationSettings,
-    /// Global shortcuts: Sonamu commands or shell commands. Given, it replaces the defaults (list the ones to keep)
-    pub keybinds: Vec<Keybind>,
+    /// Global shortcuts in named groups (shown as help sections): Sonamu commands or shell commands. Given, it
+    /// replaces the defaults (list the groups to keep)
+    pub keybinds: IndexMap<String, Vec<Keybind>>,
     /// Programs restored running in their terminal (see `.claude/SESSIONS.md`)
     pub restore_programs: Vec<RestoreProgram>,
     /// Shell commands run once when Sonamu starts (eg `dms run`)
@@ -95,6 +97,11 @@ impl Settings {
     #[must_use]
     pub fn gap_and_border_px(&self) -> (u32, u32) {
         (self.gap.round().to_px(), self.border.width.round().to_px())
+    }
+
+    /// Every keybind: groups in order, then binds in order
+    pub fn all_keybinds(&self) -> impl Iterator<Item = &Keybind> {
+        self.keybinds.values().flatten()
     }
 }
 
@@ -228,10 +235,10 @@ pub fn keybind_command(
         modifiers.logo,
     ];
     match get()
-        .keybinds
-        .into_iter()
+        .all_keybinds()
         .find(|keybind| keybind.matches(symbol, raw_keycode, mods))?
         .action
+        .clone()
     {
         Action::Command { command, args } => Some((command, args)),
         Action::Shell { .. } => None,
@@ -482,7 +489,14 @@ pub fn load(dir: &Path) -> Result<Loaded, LoadError> {
 fn parse(text: &str) -> Result<Loaded, LoadError> {
     let mut value: serde_json::Value =
         serde_json::from_str(DEFAULTS).expect("valid default settings");
-    merge(&mut value, serde_json::from_str(text)?);
+    let over: serde_json::Value = serde_json::from_str(text)?;
+    // given keybinds replace the defaults' groups, not merge with them
+    if over.get("keybinds").is_some()
+        && let Some(defaults) = value.as_object_mut()
+    {
+        defaults.remove("keybinds");
+    }
+    merge(&mut value, over);
     Ok(serde_json::from_value(value)?)
 }
 
@@ -765,7 +779,27 @@ mod tests {
     #[test]
     fn example_config_parses() {
         let text = include_str!("../../examples/config/settings.json");
-        assert!(parse(text).unwrap().settings.keybinds.len() > 1);
+        assert!(parse(text).unwrap().settings.all_keybinds().count() > 1);
+    }
+
+    #[test]
+    fn keybinds_replace_defaults_whole() {
+        let loaded = parse(r#"{"keybinds": {"Mine": [{"key": "x", "shell": "true"}]}}"#).unwrap();
+        assert_eq!(
+            loaded.settings.keybinds.keys().collect::<Vec<_>>(),
+            ["Mine"]
+        );
+    }
+
+    #[test]
+    fn keybind_groups_keep_order() {
+        let groups: Vec<_> = Settings::default().keybinds.into_keys().collect();
+        assert_eq!(groups, ["Global", "Windows", "Tree", "Traversal", "Swipe"]);
+    }
+
+    #[test]
+    fn flat_keybinds_fail() {
+        assert!(parse(r#"{"keybinds": [{"key": "x", "shell": "true"}]}"#).is_err());
     }
 
     /// Writes `assets/settings.schema.json` if it's out of date

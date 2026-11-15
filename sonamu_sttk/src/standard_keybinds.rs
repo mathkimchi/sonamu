@@ -173,7 +173,7 @@ mod tests {
     /// Every default keybind's command is one something handles
     #[test]
     fn default_keybinds_are_known() {
-        for keybind in Settings::default().keybinds {
+        for keybind in Settings::default().all_keybinds().cloned() {
             let Action::Command { command, args } = keybind.action else {
                 continue;
             };
