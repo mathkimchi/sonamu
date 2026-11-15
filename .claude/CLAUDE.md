@@ -52,5 +52,6 @@ DEVLOG.md is 10k+ lines, read it with tail.
 - When explaining and writing to .claude, avoid verbosity. Every word must serve a purpose. Prefer clear shorthand over full sentence when sensible.
 - Update the files in .claude as things are discovered and changed.
 - Never edit `docs/`, `README.md` or `DEVLOG.md`.
-- Commits may wait for a gpg passphrase: if `git commit` hasn't finished after 20 s, commit again with `--no-gpg-sign` (eg `timeout 20 git commit ... || git commit --no-gpg-sign ...`). Commit frequently.
+- Commit frequently.
+- A pre-commit hook (`.githooks/`, `git config core.hooksPath .githooks`) runs `cargo fmt` and clippy (`-D warnings`).
 - Prefer self-documenting code that requires minimal comments.

@@ -77,6 +77,7 @@ pedantic = { level = "warn", priority = -1 }
 # nursery = "warn" # these are for experimental lints
 cargo = { level = "warn", priority = -1 }
 
+allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
 
 # all the pedantic stuff I'm not going to listen to:

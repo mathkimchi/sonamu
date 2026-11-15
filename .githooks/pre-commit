@@ -1,0 +1,9 @@
+#!/bin/sh
+# Formats staged Rust files and runs clippy; enable with `git config core.hooksPath .githooks`
+set -e
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+[ -z "$staged" ] && ! git diff --cached --quiet -- '*Cargo.toml' && staged=" "
+[ -z "$staged" ] && exit 0
+cargo fmt --all
+echo "$staged" | xargs -r git add --
+cargo clippy --workspace --all-targets --quiet -- -D warnings
