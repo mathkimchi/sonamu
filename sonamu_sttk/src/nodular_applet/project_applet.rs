@@ -138,6 +138,19 @@ fn hint() -> Color {
     settings::get().palette.inactive
 }
 
+/// A `NEW_ROWS` cell's width, on `OPTIONS_ROW`
+fn new_cell_width() -> f32 {
+    NEW_CELL * font_size()
+}
+
+/// The `NEW_ROWS` cell at `x`
+fn new_cell_at(x: f64) -> Option<usize> {
+    let cell = f64::from(new_cell_width());
+    let index = ((x - f64::from(PAD)) / cell).floor();
+    #[expect(clippy::cast_sign_loss, reason = "checked non-negative")]
+    (index >= 0.0 && index < NEW_ROWS.len() as f64).then_some(index as usize)
+}
+
 /// The home directory, which paths show as `~`
 /// The overview's rows, each a line of text at its top (above the zoom-out view)
 fn overview_rows() -> Rows {
@@ -302,6 +315,8 @@ pub struct ProjectApplet {
     color: Option<Color>,
     /// The hue slider is being dragged
     dragging_hue: bool,
+    /// Where the pointer is over the overview's rows (above the zoom-out view), to highlight what it's on
+    hovered: Option<[f64; 2]>,
     size: DisplayContainerSize,
 }
 impl ProjectApplet {
@@ -435,6 +450,7 @@ impl ProjectApplet {
             picking_icon: None,
             color: None,
             dragging_hue: false,
+            hovered: None,
             // until it gets one
             size: DisplayContainerSize::new(800, 600),
         }
@@ -681,9 +697,11 @@ impl ProjectApplet {
                 kind: MouseEventKind::Motion,
                 ..
             }) => {
+                let top = self.zoom_top();
+                self.hovered = top.is_none_or(|top| y < f64::from(top)).then_some([x, y]);
                 if self.dragging_hue {
                     self.set_hue_at(x);
-                } else if let Some(top) = self.zoom_top() {
+                } else if let Some(top) = top {
                     self.holder.tree.zoom_motion([x, y - f64::from(top)]);
                 }
             }
@@ -758,11 +776,7 @@ impl ProjectApplet {
                 }
             }
             Some(OPTIONS_ROW) => {
-                let cell = NEW_CELL * font_size();
-                if let Some(index) = (0..NEW_ROWS.len()).find(|&index| {
-                    let left = f64::from(PAD + index as f32 * cell);
-                    (left..left + f64::from(cell)).contains(&x)
-                }) {
+                if let Some(index) = new_cell_at(x) {
                     self.add_new(index);
                 }
             }
@@ -946,6 +960,7 @@ impl ProjectApplet {
         let header = Self::overview_header(width, count, options);
         let rows = header
             .into_iter()
+            .chain(self.overview_hover(width, count, options))
             .chain(rows)
             .chain(self.color_controls(width))
             .chain(self.zoom_view(size))
@@ -955,6 +970,28 @@ impl ProjectApplet {
             Style::full_size(),
             rows,
         )
+    }
+
+    /// Behind the clickable row (or `NEW_ROWS` cell) of the overview's `count` the pointer is on, like hovered rows
+    /// elsewhere; the color row's parts aren't the whole row, so it isn't lit
+    fn overview_hover(&self, width: f32, count: usize, options: bool) -> Option<UITree> {
+        let [x, y] = self.hovered?;
+        let layout = overview_rows();
+        let row = layout.row_at(y).filter(|&row| row < count)?;
+        if matches!(row, HINT_ROW | COLOR_ROW) {
+            return None;
+        }
+        let [left, w] = if row == OPTIONS_ROW && !options {
+            let cell = new_cell_width();
+            [PAD + new_cell_at(x)? as f32 * cell, cell]
+        } else {
+            [PAD / 2.0, (width - PAD).max(0.0)]
+        };
+        Some(ui::rect(
+            ui::raised_bg(&settings::get().palette),
+            [left, layout.top_of(row)],
+            [w, layout.height],
+        ))
     }
 
     /// The box around the overview's `count` rows, apart from the zoom-out view, and unless `options` show,
@@ -976,7 +1013,7 @@ impl ProjectApplet {
                 Style::full_size(),
             )],
         );
-        let cell = NEW_CELL * font_size();
+        let cell = new_cell_width();
         let new_cells = (0..)
             .zip(NEW_ROWS)
             .filter(|_| !options)
