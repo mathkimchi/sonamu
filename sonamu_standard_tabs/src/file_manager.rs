@@ -840,8 +840,9 @@ impl FileManagerApplet {
             .skip(self.scroll)
             .take(self.visible_rows())
         {
+            // like the treeview's rows
             let background = if index != self.selected {
-                None
+                (self.hovered == Some(index)).then(|| ui::raised_bg(&settings::get().palette))
             } else if self.pane == Pane::Files {
                 Some(ui::selected_bg(&settings::get().palette))
             } else {
