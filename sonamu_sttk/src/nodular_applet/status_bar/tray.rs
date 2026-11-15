@@ -464,7 +464,7 @@ pub fn draw_menu(
                 None => "",
             };
             let label = format!("{}{check}{}", "  ".repeat(entry.depth), entry.label);
-            let label = super::notification_list::cut(&label, MENU_COLUMNS);
+            let label = super::cut(&label, MENU_COLUMNS);
             if !entry.enabled {
                 return vec![lines.text(index, 0, vec![(label, palette.inactive)])];
             }

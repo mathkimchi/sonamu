@@ -6,7 +6,7 @@ use sonamu_common::settings::Palette;
 use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
-    ui_element::{Length, Style, UIElement, UITree, cell_height, cell_width, font_size},
+    ui_element::{CharGrid, Length, Style, UIElement, UITree, cell_height, cell_width, font_size},
 };
 
 pub use sonamu_ui::ui_event::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
@@ -219,6 +219,27 @@ impl ScrollSteps {
         self.0 -= f64::from(steps) * SCROLL_STEP_PX;
         steps
     }
+}
+
+// Char grids (hub, man page, buffer line)
+/// Paints `row` of `grid` with `bg`
+pub fn fill_row(grid: &mut CharGrid, row: usize, bg: Color) {
+    for column in 0..grid.width() {
+        grid.get_char_mut(row, column).set_bg(bg);
+    }
+}
+
+/// Writes `text` from `column`, cut off at the grid's edge; returns the column after it
+pub fn put(grid: &mut CharGrid, row: usize, column: usize, text: &str, fg: Color) -> usize {
+    let mut end = column;
+    for c in text.chars() {
+        if end >= grid.width() {
+            break;
+        }
+        grid.get_char_mut(row, end).set_char(c).set_fg(fg);
+        end += 1;
+    }
+    end
 }
 
 /// A scrollbar's width (px)

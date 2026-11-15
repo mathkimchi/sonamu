@@ -1,7 +1,7 @@
 //! Battery, cpu and memory: the bar's segment and its popup (power profile, processes like `top`)
 
 use super::{
-    Lines, Spans, columns,
+    Lines, Spans, justified,
     system::{Battery, PROCESSES, PROFILES, Snapshot},
     widgets::{Button, Cell, ScrollList, label_color},
 };
@@ -121,12 +121,6 @@ fn bytes(bytes: u64) -> String {
     }
 }
 
-/// `left` and `right` across the popup's width
-fn justified(left: &str, right: &str) -> String {
-    let pad = COLUMNS.saturating_sub(columns(left) + columns(right));
-    format!("{left}{}{right}", " ".repeat(pad))
-}
-
 pub fn draw(
     settings: &Settings,
     snapshot: &Snapshot,
@@ -148,13 +142,16 @@ pub fn draw(
             items.push(lines.text(
                 0,
                 0,
-                vec![(justified(&left, &right), battery_color(battery.percent))],
+                vec![(
+                    justified(COLUMNS, &left, &right),
+                    battery_color(battery.percent),
+                )],
             ));
             let rate = battery.watts.map_or_else(String::new, |watts| {
                 // a real minus sign
                 format!("{watts:.1} W").replace('-', "\u{2212}")
             });
-            items.push(lines.text(1, 0, vec![(justified("Rate", &rate), palette.fg)]));
+            items.push(lines.text(1, 0, vec![(justified(COLUMNS, "Rate", &rate), palette.fg)]));
         }
         None => items.push(lines.text(0, 0, vec![("No battery".to_string(), palette.inactive)])),
     }

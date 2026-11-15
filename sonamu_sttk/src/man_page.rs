@@ -1,7 +1,6 @@
 //! The basic usage manual (`docs/usage.md`). Super+? opens it where a new wl surface would go (the root does that); Esc or q closes it.
 
 use crate::{
-    command_hub::{fill_row, put},
     nodular_applet::{
         AppletContext, AppletSpawner, AppletSpawnerTrait, NodularAppletInitializer, StandardApplet,
     },
@@ -254,26 +253,26 @@ impl StandardApplet for ManPageApplet {
             return grid.element().into();
         }
         for row in 0..height {
-            fill_row(&mut grid, row, ui::bg(&self.palette));
+            ui::fill_row(&mut grid, row, ui::bg(&self.palette));
         }
 
-        fill_row(&mut grid, 0, ui::raised_bg(&self.palette));
-        let title_end = put(&mut grid, 0, 1, "Basic Usage", self.palette.fg);
+        ui::fill_row(&mut grid, 0, ui::raised_bg(&self.palette));
+        let title_end = ui::put(&mut grid, 0, 1, "Basic Usage", self.palette.fg);
         let note = "Esc closes, Up/Down scroll ";
         if let Some(column) = width
             .checked_sub(note.len())
             .filter(|&column| column > title_end + 1)
         {
-            put(&mut grid, 0, column, note, self.palette.inactive);
+            ui::put(&mut grid, 0, column, note, self.palette.inactive);
         }
 
         let rows = Self::rows(width);
         for (row, line) in (1..height).zip(rows.iter().skip(self.scroll)) {
             if line.section {
-                put(&mut grid, row, 1, &line.text, self.palette.accent);
+                ui::put(&mut grid, row, 1, &line.text, self.palette.accent);
             } else {
-                put(&mut grid, row, 0, &line.text, self.palette.fg);
-                put(&mut grid, row, 2, line.keys, self.key_color);
+                ui::put(&mut grid, row, 0, &line.text, self.palette.fg);
+                ui::put(&mut grid, row, 2, line.keys, self.key_color);
             }
         }
 

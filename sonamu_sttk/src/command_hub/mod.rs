@@ -17,7 +17,6 @@ use sonamu_common::{
     settings::{self, Palette, Settings},
 };
 use sonamu_ui::{
-    color::Color,
     display_units::DisplayContainerSize,
     ui_element::{CharGrid, UITree},
     ui_event::{KeyModifiers, KeySymbol, MouseEventKind, UIEvent},
@@ -296,7 +295,7 @@ impl StandardApplet for CommandHubApplet {
             return grid.element().into();
         }
         for row in 0..height {
-            fill_row(&mut grid, row, ui::bg(&self.palette));
+            ui::fill_row(&mut grid, row, ui::bg(&self.palette));
         }
 
         self.repl.draw_prompt(&mut grid, height - 1, &self.palette);
@@ -309,8 +308,8 @@ impl StandardApplet for CommandHubApplet {
         let scroll = self.scroll.min(lines.len().saturating_sub(body_rows));
 
         // header: title, and a hint or how far it's scrolled
-        fill_row(&mut grid, 0, ui::raised_bg(&self.palette));
-        put(&mut grid, 0, 1, &self.title, self.palette.fg);
+        ui::fill_row(&mut grid, 0, ui::raised_bg(&self.palette));
+        ui::put(&mut grid, 0, 1, &self.title, self.palette.fg);
         let note = if scroll > 0 {
             format!("{scroll} lines below (PageDown) ")
         } else {
@@ -321,7 +320,7 @@ impl StandardApplet for CommandHubApplet {
             .checked_sub(note.len())
             .filter(|&column| column > title_end)
         {
-            put(&mut grid, 0, column, &note, self.palette.inactive);
+            ui::put(&mut grid, 0, column, &note, self.palette.inactive);
         }
 
         // the newest lines, at the bottom of the body
@@ -342,23 +341,4 @@ pub fn program_command(program: &str, args: &[&str]) -> std::process::Command {
     command.args(args);
     sonamu_common::connect_wl_client(&mut command);
     command
-}
-
-pub(crate) fn fill_row(grid: &mut CharGrid, row: usize, bg: Color) {
-    for column in 0..grid.width() {
-        grid.get_char_mut(row, column).set_bg(bg);
-    }
-}
-
-/// Writes `text` from `column`, cut off at the grid's edge; returns the column after it
-pub(crate) fn put(grid: &mut CharGrid, row: usize, column: usize, text: &str, fg: Color) -> usize {
-    let mut end = column;
-    for c in text.chars() {
-        if end >= grid.width() {
-            break;
-        }
-        grid.get_char_mut(row, end).set_char(c).set_fg(fg);
-        end += 1;
-    }
-    end
 }

@@ -58,6 +58,29 @@ fn columns(text: &str) -> usize {
         .sum()
 }
 
+/// `text` cut to `max` columns, with `…` if cut
+fn cut(text: &str, max: usize) -> String {
+    if columns(text) <= max {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    for c in text.chars() {
+        if columns(&out) + columns(&c.to_string()) + 1 > max {
+            break;
+        }
+        out.push(c);
+    }
+    out.push('…');
+    out
+}
+
+/// `left` and then `right` at the end of `width` columns, `left` cut to fit
+fn justified(width: usize, left: &str, right: &str) -> String {
+    let left = cut(left, width.saturating_sub(columns(right) + 1));
+    let pad = width.saturating_sub(columns(&left) + columns(right));
+    format!("{left}{}{right}", " ".repeat(pad))
+}
+
 /// The width of `text` in the monospace font (at least)
 fn text_width(text: &str) -> f32 {
     columns(text) as f32 * char_width()

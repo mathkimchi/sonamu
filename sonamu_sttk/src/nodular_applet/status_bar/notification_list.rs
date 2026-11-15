@@ -1,8 +1,9 @@
 //! The bell: its popup (the list, Do not disturb, clear all) and the notifications popping up under the bar
 
 use super::{
-    Lines, Spans, columns,
+    Lines, Spans, columns, cut,
     icons::Icons,
+    justified,
     notifications::{Notification, Store},
     widgets::{Button, Cell, ScrollList, label_color},
 };
@@ -41,22 +42,6 @@ pub enum Click {
     DoNotDisturb,
 }
 
-/// `text` cut to `max` columns, with `…` if cut
-pub fn cut(text: &str, max: usize) -> String {
-    if columns(text) <= max {
-        return text.to_string();
-    }
-    let mut out = String::new();
-    for c in text.chars() {
-        if columns(&out) + columns(&c.to_string()) + 1 > max {
-            break;
-        }
-        out.push(c);
-    }
-    out.push('…');
-    out
-}
-
 /// `text` wrapped at spaces to `width` columns, at most `max` lines (the last cut)
 fn wrap(text: &str, width: usize, max: usize) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
@@ -87,17 +72,6 @@ fn title(notification: &Notification) -> String {
     } else {
         format!("{}: {}", notification.app_name, notification.summary)
     }
-}
-
-/// `left` and then `right` at the end of `width` columns
-fn justified_in(width: usize, left: &str, right: &str) -> String {
-    let left = cut(left, width.saturating_sub(columns(right) + 1));
-    let pad = width.saturating_sub(columns(&left) + columns(right));
-    format!("{left}{}{right}", " ".repeat(pad))
-}
-
-fn justified(left: &str, right: &str) -> String {
-    justified_in(COLUMNS, left, right)
 }
 
 /// Where a notification's text starts, after its icon
@@ -175,7 +149,7 @@ fn list_buttons(store: &Store, list: ScrollList, palette: &Palette) -> Vec<Entry
         (
             DO_NOT_DISTURB,
             vec![(
-                justified(&format!("{icon} Do not disturb"), state),
+                justified(COLUMNS, &format!("{icon} Do not disturb"), state),
                 label_color(palette, on),
             )],
             Click::DoNotDisturb,

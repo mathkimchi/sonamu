@@ -5,7 +5,6 @@ use super::{
     Lines,
     desktop::{self, App},
     icons::Icons,
-    notification_list,
     widgets::{Button, Cell, ScrollList, label_color},
 };
 use crate::{command_hub::program_command, standard_keybinds::terminal, ui};
@@ -84,7 +83,7 @@ impl Launcher {
             let app = matches[index];
             let line = 1 + index - self.list.visible(matches.len(), SHOWN).start;
             let on = index == self.selected;
-            let name = notification_list::cut(&app.name, COLUMNS - NAME_COLUMN);
+            let name = super::cut(&app.name, COLUMNS - NAME_COLUMN);
             items.extend(Button::row(line, COLUMNS).draw(
                 &lines,
                 palette,

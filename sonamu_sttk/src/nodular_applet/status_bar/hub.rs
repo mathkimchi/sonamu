@@ -4,7 +4,7 @@
 use super::{
     Lines, Spans,
     controls::{Osd, State, Volume},
-    notification_list::cut,
+    cut, justified,
     widgets::{Button, Cell, ScrollList, label_color},
 };
 use sonamu_common::settings::{Palette, Settings};
@@ -164,13 +164,6 @@ pub fn size(state: &State, open: Option<Section>) -> [f32; 2] {
     Lines::size(lines(state, open, ScrollList::default()).len(), COLUMNS)
 }
 
-/// `left` and then `right` at the end of the width
-fn justified(left: &str, right: &str) -> String {
-    let left = cut(left, COLUMNS.saturating_sub(super::columns(right) + 1));
-    let pad = COLUMNS.saturating_sub(super::columns(&left) + super::columns(right));
-    format!("{left}{}{right}", " ".repeat(pad))
-}
-
 /// `━━━━──── 60%`
 #[expect(clippy::cast_sign_loss, reason = "slider cells")]
 fn slider(level: f32) -> String {
@@ -248,7 +241,7 @@ fn line_parts(
         Line::Network(ssid) => {
             let network = state.networks.iter().find(|network| network.ssid == ssid);
             let (signal, active) = network.map_or((0, false), |n| (n.signal, n.active));
-            let text = justified(&format!("   {ssid}"), &format!("{signal}%"));
+            let text = justified(COLUMNS, &format!("   {ssid}"), &format!("{signal}%"));
             row(text, active, Click::ConnectWifi(ssid))
         }
         Line::Bluetooth => header(
@@ -260,7 +253,7 @@ fn line_parts(
         Line::Device(index) => {
             let device = &state.devices[index];
             let right = if device.connected { "connected" } else { "" };
-            let text = justified(&format!("   {}", device.name), right);
+            let text = justified(COLUMNS, &format!("   {}", device.name), right);
             row(text, device.connected, Click::ToggleDevice(index))
         }
         Line::Volume => volume_parts(state, open, palette),

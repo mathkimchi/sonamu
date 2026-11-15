@@ -1,8 +1,5 @@
 use crate::{
-    command_hub::{
-        fill_row, put,
-        repl::{self, Repl},
-    },
+    command_hub::repl::{self, Repl},
     man_page::ManPageApplet,
     nodular_applet::{
         AppletSpawner, NodeRequest, NodularAppletInitializer,
@@ -1662,12 +1659,12 @@ fn buffer_line(
     let prompt_row = shown.len();
     match bar {
         Bar::Prompt(_) => {
-            fill_row(&mut grid, prompt_row, ui::raised_bg(palette));
+            ui::fill_row(&mut grid, prompt_row, ui::raised_bg(palette));
             repl.draw_prompt(&mut grid, prompt_row, palette);
         }
         Bar::Insert => {
-            fill_row(&mut grid, prompt_row, ui::raised_bg(palette));
-            put(&mut grid, prompt_row, 1, "-- INSERT --", palette.accent);
+            ui::fill_row(&mut grid, prompt_row, ui::raised_bg(palette));
+            ui::put(&mut grid, prompt_row, 1, "-- INSERT --", palette.accent);
         }
         Bar::None => {}
     }
