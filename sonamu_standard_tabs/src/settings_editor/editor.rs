@@ -132,7 +132,7 @@ impl Editor {
                 Value::from(text)
             }
             FieldKind::Text { nullable: true } if text.is_empty() => Value::Null,
-            FieldKind::Text { .. } => Value::from(text),
+            FieldKind::Text { .. } | FieldKind::Path => Value::from(text),
             _ => return Err(format!("{} can't be typed", field.label)),
         };
         self.commit(std::slice::from_ref(&field.path), &[value])

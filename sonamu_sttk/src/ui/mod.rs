@@ -11,11 +11,15 @@ use sonamu_ui::{
 
 pub mod color_picker;
 pub mod fields;
+pub mod file_chooser;
 
 pub use sonamu_ui::ui_event::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
 
 /// How far the pointer moves while pressed before it's a drag
 const DRAG_THRESHOLD: f64 = 12.0;
+
+/// Two clicks on one thing within this are a double click
+pub const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// Whether the pointer moved far enough from `from` to `at` for a drag
 pub fn dragged([x1, y1]: [f64; 2], [x2, y2]: [f64; 2]) -> bool {

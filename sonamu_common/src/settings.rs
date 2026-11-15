@@ -134,7 +134,7 @@ pub enum Wallpaper {
     None,
     Color(#[schemars(with = "ColorSchema")] Color),
     /// An image file (`~` or relative to the config dir), covering each screen
-    Image(PathBuf),
+    Image(#[schemars(extend("format" = "path"))] PathBuf),
     /// A Shadertoy-style GLSL fragment shader: `void mainImage(out vec4 fragColor, in vec2 fragCoord)` with `iTime`,
     /// `iResolution`, `iFrame`, `iMouse`. Reloads when the file changes
     Shader(ShaderWallpaper),
@@ -143,6 +143,7 @@ pub enum Wallpaper {
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 pub struct ShaderWallpaper {
     /// The shader file (`~` or relative to the config dir)
+    #[schemars(extend("format" = "path"))]
     pub path: PathBuf,
     /// Drawn at this fraction of the screen's resolution and stretched: lower is cheaper
     #[serde(default = "full_scale", deserialize_with = "scale_fraction")]
@@ -180,6 +181,20 @@ pub fn config_path(path: &Path, dir: &Path) -> PathBuf {
     match (path.strip_prefix("~"), std::env::var_os("HOME")) {
         (Ok(rest), Some(home)) => PathBuf::from(home).join(rest),
         _ => dir.join(path),
+    }
+}
+
+/// `path` as a setting writes it (`config_path` reverses it): relative inside the config dir `dir`, else `~/` inside
+/// the home dir, else as it is
+#[must_use]
+pub fn config_relative(path: &Path, dir: &Path) -> PathBuf {
+    if let Ok(inside) = path.strip_prefix(dir) {
+        return inside.to_owned();
+    }
+    match std::env::var_os("HOME").and_then(|home| path.strip_prefix(home).ok().map(Path::to_owned))
+    {
+        Some(rest) => Path::new("~").join(rest),
+        None => path.to_owned(),
     }
 }
 
@@ -1071,6 +1086,11 @@ mod tests {
             config_path(Path::new("~/a.png"), dir),
             Path::new(&home).join("a.png")
         );
+        // config_relative reverses it
+        for written in ["w/sine.glsl", "/abs.png", "~/a.png"] {
+            let path = config_path(Path::new(written), dir);
+            assert_eq!(config_relative(&path, dir), PathBuf::from(written));
+        }
     }
 
     #[test]

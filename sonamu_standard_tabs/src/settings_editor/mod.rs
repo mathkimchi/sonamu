@@ -12,7 +12,7 @@ use serde_json::Value;
 use sonamu_common::{
     Capture,
     command::{self, NodeUid},
-    sap::packets::StandardEvent,
+    sap::packets::{StandardEvent, SwipeView},
     settings::{self, ERROR, Keybind, Palette, Settings},
     utils::tree::{
         recursive_tree::RecursiveTreeNode,
@@ -23,12 +23,14 @@ use sonamu_common::{
 use sonamu_sttk::{
     nodular_applet::{
         AppletContext, AppletSpawner, AppletSpawnerTrait, NodularAppletInitializer, StandardApplet,
+        swipe,
     },
     standard_keybinds::handle_standard_keybinds,
     ui::{
         self, Rows,
         color_picker::{ColorPicker, PickerKey},
         fields::{self, Edit, TextInput},
+        file_chooser::FileChooser,
     },
 };
 use sonamu_ui::{
@@ -40,8 +42,9 @@ use sonamu_ui::{
 use std::{
     cell::Cell,
     collections::HashSet,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Mutex, PoisonError},
+    time::Instant,
 };
 
 /// The open editor's node: opening Settings again focuses it instead of making another
@@ -62,6 +65,10 @@ enum Row {
     AddItem(usize, usize),
     /// A line of the open color picker, below its field
     Picker(usize),
+    /// "type a path", first below a path field with its file chooser open
+    TypePath,
+    /// A line of the open file chooser
+    Chooser(usize),
     /// The Keybinds section's title
     KeybindsTitle,
     /// A keybind group's name
@@ -89,6 +96,8 @@ const KEYBINDS: &str = "keybinds";
 /// Header rows above the form: title with Revert, then the selected setting's description
 const HEADER_ROWS: usize = 2;
 const REVERT: &str = "Revert";
+/// In the header while a section is shown alone: back to every section
+const BACK: &str = "‹ Settings";
 
 pub struct SettingsEditorApplet {
     editor: Editor,
@@ -114,6 +123,16 @@ pub struct SettingsEditorApplet {
     sliding: Option<((usize, usize), f64)>,
     /// The bind whose keys are being recorded; every key comes here meanwhile
     recording: Option<((usize, usize), Capture)>,
+    /// The path field choosing a file, and its chooser
+    chooser: Option<((usize, usize), FileChooser)>,
+    /// The section shown alone (its inner child focused), else every section (its inner root)
+    view: Option<usize>,
+    /// A swipe between sections or to the inner root, drawn instead of the view
+    swipe: Option<SwipeView>,
+    /// The last click on a section's title, to tell a double click (shows it alone)
+    title_click: Option<(usize, Instant)>,
+    /// The config dir: path settings are relative to it
+    dir: PathBuf,
     hook: AppletContext,
 }
 impl SettingsEditorApplet {
@@ -126,6 +145,11 @@ impl SettingsEditorApplet {
             collapsed: HashSet::new(),
             picker: None,
             sliding: None,
+            chooser: None,
+            view: None,
+            swipe: None,
+            title_click: None,
+            dir: dir.to_owned(),
             editor,
             palette: settings::get().palette,
             size: Cell::new(DisplayContainerSize::new(800, 600)),
@@ -162,8 +186,77 @@ impl SettingsEditorApplet {
     }
 
     fn rows(&self) -> Vec<Row> {
+        self.rows_of(self.view, true)
+    }
+
+    /// The rows `view` shows; with what's open in it if `live` (the view, not one a swipe brings in)
+    fn rows_of(&self, view: Option<usize>, live: bool) -> Vec<Row> {
         let picker = self.picker.as_ref().map(|(at, _)| *at);
-        form_rows(&self.editor, &self.keybinds, &self.collapsed, picker)
+        let chooser = self
+            .chooser
+            .as_ref()
+            .map(|(at, chooser)| (*at, chooser.lines()));
+        let open = Open {
+            picker: picker.filter(|_| live),
+            chooser: chooser.filter(|_| live),
+        };
+        form_rows(&self.editor, &self.keybinds, &self.collapsed, open, view)
+    }
+
+    /// Shows `view` (`None`: every section); the treeview's focus follows
+    fn show(&mut self, view: Option<usize>) {
+        if view == self.view {
+            return;
+        }
+        self.commit_editing();
+        self.recording = None;
+        self.picker = None;
+        self.chooser = None;
+        self.sliding = None;
+        let from = std::mem::replace(&mut self.view, view);
+        self.selected = None;
+        self.hovered = None;
+        self.scroll = 0;
+        // back on every section: at the one just left
+        if let (None, Some(from)) = (view, from) {
+            let title = if from == self.editor.sections.len() {
+                Row::KeybindsTitle
+            } else {
+                Row::Title(from)
+            };
+            if let Some(index) = self.rows().iter().position(|row| *row == title) {
+                self.selected = Some(index);
+                self.scroll = index.min(ui::max_scroll(self.rows().len(), self.shown()));
+            }
+        }
+        self.hook.damage_window();
+        self.hook.damage_treeview();
+    }
+
+    /// Drops a picker or chooser whose field changed (eg another wallpaper kind)
+    fn close_stale(&mut self) {
+        let is = |at: (usize, usize), kind: &FieldKind| {
+            self.editor
+                .sections
+                .get(at.0)
+                .and_then(|section| section.fields.get(at.1))
+                .is_some_and(|field| field.kind == *kind)
+        };
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|(at, _)| !is(*at, &FieldKind::Color))
+        {
+            self.picker = None;
+        }
+        if self
+            .chooser
+            .as_ref()
+            .is_some_and(|(at, _)| !is(*at, &FieldKind::Path))
+        {
+            self.chooser = None;
+        }
+        self.selected = self.selected.filter(|&index| index < self.rows().len());
     }
 
     /// Selects `row`, if it's shown
@@ -244,6 +337,10 @@ impl SettingsEditorApplet {
             Row::Field(section, field)
             | Row::Item(section, field, _)
             | Row::AddItem(section, field) => Some(self.field(section, field)),
+            Row::TypePath | Row::Chooser(_) => {
+                let ((section, field), _) = self.chooser.as_ref()?;
+                Some(self.field(*section, *field))
+            }
             _ => None,
         }
     }
@@ -276,6 +373,15 @@ impl SettingsEditorApplet {
         }
         match row {
             Row::Title(_) | Row::KeybindsTitle | Row::Picker(_) => {}
+            Row::TypePath => {
+                let value = self
+                    .field_of(row)
+                    .map(|field| self.editor.field_value(field));
+                self.editing = Some(TextInput::new(
+                    value.as_ref().map(plain).unwrap_or_default(),
+                ));
+            }
+            Row::Chooser(line) => self.choose(line),
             Row::Generate => {
                 let result = self.editor.generate(pastel::random_hue());
                 self.report(result);
@@ -292,6 +398,9 @@ impl SettingsEditorApplet {
                     FieldKind::Choice(_) | FieldKind::Variant(_) => self.cycle(&field, true),
                     FieldKind::Color => {
                         self.toggle_picker((section_index_of(row), field_index_of(row)), &value)
+                    }
+                    FieldKind::Path => {
+                        self.toggle_chooser((section_index_of(row), field_index_of(row)), &value)
                     }
                     FieldKind::Number { .. } | FieldKind::Text { .. } => {
                         self.editing = Some(TextInput::new(plain(&value)));
@@ -399,6 +508,45 @@ impl SettingsEditorApplet {
         }
     }
 
+    /// Opens the file chooser under a path field (in the current file's folder), or closes it if it's open there
+    fn toggle_chooser(&mut self, at: (usize, usize), value: &Value) {
+        if self.chooser.as_ref().is_some_and(|(open, _)| *open == at) {
+            return self.close_chooser();
+        }
+        let current = plain(value);
+        let start = if current.is_empty() {
+            self.dir.clone()
+        } else {
+            settings::config_path(Path::new(&current), &self.dir)
+        };
+        self.chooser = Some((at, FileChooser::new(&start)));
+        self.select_row(Row::TypePath);
+    }
+
+    /// Closes the file chooser, selecting its field
+    fn close_chooser(&mut self) {
+        if let Some((at, _)) = self.chooser.take() {
+            self.selected = None;
+            self.select_row(Row::Field(at.0, at.1));
+        }
+    }
+
+    /// Enter on a chooser line: goes into a folder, or writes the file as the setting
+    fn choose(&mut self, line: usize) {
+        let Some(((section, field), chooser)) = &mut self.chooser else {
+            return;
+        };
+        let (section, field) = (*section, *field);
+        let Some(file) = chooser.choose(line) else {
+            return self.select_row(Row::Chooser(0));
+        };
+        let path = settings::config_relative(&file, &self.dir);
+        let field = self.field(section, field).clone();
+        let result = self.editor.commit_text(&field, &path.to_string_lossy());
+        self.report(result);
+        self.close_chooser();
+    }
+
     /// Writes the picker's color (`original` to undo it)
     fn commit_picker(&mut self, original: bool) {
         let Some(((section, field), picker)) = &self.picker else {
@@ -472,7 +620,7 @@ impl SettingsEditorApplet {
             let (next, _) = &variants[fields::cycle(variants.len(), at, forward)];
             let result = self.editor.commit_variant(field, next);
             self.report(result);
-            return;
+            return self.close_stale();
         }
         let FieldKind::Choice(options) = &field.kind else {
             return;
@@ -547,6 +695,11 @@ impl SettingsEditorApplet {
         self.report(result);
     }
 
+    fn selected_row(&self) -> Option<Row> {
+        self.selected
+            .and_then(|index| self.rows().get(index).copied())
+    }
+
     fn select(&mut self, index: Option<usize>) {
         if index != self.selected {
             self.commit_editing();
@@ -560,7 +713,13 @@ impl SettingsEditorApplet {
     fn handle_key(&mut self, symbol: KeySymbol, modifiers: sonamu_ui::ui_event::KeyModifiers) {
         if let Some(input) = &mut self.editing {
             match input.handle_key(symbol, modifiers) {
-                Edit::Commit => self.commit_editing(),
+                Edit::Commit => {
+                    let typed_path = self.selected_row() == Some(Row::TypePath);
+                    self.commit_editing();
+                    if typed_path && self.error.is_none() {
+                        self.close_chooser();
+                    }
+                }
                 Edit::Cancel => self.editing = None,
                 Edit::Changed | Edit::Ignored => {}
             }
@@ -583,6 +742,17 @@ impl SettingsEditorApplet {
         }
         let rows = self.rows();
         let row = self.selected.and_then(|index| rows.get(index).copied());
+        match (row, symbol) {
+            (_, KeySymbol::Escape) if self.chooser.is_some() => return self.close_chooser(),
+            (_, KeySymbol::Escape) => return self.show(None),
+            (Some(Row::Title(section)), KeySymbol::ArrowKeyRight) => {
+                return self.show(Some(section));
+            }
+            (Some(Row::KeybindsTitle), KeySymbol::ArrowKeyRight) => {
+                return self.show(Some(self.editor.sections.len()));
+            }
+            _ => {}
+        }
         if let (
             Some(Row::Field(section, field)),
             KeySymbol::ArrowKeyLeft | KeySymbol::ArrowKeyRight,
@@ -711,7 +881,19 @@ impl SettingsEditorApplet {
                     }
                     return;
                 }
-                if y < f64::from(ui::row_height()) && x >= f64::from(self.revert_left()) {
+                if y < f64::from(ui::row_height())
+                    && self.view.is_some()
+                    && x < f64::from(back_end())
+                {
+                    self.show(None);
+                } else if let Some(index) = row_at
+                    && let Some(section) = self.title_section(self.rows()[index])
+                    && self.double_clicked(section)
+                {
+                    // the first click folded it
+                    self.collapsed.remove(&section);
+                    self.show(Some(section));
+                } else if y < f64::from(ui::row_height()) && x >= f64::from(self.revert_left()) {
                     self.commit_editing();
                     let result = self.editor.revert();
                     self.report(result);
@@ -730,6 +912,31 @@ impl SettingsEditorApplet {
             }
             MouseEventKind::Button { .. } => {}
         }
+    }
+
+    /// The section whose title `row` is
+    fn title_section(&self, row: Row) -> Option<usize> {
+        match row {
+            Row::Title(section) => Some(section),
+            Row::KeybindsTitle => Some(self.editor.sections.len()),
+            _ => None,
+        }
+    }
+
+    /// Whether this click on `section`'s title follows one on it
+    fn double_clicked(&mut self, section: usize) -> bool {
+        let double = self
+            .title_click
+            .is_some_and(|(last, time)| last == section && time.elapsed() < ui::DOUBLE_CLICK);
+        self.title_click = (!double).then(|| (section, Instant::now()));
+        double
+    }
+
+    fn section_title(&self, section: usize) -> &str {
+        self.editor
+            .sections
+            .get(section)
+            .map_or("Keybinds", |section| section.title.as_str())
     }
 
     /// The selected setting's description, else a hint
@@ -751,10 +958,22 @@ impl SettingsEditorApplet {
                     .to_owned();
             }
             Some(Row::KeybindsTitle) => {
-                return "Shortcuts in named groups, shown as sections in help (Super+?). Enter or click: fold"
+                return "Shortcuts in named groups, shown as sections in help (Super+?). Enter or click: fold, \
+                        Right or double click: show alone"
                     .to_owned();
             }
-            Some(Row::Title(_)) => return "Enter or click: fold".to_owned(),
+            Some(Row::Title(_)) => {
+                return "Enter or click: fold, Right or double click: show alone".to_owned();
+            }
+            Some(Row::TypePath | Row::Chooser(_)) => {
+                return "Enter or click: open a folder or pick a file, Esc: close".to_owned();
+            }
+            Some(Row::Field(section, field))
+                if self.field(section, field).kind == FieldKind::Path =>
+            {
+                let help = &self.field(section, field).help;
+                return format!("{help} (Enter or click: choose a file)");
+            }
             Some(Row::Field(section, field))
                 if matches!(self.field(section, field).kind, FieldKind::Number { .. }) =>
             {
@@ -765,11 +984,16 @@ impl SettingsEditorApplet {
         }
         match row.and_then(|row| self.field_of(row)) {
             Some(field) if !field.help.is_empty() => field.help.replace('\n', " "),
+            _ if self.view.is_some() => {
+                "Up/Down: pick, Enter or click: change, Left/Right: options, Esc: every section"
+                    .to_owned()
+            }
             _ => "Up/Down: pick, Enter or click: change, Left/Right: options".to_owned(),
         }
     }
 
-    fn header(&self, width: f32) -> Vec<UITree> {
+    /// Title (with the back button in a section), status and Revert; then the selected row's help if `live`
+    fn header(&self, view: Option<usize>, live: bool, width: f32) -> Vec<UITree> {
         let header = Rows::new(0.0);
         let palette = &self.palette;
         let status = match (&self.error, self.editor.read_only()) {
@@ -784,11 +1008,24 @@ impl SettingsEditorApplet {
             (None, None) => ui::text("Changes apply as you make them", palette.inactive),
         };
         let revert_left = self.revert_left();
-        let title_end = ui::PAD + text_width("Settings") + ui::PAD;
-        let mut parts = vec![
-            header.text(ui::text("Settings", palette.fg), ui::PAD, title_end),
+        let mut parts = Vec::new();
+        let title_left = match view {
+            Some(_) => {
+                parts.push(
+                    header
+                        .text(ui::text(BACK, palette.accent), ui::PAD, back_end())
+                        .with_pointer(),
+                );
+                back_end()
+            }
+            None => ui::PAD,
+        };
+        let title = view.map_or("Settings", |section| self.section_title(section));
+        let title_end = title_left + text_width(title) + ui::PAD;
+        parts.extend([
+            header.text(ui::text(title, palette.fg), title_left, title_end),
             header.text(status, title_end, revert_left - ui::PAD),
-        ];
+        ]);
         if self.editor.read_only().is_none() {
             parts.push(
                 header
@@ -803,7 +1040,10 @@ impl SettingsEditorApplet {
                 width,
                 None,
                 vec![header.text(
-                    ui::text(self.help(), palette.inactive),
+                    ui::text(
+                        if live { self.help() } else { String::new() },
+                        palette.inactive,
+                    ),
                     ui::PAD,
                     width - ui::PAD,
                 )],
@@ -999,6 +1239,9 @@ impl SettingsEditorApplet {
                 format!("{current} (edit in settings.json)"),
                 palette.inactive,
             ))),
+            (FieldKind::Path, None) if plain(&current).is_empty() => {
+                parts.push(value(ui::text("choose a file…", palette.inactive)));
+            }
             (_, None) if current.is_null() => {
                 parts.push(value(ui::text("unset", palette.inactive)))
             }
@@ -1007,13 +1250,14 @@ impl SettingsEditorApplet {
         parts
     }
 
-    fn draw_row(&self, rows: &Rows, index: usize, row: Row, width: f32) -> UITree {
+    /// Row `index` of the view, or (not `live`) of one a swipe brings in
+    fn draw_row(&self, rows: &Rows, (index, row): (usize, Row), live: bool, width: f32) -> UITree {
         let palette = &self.palette;
         let value_left = value_left(width);
-        let selected = self.selected == Some(index);
+        let selected = live && self.selected == Some(index);
         let background = if selected {
             Some(ui::selected_bg(palette))
-        } else if self.hovered == Some(index) && !row.is_title() {
+        } else if live && self.hovered == Some(index) && !row.is_title() {
             Some(ui::raised_bg(palette))
         } else {
             None
@@ -1033,6 +1277,26 @@ impl SettingsEditorApplet {
             }
             Row::Generate => vec![label("Generate pastel", palette.fg)],
             Row::Picker(_) => Vec::new(),
+            Row::TypePath => {
+                let element = editing.map_or_else(
+                    || ui::text("✎ type a path", palette.inactive),
+                    |input| input.element(true, palette),
+                );
+                vec![value(element)]
+            }
+            Row::Chooser(line) => {
+                let label = self
+                    .chooser
+                    .as_ref()
+                    .map(|(_, chooser)| chooser.label(line))
+                    .unwrap_or_default();
+                let color = match line {
+                    0 => palette.inactive,
+                    _ if label.ends_with('/') => palette.accent,
+                    _ => palette.fg,
+                };
+                vec![value(ui::text(label, color))]
+            }
             Row::Field(section, field) => self.field_parts(rows, (section, field), editing, width),
             Row::Item(section, field, item) => {
                 let text = self.items(self.field(section, field)).swap_remove(item);
@@ -1109,6 +1373,11 @@ fn field_index_of(row: Row) -> usize {
     }
 }
 
+/// The back button's right edge
+fn back_end() -> f32 {
+    ui::PAD + text_width(BACK) + ui::PAD
+}
+
 /// Where values start in a row of an applet `width` wide
 fn value_left(width: f32) -> f32 {
     (width * 0.4).max(ui::PAD + 8.0 * font_size())
@@ -1150,54 +1419,65 @@ fn section_tree(editor: &Editor) -> WorldTree<String> {
     )))
 }
 
-/// The section `row` is in (`keybinds` is the Keybinds section's index); the picker's is its field's
-fn section_of(row: Row, picker: Option<(usize, usize)>, keybinds: usize) -> Option<usize> {
-    match row {
-        Row::Title(section)
-        | Row::Field(section, _)
-        | Row::Item(section, ..)
-        | Row::AddItem(section, _) => Some(section),
-        Row::Generate => Some(0),
-        Row::Picker(_) => picker.map(|(section, _)| section),
-        Row::KeybindsTitle
-        | Row::Group(_)
-        | Row::Bind(..)
-        | Row::AddBind(_)
-        | Row::AddGroup
-        | Row::AddDefaults => Some(keybinds),
-    }
+/// What's open under a field: the color picker, the file chooser (with its line count)
+#[derive(Debug, Clone, Copy, Default)]
+struct Open {
+    picker: Option<(usize, usize)>,
+    chooser: Option<((usize, usize), usize)>,
 }
 
-/// Every row: sections' titles, their fields (and list items, the color picker) unless folded, then keybinds
+/// The rows of `view` (a section alone, without its title; else every section's title, then its rows unless
+/// folded): fields (and list items, what's `open`), the keybinds last
 fn form_rows(
     editor: &Editor,
     keybinds: &Keybinds,
     collapsed: &HashSet<usize>,
-    picker: Option<(usize, usize)>,
+    open: Open,
+    view: Option<usize>,
 ) -> Vec<Row> {
+    let shows = |section| view.is_none_or(|view| view == section);
+    let folded = |section| view.is_none() && collapsed.contains(&section);
     let mut rows = Vec::new();
     for (section_index, section) in editor.sections.iter().enumerate() {
-        rows.push(Row::Title(section_index));
-        if collapsed.contains(&section_index) {
+        if !shows(section_index) {
+            continue;
+        }
+        if view.is_none() {
+            rows.push(Row::Title(section_index));
+        }
+        if folded(section_index) {
             continue;
         }
         if section.title == "Colors" && editor.read_only().is_none() {
             rows.push(Row::Generate);
         }
         for (field_index, field) in section.fields.iter().enumerate() {
+            let at = (section_index, field_index);
             rows.push(Row::Field(section_index, field_index));
             if field.kind == FieldKind::TextList {
                 let count = items(editor, field).len();
                 rows.extend((0..count).map(|item| Row::Item(section_index, field_index, item)));
                 rows.push(Row::AddItem(section_index, field_index));
             }
-            if picker == Some((section_index, field_index)) {
+            if open.picker == Some(at) {
                 rows.extend((0..PICKER_LINES).map(Row::Picker));
+            }
+            if let Some((chooser, lines)) = open.chooser
+                && chooser == at
+            {
+                rows.push(Row::TypePath);
+                rows.extend((0..lines).map(Row::Chooser));
             }
         }
     }
-    rows.push(Row::KeybindsTitle);
-    if !collapsed.contains(&editor.sections.len()) {
+    let keybinds_section = editor.sections.len();
+    if !shows(keybinds_section) {
+        return rows;
+    }
+    if view.is_none() {
+        rows.push(Row::KeybindsTitle);
+    }
+    if !folded(keybinds_section) {
         for (group, (_, binds)) in keybinds.groups.iter().enumerate() {
             rows.push(Row::Group(group));
             rows.extend((0..binds.len()).map(|bind| Row::Bind(group, bind)));
@@ -1206,6 +1486,20 @@ fn form_rows(
         rows.extend([Row::AddGroup, Row::AddDefaults]);
     }
     rows
+}
+
+/// The view an inner path is: the inner root (every section) or a section's child; `None` if neither
+#[expect(
+    clippy::option_option,
+    reason = "not a view, or the view (itself an option)"
+)]
+fn view_at(path: &WorldTreePath, sections: usize) -> Option<Option<usize>> {
+    let (TreeNodePath(steps), _) = path.split_world();
+    match *steps.as_slice() {
+        [] => Some(None),
+        [section] if section <= sections => Some(Some(section)),
+        _ => None,
+    }
 }
 
 /// A list setting's items
@@ -1254,10 +1548,43 @@ fn text_width(text: &str) -> f32 {
     text.chars().count() as f32 * font_size() * 0.6
 }
 
+impl SettingsEditorApplet {
+    /// What `view` shows: as it is if it's the view, else from its top (eg brought in by a swipe)
+    fn page(&self, view: Option<usize>, size: DisplayContainerSize) -> UITree {
+        let live = view == self.view;
+        let [width, height] = [size.width, size.height].map(|px| px as f32);
+        let scroll = if live { self.scroll } else { 0 };
+        let rows = Rows::new(HEADER_ROWS as f32 * ui::row_height()).scrolled(scroll);
+        let all = self.rows_of(view, live);
+        let shown = rows.fitting(height);
+        let mut parts = self.header(view, live, width);
+        for (index, &row) in all.iter().enumerate().skip(scroll).take(shown) {
+            parts.push(self.draw_row(&rows, (index, row), live, width));
+        }
+        if live {
+            parts.extend(self.picker_parts());
+        }
+        parts.extend(ui::scrollbar(
+            &self.palette,
+            ui::scrollbar_x(width),
+            [rows.top, height - rows.top],
+            scroll,
+            shown,
+            all.len(),
+        ));
+        UITree::new_styled(
+            UIElement::Backgrounded(ui::bg(&self.palette)),
+            Style::absolute([0.0, 0.0], [width, height]),
+            parts,
+        )
+    }
+}
+
 impl StandardApplet for SettingsEditorApplet {
     fn settings_changed(&mut self, settings: &Settings) {
         self.palette = settings.palette.clone();
         self.editor.reload();
+        self.close_stale();
         self.sync_keybinds();
         self.hook.damage_window();
         self.hook.damage_treeview();
@@ -1301,6 +1628,10 @@ impl StandardApplet for SettingsEditorApplet {
                 self.hook.damage_window();
                 self.hook.damage_treeview();
             }
+            StandardEvent::Swipe(view) => {
+                self.swipe = view;
+                self.hook.damage_window();
+            }
             StandardEvent::FocusChanged(false) => {
                 self.recording = None;
                 self.commit_editing();
@@ -1313,60 +1644,43 @@ impl StandardApplet for SettingsEditorApplet {
 
     fn get_window_standard_applet(&self, container_size: DisplayContainerSize) -> UITree {
         self.size.set(container_size);
-        let [width, height] = [container_size.width, container_size.height].map(|px| px as f32);
-        let rows = self.list_rows();
-        let all = self.rows();
-        let shown = rows.fitting(height);
-        let mut parts = self.header(width);
-        for (index, &row) in all.iter().enumerate().skip(self.scroll).take(shown) {
-            parts.push(self.draw_row(&rows, index, row, width));
+        let sections = self.editor.sections.len();
+        let swiped = self.swipe.as_ref().and_then(|swipe| {
+            let from = view_at(&swipe.from, sections)?;
+            let to = match &swipe.to {
+                Some(to) => Some(view_at(to, sections)?),
+                None => None,
+            };
+            Some((swipe, from, to))
+        });
+        match swiped {
+            Some((swipe, from, to)) => swipe::slide(
+                container_size,
+                swipe.vertical,
+                swipe.progress,
+                self.page(from, container_size),
+                to.map(|to| self.page(to, container_size)),
+            ),
+            None => self.page(self.view, container_size),
         }
-        parts.extend(self.picker_parts());
-        parts.extend(ui::scrollbar(
-            &self.palette,
-            ui::scrollbar_x(width),
-            [rows.top, height - rows.top],
-            self.scroll,
-            shown,
-            all.len(),
-        ));
-        UITree::new_styled(
-            UIElement::Backgrounded(ui::bg(&self.palette)),
-            Style::absolute([0.0, 0.0], [width, height]),
-            parts,
-        )
     }
 
     fn get_treeview(&self) -> WorldTree<String> {
         section_tree(&self.editor)
     }
 
-    /// The selected row's section
+    /// The section shown alone, else the inner root
     fn get_focus_path(&self) -> WorldTreePath {
-        let row = self
-            .selected
-            .and_then(|index| self.rows().get(index).copied());
-        let picker = self.picker.as_ref().map(|(at, _)| *at);
-        row.and_then(|row| section_of(row, picker, self.editor.sections.len()))
-            .map_or_else(WorldTreePath::root, |section| {
-                WorldTreePath::from_tree_path(&TreeNodePath(vec![section]))
-            })
+        self.view.map_or_else(WorldTreePath::root, |section| {
+            WorldTreePath::from_tree_path(&TreeNodePath(vec![section]))
+        })
     }
 
-    /// A section's row in the treeview: selects its title, at the top
+    /// A section's row in the treeview shows it alone; the inner root, every section
     fn focus(&mut self, path: &WorldTreePath) {
-        let (TreeNodePath(steps), _) = path.split_world();
-        let title = match steps.as_slice() {
-            [section] if *section < self.editor.sections.len() => Row::Title(*section),
-            [section] if *section == self.editor.sections.len() => Row::KeybindsTitle,
-            _ => return,
-        };
-        if let Some(index) = self.rows().iter().position(|row| *row == title) {
-            self.select(Some(index));
-            self.scroll = index.min(ui::max_scroll(self.rows().len(), self.shown()));
+        if let Some(view) = view_at(path, self.editor.sections.len()) {
+            self.show(view);
         }
-        self.hook.damage_window();
-        self.hook.damage_treeview();
     }
 
     /// Space on a section's row in the treeview folds it
@@ -1399,12 +1713,13 @@ mod tests {
     #[test]
     fn collapsed_sections_hide_their_rows() {
         let (editor, keybinds) = editor("collapse");
-        let open = form_rows(&editor, &keybinds, &HashSet::new(), None);
+        let open = form_rows(&editor, &keybinds, &HashSet::new(), Open::default(), None);
         let keybinds_section = editor.sections.len();
         let collapsed = form_rows(
             &editor,
             &keybinds,
             &HashSet::from([0, keybinds_section]),
+            Open::default(),
             None,
         );
         assert_eq!(collapsed[0], Row::Title(0));
@@ -1417,13 +1732,67 @@ mod tests {
     #[test]
     fn picker_rows_follow_its_field() {
         let (editor, keybinds) = editor("picker");
-        let rows = form_rows(&editor, &keybinds, &HashSet::new(), Some((0, 0)));
+        let open = Open {
+            picker: Some((0, 0)),
+            chooser: None,
+        };
+        let rows = form_rows(&editor, &keybinds, &HashSet::new(), open, None);
         let at = rows
             .iter()
             .position(|row| *row == Row::Field(0, 0))
             .unwrap();
         let lines: Vec<Row> = (0..PICKER_LINES).map(Row::Picker).collect();
         assert_eq!(rows[at + 1..=at + PICKER_LINES], lines[..]);
+    }
+
+    #[test]
+    fn chooser_rows_follow_its_field() {
+        let (editor, keybinds) = editor("chooser");
+        let open = Open {
+            picker: None,
+            chooser: Some(((1, 0), 2)),
+        };
+        let rows = form_rows(&editor, &keybinds, &HashSet::new(), open, None);
+        let at = rows
+            .iter()
+            .position(|row| *row == Row::Field(1, 0))
+            .unwrap();
+        assert_eq!(
+            rows[at + 1..=at + 3],
+            [Row::TypePath, Row::Chooser(0), Row::Chooser(1)]
+        );
+    }
+
+    /// A section shown alone has its rows only, unfolded and without its title
+    #[test]
+    fn a_view_shows_its_section() {
+        let (editor, keybinds) = editor("view");
+        let keybinds_section = editor.sections.len();
+        let collapsed = HashSet::from([1]);
+        let section = form_rows(&editor, &keybinds, &collapsed, Open::default(), Some(1));
+        assert_ne!(section.len(), 0);
+        assert!(section.iter().all(|row| matches!(
+            row,
+            Row::Field(1, _) | Row::Item(1, ..) | Row::AddItem(1, _)
+        )));
+        let binds = form_rows(
+            &editor,
+            &keybinds,
+            &HashSet::new(),
+            Open::default(),
+            Some(keybinds_section),
+        );
+        assert_eq!(binds.first(), Some(&Row::Group(0)));
+        assert_eq!(binds.last(), Some(&Row::AddDefaults));
+    }
+
+    #[test]
+    fn inner_paths_are_views() {
+        let path = |steps: Vec<usize>| WorldTreePath::from_tree_path(&TreeNodePath(steps));
+        assert_eq!(view_at(&path(vec![]), 5), Some(None));
+        assert_eq!(view_at(&path(vec![5]), 5), Some(Some(5)));
+        assert_eq!(view_at(&path(vec![6]), 5), None);
+        assert_eq!(view_at(&path(vec![1, 0]), 5), None);
     }
 
     /// The treeview shows each section, Keybinds last, as an inner child
@@ -1444,30 +1813,6 @@ mod tests {
             .collect();
         titles.push("Keybinds".to_owned());
         assert_eq!(labels, titles);
-    }
-
-    #[test]
-    fn rows_belong_to_sections() {
-        let (editor, _) = editor("sections");
-        let keybinds_section = editor.sections.len();
-        assert_eq!(section_of(Row::Title(2), None, keybinds_section), Some(2));
-        assert_eq!(
-            section_of(Row::Field(3, 1), None, keybinds_section),
-            Some(3)
-        );
-        assert_eq!(section_of(Row::Generate, None, keybinds_section), Some(0));
-        assert_eq!(
-            section_of(Row::Picker(2), Some((0, 4)), keybinds_section),
-            Some(0)
-        );
-        assert_eq!(
-            section_of(Row::Bind(1, 0), None, keybinds_section),
-            Some(keybinds_section)
-        );
-        assert_eq!(
-            section_of(Row::AddDefaults, None, keybinds_section),
-            Some(keybinds_section)
-        );
     }
 
     #[test]

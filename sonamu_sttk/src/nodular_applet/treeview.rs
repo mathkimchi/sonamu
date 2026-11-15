@@ -12,7 +12,7 @@ use sonamu_common::{
         world_tree::{Step, WorldTree, WorldTreePath},
     },
 };
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use sonamu_ui::{
     color::Color,
@@ -33,8 +33,6 @@ pub fn close_width() -> f32 {
 /// The share of a row's height at its top and at its bottom that drops between siblings
 const EDGE_ZONE: f32 = 0.25;
 const INSERT_LINE_HEIGHT: f32 = 3.0;
-/// Two clicks on a row within this are a double click (sets the view root)
-const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// What the menu's `New` items list, and their labels
 const NEW_APPLETS: [(NewApplet, &str); 4] = [
     (NewApplet::Terminal, "Terminal"),
@@ -436,7 +434,7 @@ impl TreeviewPointer {
         row.filter(|row| row.path == press.path).map(|row| {
             let target = row.path.clone();
             let double = last_click
-                .is_some_and(|(path, time)| path == target && time.elapsed() < DOUBLE_CLICK);
+                .is_some_and(|(path, time)| path == target && time.elapsed() < ui::DOUBLE_CLICK);
             if !press.on_close && !press.on_triangle && !double {
                 self.last_click = Some((target.clone(), Instant::now()));
             }

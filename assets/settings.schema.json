@@ -196,7 +196,8 @@
           "type": "object",
           "properties": {
             "image": {
-              "type": "string"
+              "type": "string",
+              "format": "path"
             }
           },
           "required": [
@@ -224,7 +225,8 @@
       "properties": {
         "path": {
           "description": "The shader file (`~` or relative to the config dir)",
-          "type": "string"
+          "type": "string",
+          "format": "path"
         },
         "scale": {
           "description": "Drawn at this fraction of the screen's resolution and stretched: lower is cheaper",

@@ -40,6 +40,8 @@ pub enum FieldKind {
     Text {
         nullable: bool,
     },
+    /// A file (schema `format: path`), picked with `ui::file_chooser` or typed
+    Path,
     /// A list of strings, one per line
     TextList,
     /// Shown as JSON, edited in `settings.json`
@@ -261,6 +263,7 @@ fn kind(schema: &Value, defs: &Value) -> FieldKind {
                 max: schema["maximum"].as_f64(),
                 integer: kind == "integer",
             },
+            "string" if schema["format"] == "path" => FieldKind::Path,
             "string" => FieldKind::Text { nullable: false },
             "array" if resolve(&schema["items"], defs)["type"] == "string" => FieldKind::TextList,
             _ => FieldKind::ReadOnly,
@@ -381,6 +384,19 @@ mod tests {
             (field.kind.clone(), field.label.as_str()),
             (FieldKind::Color, "Color")
         );
+        // files are paths, in either kind
+        let kind_of = |fields: &[Field], path: &str| {
+            fields
+                .iter()
+                .find(|field| field.path.join(".") == path)
+                .map(|field| field.kind.clone())
+        };
+        assert_eq!(
+            kind_of(&shader, "wallpaper.shader.path"),
+            Some(FieldKind::Path)
+        );
+        let image = fields_with(serde_json::json!({"image": "x.png"}));
+        assert_eq!(kind_of(&image, "wallpaper.image"), Some(FieldKind::Path));
     }
 
     #[test]
