@@ -803,6 +803,9 @@ fn reload_from(dir: &Path, reloading: bool) -> Option<Vec<PathBuf>> {
             sonamu_ui::ui_element::set_font_size(settings.font_size);
             sonamu_ui::mipmaps::set_enabled(settings.mipmaps);
             ALPHA.store(settings.alpha(), Ordering::Relaxed);
+            if let Err(err) = crate::alacritty_theme::write(&settings) {
+                log::warn!("Could not write Alacritty's theme: {err}");
+            }
             let changed = {
                 let mut current = CURRENT.write().unwrap_or_else(PoisonError::into_inner);
                 let old = std::mem::replace(&mut *current, settings);

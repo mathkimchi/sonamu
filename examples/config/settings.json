@@ -91,7 +91,7 @@
     },
     "typst"
   ],
-  "terminal": "foot",
+  "terminal": "alacritty",
   "browser": "firefox",
   "startup": ["touch \"$XDG_RUNTIME_DIR/sonamu-hide-beeper\"; exec beeper --no-sandbox"],
   "zoom_out": {
