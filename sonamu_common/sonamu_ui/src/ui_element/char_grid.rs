@@ -27,23 +27,15 @@ impl CharCellStyle {
     pub const CURSOR_LINE: Self = Self(1 << 2);
 }
 /// For me, add makes more sense than bitwise OR
-impl std::ops::Add for CharCellStyle {
+impl std::ops::BitOr for CharCellStyle {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        #[expect(
-            clippy::suspicious_arithmetic_impl,
-            reason = "adding styles unions their flags"
-        )]
+    fn bitor(self, rhs: Self) -> Self::Output {
         Self(self.0 | rhs.0)
     }
 }
-impl std::ops::AddAssign for CharCellStyle {
-    #[expect(
-        clippy::suspicious_op_assign_impl,
-        reason = "adding styles unions their flags"
-    )]
-    fn add_assign(&mut self, rhs: Self) {
+impl std::ops::BitOrAssign for CharCellStyle {
+    fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0;
     }
 }
@@ -78,8 +70,8 @@ impl InternalCharCell {
         self
     }
 
-    pub fn add_style(&mut self, new_style: CharCellStyle) -> &mut Self {
-        self.style += new_style;
+    pub fn combine_style(&mut self, new_style: CharCellStyle) -> &mut Self {
+        self.style |= new_style;
         self
     }
     pub const fn set_style(&mut self, new_style: CharCellStyle) -> &mut Self {

@@ -410,7 +410,7 @@ impl StandardApplet for CodeEditorApplet {
                         EditorMode::Insert => {
                             content
                                 .get_char_mut(row, cursor_col)
-                                .add_style(CharCellStyle::CURSOR_LINE);
+                                .combine_style(CharCellStyle::CURSOR_LINE);
                             // log::debug!(
                             //     "Cursor style: {}",
                             //     (content.get_char(row, col).style.0 >> 2) & 1
