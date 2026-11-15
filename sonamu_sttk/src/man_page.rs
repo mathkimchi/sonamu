@@ -64,7 +64,9 @@ fn keybind_sections(settings: &Settings) -> Vec<(String, Vec<(String, String)>)>
         .collect()
 }
 
-fn keys_label(keybind: &Keybind) -> String {
+/// A keybind's keys, eg `Super+Shift+T`
+#[must_use]
+pub fn keys_label(keybind: &Keybind) -> String {
     let has = |name: &str| keybind.mods.iter().any(|m| m.eq_ignore_ascii_case(name));
     let mut label = String::new();
     for (name, shown) in [

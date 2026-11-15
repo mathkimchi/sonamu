@@ -2,14 +2,17 @@
 
 pub mod editor;
 pub mod form;
+pub mod keybinds;
 pub mod pastel;
 
 use editor::{Editor, hex};
 use form::{Field, FieldKind};
+use keybinds::Keybinds;
 use serde_json::Value;
 use sonamu_common::{
+    Capture,
     sap::packets::StandardEvent,
-    settings::{self, ERROR, Palette, Settings},
+    settings::{self, ERROR, Keybind, Palette, Settings},
     utils::tree::world_tree::WorldTree,
 };
 use sonamu_sttk::{
@@ -42,7 +45,26 @@ enum Row {
     Item(usize, usize, usize),
     /// "+ add" below a list setting's items
     AddItem(usize, usize),
+    /// The Keybinds section's title
+    KeybindsTitle,
+    /// A keybind group's name
+    Group(usize),
+    /// A keybind: group and bind index
+    Bind(usize, usize),
+    /// "+ keybind" at a group's end
+    AddBind(usize),
+    AddGroup,
+    /// Puts back missing default groups
+    AddDefaults,
 }
+impl Row {
+    const fn is_title(self) -> bool {
+        matches!(self, Self::Title(_) | Self::KeybindsTitle)
+    }
+}
+
+/// The setting the Keybinds section edits
+const KEYBINDS: &str = "keybinds";
 
 /// Header rows above the form: title with Revert, then the selected setting's description
 const HEADER_ROWS: usize = 2;
@@ -60,12 +82,18 @@ pub struct SettingsEditorApplet {
     editing: Option<TextInput>,
     /// The last write's error
     error: Option<String>,
+    keybinds: Keybinds,
+    /// The bind whose keys are being recorded; every key comes here meanwhile
+    recording: Option<((usize, usize), Capture)>,
     hook: AppletContext,
 }
 impl SettingsEditorApplet {
     fn new(dir: &Path, hook: AppletContext) -> Self {
+        let editor = Editor::open(dir);
         Self {
-            editor: Editor::open(dir),
+            keybinds: Keybinds::from_json(&editor.value(&[KEYBINDS.to_owned()])),
+            recording: None,
+            editor,
             palette: settings::get().palette,
             size: DisplayContainerSize::new(800, 600),
             selected: None,
@@ -112,7 +140,67 @@ impl SettingsEditorApplet {
                 }
             }
         }
+        rows.push(Row::KeybindsTitle);
+        for (group, (_, binds)) in self.keybinds.groups.iter().enumerate() {
+            rows.push(Row::Group(group));
+            rows.extend((0..binds.len()).map(|bind| Row::Bind(group, bind)));
+            rows.push(Row::AddBind(group));
+        }
+        rows.extend([Row::AddGroup, Row::AddDefaults]);
         rows
+    }
+
+    /// Selects `row`, if it's shown
+    fn select_row(&mut self, row: Row) {
+        let index = self.rows().iter().position(|&other| other == row);
+        self.select(index);
+    }
+
+    /// Writes the Keybinds section's binds (unfinished ones left out)
+    fn commit_keybinds(&mut self) {
+        let json = self.keybinds.to_json();
+        let result = self.editor.commit(&[vec![KEYBINDS.to_owned()]], &[json]);
+        self.report(result);
+    }
+
+    /// Takes the keybinds from the file again if they changed there (eg Revert, a hand edit)
+    fn sync_keybinds(&mut self) {
+        let current = self.editor.value(&[KEYBINDS.to_owned()]);
+        if self.keybinds.to_json() != current {
+            self.keybinds = Keybinds::from_json(&current);
+            self.recording = None;
+            self.selected = None;
+            self.editing = None;
+        }
+    }
+
+    /// While recording: the pressed keys become the bind's (Esc alone cancels)
+    fn record(&mut self, ui_event: UIEvent) {
+        let (
+            Some(((group, bind), _)),
+            UIEvent::Key {
+                symbol,
+                modifiers,
+                raw_keycode,
+                pressed: true,
+            },
+        ) = (&self.recording, ui_event)
+        else {
+            return;
+        };
+        let (group, bind) = (*group, *bind);
+        let bare = !(modifiers.ctrl || modifiers.alt || modifiers.shift || modifiers.logo);
+        if bare && matches!(symbol, Some(KeySymbol::Escape)) {
+            self.recording = None;
+            return;
+        }
+        if let Some((mods, key)) = Keybind::recorded(symbol, raw_keycode, modifiers) {
+            self.recording = None;
+            let draft = &mut self.keybinds.groups[group].1[bind];
+            draft.mods = mods;
+            draft.key = Some(key);
+            self.commit_keybinds();
+        }
     }
 
     fn field(&self, section: usize, field: usize) -> &Field {
@@ -125,7 +213,7 @@ impl SettingsEditorApplet {
             Row::Field(section, field)
             | Row::Item(section, field, _)
             | Row::AddItem(section, field) => Some(self.field(section, field)),
-            Row::Title(_) | Row::Generate => None,
+            _ => None,
         }
     }
 
@@ -186,7 +274,72 @@ impl SettingsEditorApplet {
                 self.editing = Some(TextInput::new(text));
             }
             Row::AddItem(..) => self.editing = Some(TextInput::new(String::new())),
+            Row::KeybindsTitle => {}
+            Row::Group(group) => {
+                self.editing = Some(TextInput::new(self.keybinds.groups[group].0.clone()));
+            }
+            Row::Bind(group, bind) => self.recording = Some(((group, bind), Capture::start())),
+            Row::AddBind(group) => {
+                let bind = self.keybinds.add_bind(group);
+                self.select_row(Row::Bind(group, bind));
+                self.recording = Some(((group, bind), Capture::start()));
+            }
+            Row::AddGroup => {
+                let group = self.keybinds.add_group();
+                self.commit_keybinds();
+                self.select_row(Row::Group(group));
+                self.editing = Some(TextInput::new(self.keybinds.groups[group].0.clone()));
+            }
+            Row::AddDefaults => {
+                self.keybinds.add_defaults();
+                self.commit_keybinds();
+            }
         }
+    }
+
+    /// Keys on a keybind or group row that aren't Enter; whether it was one
+    fn handle_keybind_key(
+        &mut self,
+        row: Row,
+        symbol: KeySymbol,
+        modifiers: sonamu_ui::ui_event::KeyModifiers,
+    ) -> bool {
+        let vertical = matches!(symbol, KeySymbol::ArrowKeyUp | KeySymbol::ArrowKeyDown);
+        let up = matches!(symbol, KeySymbol::ArrowKeyUp);
+        match (row, symbol) {
+            (Row::Bind(group, bind), KeySymbol::ArrowKeyLeft | KeySymbol::ArrowKeyRight) => {
+                let forward = matches!(symbol, KeySymbol::ArrowKeyRight);
+                self.keybinds.groups[group].1[bind].cycle_action(forward);
+                self.commit_keybinds();
+            }
+            (Row::Bind(group, bind), KeySymbol::Char('\t')) => {
+                let draft = &self.keybinds.groups[group].1[bind];
+                if draft.takes_args() {
+                    self.editing = Some(TextInput::new(draft.args_text()));
+                }
+            }
+            (Row::Bind(group, bind), KeySymbol::Backspace) => {
+                self.keybinds.delete_bind((group, bind));
+                self.commit_keybinds();
+            }
+            (Row::Bind(group, bind), _) if vertical && modifiers.shift => {
+                if let Some((group, bind)) = self.keybinds.move_bind((group, bind), up) {
+                    self.commit_keybinds();
+                    self.select_row(Row::Bind(group, bind));
+                }
+            }
+            (Row::Group(group), KeySymbol::Backspace) => {
+                self.keybinds.delete_group(group);
+                self.commit_keybinds();
+            }
+            (Row::Group(group), _) if vertical && modifiers.shift => {
+                let group = self.keybinds.move_group(group, up);
+                self.commit_keybinds();
+                self.select_row(Row::Group(group));
+            }
+            _ => return false,
+        }
+        true
     }
 
     /// Moves a choice to its next (`forward`) or previous option
@@ -216,6 +369,30 @@ impl SettingsEditorApplet {
         ) else {
             return;
         };
+        match row {
+            Row::Group(group) => {
+                if self.keybinds.rename_group(group, &input.text) {
+                    self.commit_keybinds();
+                } else {
+                    self.error = Some(format!("{:?} is empty or another group's name", input.text));
+                }
+                return;
+            }
+            Row::Bind(group, bind) => {
+                let draft = &mut self.keybinds.groups[group].1[bind];
+                if draft.set_args_text(&input.text) {
+                    self.commit_keybinds();
+                } else {
+                    self.error = Some(format!(
+                        "{:?} isn't right for {}",
+                        input.text,
+                        draft.action_name()
+                    ));
+                }
+                return;
+            }
+            _ => {}
+        }
         let Some(field) = self.field_of(row).cloned() else {
             return;
         };
@@ -261,13 +438,19 @@ impl SettingsEditorApplet {
         }
         let rows = self.rows();
         let row = self.selected.and_then(|index| rows.get(index).copied());
+        if let Some(row) = row
+            && self.editor.read_only().is_none()
+            && self.handle_keybind_key(row, symbol, modifiers)
+        {
+            return;
+        }
         match symbol {
             KeySymbol::ArrowKeyDown | KeySymbol::ArrowKeyUp => {
                 let down = matches!(symbol, KeySymbol::ArrowKeyDown);
                 let mut next = ui::step(self.selected, down, rows.len());
                 // titles are skipped, except at the ends
                 while let Some(index) = next
-                    && matches!(rows[index], Row::Title(_))
+                    && rows[index].is_title()
                     && ui::step(next, down, rows.len()) != next
                 {
                     next = ui::step(next, down, rows.len());
@@ -318,6 +501,7 @@ impl SettingsEditorApplet {
                     self.commit_editing();
                     let result = self.editor.revert();
                     self.report(result);
+                    self.sync_keybinds();
                 } else if let Some(index) = row_at {
                     self.select(Some(index));
                     if self.editing.is_none() {
@@ -339,6 +523,24 @@ impl SettingsEditorApplet {
         let row = self
             .selected
             .and_then(|index| self.rows().get(index).copied());
+        if self.recording.is_some() {
+            return "Press the keys (Esc alone: cancel)".to_owned();
+        }
+        match row {
+            Some(Row::Bind(..)) => {
+                return "Enter: record keys, Left/Right: command, Tab: its args, Shift+Up/Down: move, Backspace: \
+                        delete"
+                    .to_owned();
+            }
+            Some(Row::Group(_)) => {
+                return "Enter: rename, Shift+Up/Down: move, Backspace: delete (with its keybinds)"
+                    .to_owned();
+            }
+            Some(Row::KeybindsTitle) => {
+                return "Shortcuts in named groups, shown as sections in help (Super+?)".to_owned();
+            }
+            _ => {}
+        }
         match row.and_then(|row| self.field_of(row)) {
             Some(field) if !field.help.is_empty() => field.help.replace('\n', " "),
             _ => "Up/Down: pick, Enter or click: change, Left/Right: options".to_owned(),
@@ -387,13 +589,69 @@ impl SettingsEditorApplet {
         ]
     }
 
+    /// A keybind row's keys, command and args
+    fn bind_parts(
+        &self,
+        rows: &Rows,
+        (group, bind): (usize, usize),
+        value_left: f32,
+        width: f32,
+    ) -> Vec<UITree> {
+        let palette = &self.palette;
+        let editing = self.editing.as_ref().filter(|_| {
+            self.selected
+                .and_then(|index| self.rows().get(index).copied())
+                == Some(Row::Bind(group, bind))
+        });
+        let draft = &self.keybinds.groups[group].1[bind];
+        let recording = self
+            .recording
+            .as_ref()
+            .is_some_and(|(at, _)| *at == (group, bind));
+        let keys = if recording {
+            ui::text("press keys…", palette.accent)
+        } else {
+            let color = if draft.key.is_some() {
+                palette.fg
+            } else {
+                ERROR
+            };
+            ui::text(draft.keys_label(), color)
+        };
+        let args = editing.map_or_else(
+            || ui::text(draft.args_text(), palette.inactive),
+            |input| input.element(true, palette),
+        );
+        let complete = draft.to_json().is_some();
+        let action_left = value_left;
+        let args_left = action_left + text_width(draft.action_name()) + 4.0 * font_size();
+        vec![
+            rows.text(keys, ui::PAD + ui::INDENT, value_left),
+            rows.text(
+                fields::choice(draft.action_name(), palette),
+                action_left,
+                args_left,
+            ),
+            rows.text(args, args_left, width - ui::PAD),
+        ]
+        .into_iter()
+        .chain((!complete && !recording).then(|| {
+            rows.text(
+                ui::text("unfinished", ERROR),
+                width - ui::PAD - text_width("unfinished"),
+                width,
+            )
+        }))
+        .collect()
+    }
+
     fn draw_row(&self, rows: &Rows, index: usize, row: Row, width: f32) -> UITree {
         let palette = &self.palette;
         let value_left = (width * 0.4).max(ui::PAD + 8.0 * font_size());
         let selected = self.selected == Some(index);
         let background = if selected {
             Some(ui::selected_bg(palette))
-        } else if self.hovered == Some(index) && !matches!(row, Row::Title(_)) {
+        } else if self.hovered == Some(index) && !row.is_title() {
             Some(ui::raised_bg(palette))
         } else {
             None
@@ -460,9 +718,26 @@ impl SettingsEditorApplet {
                 );
                 vec![value(element)]
             }
+            Row::KeybindsTitle => vec![label("Keybinds", palette.accent)],
+            Row::Group(group) => {
+                let name = &self.keybinds.groups[group].0;
+                let element = editing.map_or_else(
+                    || ui::text(name.clone(), palette.fg),
+                    |input| input.element(true, palette),
+                );
+                vec![rows.text(element, ui::PAD, value_left)]
+            }
+            Row::Bind(group, bind) => self.bind_parts(rows, (group, bind), value_left, width),
+            Row::AddBind(_) => vec![rows.text(
+                ui::text("+ keybind", palette.inactive),
+                ui::PAD + ui::INDENT,
+                value_left,
+            )],
+            Row::AddGroup => vec![label("+ group", palette.inactive)],
+            Row::AddDefaults => vec![label("+ missing default groups", palette.inactive)],
         };
         let tree = rows.row(index, width, background, parts);
-        if matches!(row, Row::Title(_)) {
+        if row.is_title() {
             tree
         } else {
             tree.with_pointer()
@@ -488,12 +763,18 @@ impl StandardApplet for SettingsEditorApplet {
     fn settings_changed(&mut self, settings: &Settings) {
         self.palette = settings.palette.clone();
         self.editor.reload();
+        self.sync_keybinds();
         self.hook.damage_window();
     }
 
     fn handle_standard_event(&mut self, standard_event: StandardEvent) {
         match standard_event {
             StandardEvent::UIEvent(ui_event) => {
+                if self.recording.is_some() && matches!(ui_event, UIEvent::Key { .. }) {
+                    self.record(ui_event);
+                    self.hook.damage_window();
+                    return;
+                }
                 if self.editing.is_none() && handle_standard_keybinds(&ui_event, &self.hook) {
                     return;
                 }
@@ -515,6 +796,7 @@ impl StandardApplet for SettingsEditorApplet {
                 self.hook.damage_window();
             }
             StandardEvent::FocusChanged(false) => {
+                self.recording = None;
                 self.commit_editing();
                 self.hook.damage_window();
             }

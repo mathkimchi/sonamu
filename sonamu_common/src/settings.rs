@@ -4,7 +4,7 @@ use crate::notification::Replacing;
 use indexmap::IndexMap;
 use notify::Watcher as _;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sonamu_ui::{
     color::Color,
     display_units::ToPx,
@@ -134,7 +134,7 @@ pub enum Action {
 }
 
 /// A character (case-insensitive), a key's name, or an evdev code for other keys (eg 115 is volume up)
-#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Key {
     Code(u32),
@@ -142,7 +142,7 @@ pub enum Key {
     Named(NamedKey),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NamedKey {
     Left,
