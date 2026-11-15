@@ -22,7 +22,7 @@ layout(set = 0, binding = 0) uniform SonamuGlobals {
 } sonamu_globals;
 #define iResolution vec3(sonamu_globals.resolution_time_frame.xy, 1.0)
 #define iTime sonamu_globals.resolution_time_frame.z
-#define iFrame int(sonamu_globals.resolution_time_frame.w)
+#define iFrame int(floatBitsToUint(sonamu_globals.resolution_time_frame.w))
 #define iMouse sonamu_globals.mouse
 layout(location = 0) out vec4 sonamu_color;
 ";
@@ -36,24 +36,68 @@ void main() {
 }
 ";
 
-/// Shadertoy's inputs for a WGSL shader: the same buffer as `PREAMBLE`'s, as fields of `shadertoy`
-const WGSL_PREAMBLE: &str = "struct Shadertoy {
-    iResolution: vec2<f32>,
-    iTime: f32,
-    iFrame: f32,
-    iMouse: vec4<f32>,
+/// A WGSL shader's inputs: `PREAMBLE`'s buffer as `wallpaper`. A shader may declare it itself (eg so an editor knows
+/// its type), exactly so (`declared_layout`)
+const WGSL_PREAMBLE: &str = "struct Wallpaper {
+    resolution: vec2f,
+    time: f32,
+    frame: u32,
+    mouse: vec4f,
 }
-@group(0) @binding(0) var<uniform> shadertoy: Shadertoy;
+@group(0) @binding(0) var<uniform> wallpaper: Wallpaper;
 ";
 
-/// Calls the user's WGSL `mainImage`, like `EPILOGUE`
+/// Calls the user's WGSL `main_image`, like `EPILOGUE`
 const WGSL_EPILOGUE: &str = "
 @fragment
-fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    let color = mainImage(vec2<f32>(position.x, shadertoy.iResolution.y - position.y));
-    return vec4<f32>(color.rgb, 1.0);
+fn main(@builtin(position) position: vec4f) -> @location(0) vec4f {
+    let color = main_image(vec2f(position.x, wallpaper.resolution.y - position.y));
+    return vec4f(color.rgb, 1.0);
 }
 ";
+
+/// Whether a WGSL shader declares `wallpaper` itself (then `WGSL_PREAMBLE` isn't added)
+fn declares_wallpaper(user: &str) -> bool {
+    user.contains("var<uniform> wallpaper")
+}
+
+/// The `wallpaper` uniform's fields (name, offset, type), if it's at group 0, binding 0
+fn uniform_layout(module: &naga::Module) -> Option<Vec<(Option<String>, u32, String)>> {
+    let (_, global) = module
+        .global_variables
+        .iter()
+        .find(|(_, global)| global.name.as_deref() == Some("wallpaper"))?;
+    let binding = global.binding.as_ref()?;
+    if global.space != naga::AddressSpace::Uniform || (binding.group, binding.binding) != (0, 0) {
+        return None;
+    }
+    let naga::TypeInner::Struct { members, .. } = &module.types[global.ty].inner else {
+        return None;
+    };
+    Some(
+        members
+            .iter()
+            .map(|member| {
+                let ty = format!("{:?}", module.types[member.ty].inner);
+                (member.name.clone(), member.offset, ty)
+            })
+            .collect(),
+    )
+}
+
+/// Whether a shader's own `wallpaper` declaration is `WGSL_PREAMBLE`'s
+fn declared_layout(module: &naga::Module) -> Result<(), String> {
+    let expected = naga::front::wgsl::parse_str(WGSL_PREAMBLE)
+        .ok()
+        .and_then(|preamble| uniform_layout(&preamble));
+    if uniform_layout(module).is_some_and(|layout| Some(layout) == expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "`wallpaper` is declared differently from Sonamu's (or leave it out):\n{WGSL_PREAMBLE}"
+        ))
+    }
+}
 
 /// A wallpaper shader's language, by its file's extension: `.wgsl`, else GLSL
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +137,7 @@ static NOTIFICATION: Replacing = Replacing::new();
 fn fragment_source(user: &str, language: Language) -> String {
     match language {
         Language::Glsl => format!("{PREAMBLE}{user}\n{EPILOGUE}"),
+        Language::Wgsl if declares_wallpaper(user) => format!("{user}\n{WGSL_EPILOGUE}"),
         Language::Wgsl => format!("{WGSL_PREAMBLE}{user}\n{WGSL_EPILOGUE}"),
     }
 }
@@ -104,7 +149,11 @@ fn fragment_module(user: &str, language: Language) -> Result<naga::Module, Strin
     let module = match language {
         Language::Glsl => glsl_module(user, &source)?,
         Language::Wgsl => naga::front::wgsl::parse_str(&source).map_err(|err| {
-            let preamble_lines = WGSL_PREAMBLE.lines().count();
+            let preamble_lines = if declares_wallpaper(user) {
+                0
+            } else {
+                WGSL_PREAMBLE.lines().count()
+            };
             match err.location(&source) {
                 Some(at) => format!(
                     "wgsl:{}:{}: {}",
@@ -116,6 +165,9 @@ fn fragment_module(user: &str, language: Language) -> Result<naga::Module, Strin
             }
         })?,
     };
+    if language == Language::Wgsl && declares_wallpaper(user) {
+        declared_layout(&module)?;
+    }
     naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::default(),
@@ -146,11 +198,6 @@ fn glsl_module(user: &str, source: &str) -> Result<naga::Module, String> {
                 .collect();
             lines.join("\n")
         })
-}
-
-/// Whether a frame is due at `now`, after one drawn at `last`
-fn frame_due(last: Option<Instant>, now: Instant, fps: u32) -> bool {
-    last.is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1) / fps.max(1))
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
@@ -194,7 +241,8 @@ struct Shader {
     /// The texture's size, and its sRGB view
     target: Option<([u32; 2], wgpu::Texture, wgpu::TextureView)>,
     start: Instant,
-    last: Option<Instant>,
+    /// A new frame is to be drawn: `next_frame` was called, or the target is new
+    due: bool,
     frame: u32,
 }
 impl Shader {
@@ -279,7 +327,7 @@ impl Shader {
             bind_group,
             target: None,
             start: Instant::now(),
-            last: None,
+            due: true,
             frame: 0,
         })
     }
@@ -318,12 +366,11 @@ impl Shader {
                 ..Default::default()
             });
             self.target = Some((size, texture, view));
-            self.last = None;
+            self.due = true;
         }
         let (_, texture, view) = self.target.as_ref().expect("just made");
         let now = Instant::now();
-        if frame_due(self.last, now, self.setting.fps) {
-            self.last = Some(now);
+        if std::mem::take(&mut self.due) {
             #[expect(
                 clippy::cast_precision_loss,
                 reason = "sizes and frame counts are small"
@@ -332,7 +379,8 @@ impl Shader {
                 size[0] as f32,
                 size[1] as f32,
                 now.duration_since(self.start).as_secs_f32(),
-                self.frame as f32,
+                // a `u32` to WGSL (`int(floatBitsToUint(..))` in GLSL)
+                f32::from_bits(self.frame),
                 0.0,
                 0.0,
                 0.0,
@@ -432,6 +480,14 @@ impl Wallpaper {
         }
     }
 
+    /// A shader draws its next frame when next drawn (the runner's timer, at `frame_interval`; other redraws show
+    /// the last frame)
+    pub fn next_frame(&mut self) {
+        if let State::Shader(shader) = &mut self.state {
+            shader.due = true;
+        }
+    }
+
     /// How often it needs redrawing (a shader's frame rate); `None`: only when it changes
     pub fn frame_interval(&self) -> Option<Duration> {
         match &self.state {
@@ -502,6 +558,9 @@ mod tests {
     #[test]
     fn shadertoy_shader_compiles() {
         assert!(fragment_module(SINE, Language::Glsl).is_ok());
+        let frames = "void mainImage(out vec4 c, in vec2 p) { c = vec4(float(iFrame % 2)); }";
+        let result = fragment_module(frames, Language::Glsl);
+        assert!(result.is_ok(), "{:?}", result.err());
     }
 
     /// The example config's wallpaper
@@ -529,12 +588,16 @@ mod tests {
 
     #[test]
     fn wgsl_shader_compiles() {
-        let shader = "fn mainImage(fragCoord: vec2<f32>) -> vec4<f32> {
-            let uv = fragCoord / shadertoy.iResolution;
-            let wave = 0.5 + 0.4 * sin(uv.x * 12.0 + shadertoy.iTime);
-            return vec4<f32>(0.0, smoothstep(0.02, 0.0, abs(uv.y - wave)), 0.0, 1.0);
+        let shader = "fn main_image(position: vec2f) -> vec4f {
+            let uv = position / wallpaper.resolution;
+            let wave = 0.5 + 0.4 * sin(uv.x * 12.0 + wallpaper.time + f32(wallpaper.frame % 2u));
+            return vec4f(0.0, smoothstep(0.02, 0.0, abs(uv.y - wave)), 0.0, 1.0);
         }";
         let result = fragment_module(shader, Language::Wgsl);
+        assert!(result.is_ok(), "{:?}", result.err());
+        // declared in the file, as Sonamu's
+        let declared = format!("{WGSL_PREAMBLE}{shader}");
+        let result = fragment_module(&declared, Language::Wgsl);
         assert!(result.is_ok(), "{:?}", result.err());
         assert_eq!(Language::of(Path::new("w/a.wgsl")), Language::Wgsl);
         assert_eq!(Language::of(Path::new("w/a.frag")), Language::Glsl);
@@ -543,12 +606,29 @@ mod tests {
     #[test]
     fn broken_wgsl_says_where() {
         let err = fragment_module(
-            "fn mainImage(p: vec2<f32>) -> vec4<f32> {\n    return nope;\n}",
+            "fn main_image(p: vec2f) -> vec4f {\n    return nope;\n}",
             Language::Wgsl,
         )
         .unwrap_err();
         assert!(err.contains("nope"), "{err}");
         assert!(err.contains("wgsl:2:"), "{err}");
+    }
+
+    /// A declaration in the file must match the buffer
+    #[test]
+    fn declared_wallpaper_must_match() {
+        let shader = "struct Wallpaper { time: f32, resolution: vec2f, frame: u32, mouse: vec4f }
+@group(0) @binding(0) var<uniform> wallpaper: Wallpaper;
+fn main_image(p: vec2f) -> vec4f { return vec4f(wallpaper.time); }";
+        let err = fragment_module(shader, Language::Wgsl).unwrap_err();
+        assert!(err.contains("declared differently"), "{err}");
+        // lines count from the file's first when it declares it
+        let err = fragment_module(
+            &format!("{WGSL_PREAMBLE}fn main_image(p: vec2f) -> vec4f {{\n    return nope;\n}}"),
+            Language::Wgsl,
+        )
+        .unwrap_err();
+        assert!(err.contains("wgsl:9:"), "{err}");
     }
 
     #[test]
@@ -574,14 +654,5 @@ mod tests {
             .unwrap();
         assert!(watched.changed());
         assert!(!Watched::now(path).changed());
-    }
-
-    #[test]
-    fn frames_follow_fps() {
-        let start = Instant::now();
-        let frame = Duration::from_secs(1) / 30;
-        assert!(frame_due(None, start, 30));
-        assert!(!frame_due(Some(start), start + frame / 2, 30));
-        assert!(frame_due(Some(start), start + frame, 30));
     }
 }

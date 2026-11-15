@@ -251,6 +251,7 @@ impl AppletRunner {
                 runner.wallpaper.reload_changed(&runner.ui_handle.device);
                 let interval = runner.wallpaper.frame_interval();
                 if interval.is_some() && runner.smithay_state.fullscreen().is_none() {
+                    runner.wallpaper.next_frame();
                     runner.needs_redraw = true;
                 }
                 // an idle check for a changed shader file otherwise

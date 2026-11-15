@@ -147,8 +147,9 @@ pub enum Wallpaper {
     /// An image file (`~` or relative to the config dir), covering each screen
     Image(#[schemars(extend("format" = "path"))] PathBuf),
     /// A Shadertoy-style fragment shader, reloaded when the file changes. GLSL: `void mainImage(out vec4 fragColor,
-    /// in vec2 fragCoord)` with `iTime`, `iResolution`, `iFrame`, `iMouse`. A `.wgsl` file: `fn mainImage(fragCoord:
-    /// vec2<f32>) -> vec4<f32>` with `shadertoy.iTime` (and `iResolution` as a `vec2`, `iFrame`, `iMouse`)
+    /// in vec2 fragCoord)` with `iTime`, `iResolution`, `iFrame`, `iMouse`. A `.wgsl` file: `fn main_image(position: vec2f)
+    /// -> vec4f` with `wallpaper.time`, `.resolution`, `.frame` (`u32`), `.mouse`; it may declare `wallpaper` itself
+    /// (`struct Wallpaper { resolution: vec2f, time: f32, frame: u32, mouse: vec4f }` at group 0, binding 0)
     Shader(ShaderWallpaper),
 }
 
