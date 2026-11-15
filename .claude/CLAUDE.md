@@ -27,6 +27,7 @@ Component docs are `CLAUDE.md` beside their code; keep each component's instruct
 - World tree, ownership, pluck/place, projects, focus, traversal, zoom-out, treeview, screens: `sonamu_sttk/src/nodular_applet/CLAUDE.md`
 - Status bar: `sonamu_sttk/src/nodular_applet/status_bar/CLAUDE.md`
 - Native applet UI kit, UI consistency: `sonamu_sttk/src/ui/CLAUDE.md`
+- Settings editor: `sonamu_standard_tabs/src/settings_editor/CLAUDE.md`
 - `.claude/`: glossary `CONTEXT.md`, sessions `SESSIONS.md`, settings `SETTINGS.md`, commands and Luau `COMMANDS.md`, headless testing `TESTING.md`
 
 # Rules
