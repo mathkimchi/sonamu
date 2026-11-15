@@ -4,7 +4,11 @@ use crate::notification::Replacing;
 use notify::Watcher as _;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::Deserialize;
-use sonamu_ui::{color::Color, display_units::ToPx};
+use sonamu_ui::{
+    color::Color,
+    display_units::ToPx,
+    ui_event::{KeyModifiers, KeySymbol, UIEvent},
+};
 use std::{
     collections::HashSet,
     fs, io,
@@ -68,7 +72,7 @@ pub struct Settings {
     pub zoom_out: ZoomOutSettings,
     /// Desktop notifications, shown by the status bar (#150)
     pub notifications: NotificationSettings,
-    /// Global shortcuts that run a shell command
+    /// Global shortcuts: Sonamu commands or shell commands. Given, it replaces the defaults (list the ones to keep)
     pub keybinds: Vec<Keybind>,
     /// Programs restored running in their terminal (see `.claude/SESSIONS.md`)
     pub restore_programs: Vec<RestoreProgram>,
@@ -94,28 +98,76 @@ impl Settings {
     }
 }
 
-/// Runs `command` with `sh -c` when `key` is pressed with exactly `mods` held.
+/// Does `action` when `key` is pressed with exactly `mods` held
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 pub struct Keybind {
     /// Any of `ctrl`, `alt`, `shift`, `logo`
     #[serde(default)]
     pub mods: Vec<String>,
     pub key: Key,
-    pub command: String,
+    #[serde(flatten)]
+    pub action: Action,
 }
 
-/// A character (case-insensitive), or an evdev code for keys without one (eg 115 is volume up)
+/// What a keybind does
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Action {
+    /// Runs it with `sh -c`
+    Shell { shell: String },
+    /// A Sonamu command (see `.claude/SETTINGS.md`), eg `close`
+    Command {
+        command: String,
+        #[serde(default)]
+        args: Vec<serde_json::Value>,
+    },
+}
+
+/// A character (case-insensitive), a key's name, or an evdev code for other keys (eg 115 is volume up)
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Key {
     Code(u32),
     Char(char),
+    Named(NamedKey),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NamedKey {
+    Left,
+    Right,
+    Up,
+    Down,
+    Enter,
+    Tab,
+    Escape,
+    Backspace,
+    PageUp,
+    PageDown,
+}
+impl NamedKey {
+    fn is(self, symbol: KeySymbol) -> bool {
+        matches!(
+            (self, symbol),
+            (Self::Left, KeySymbol::ArrowKeyLeft)
+                | (Self::Right, KeySymbol::ArrowKeyRight)
+                | (Self::Up, KeySymbol::ArrowKeyUp)
+                | (Self::Down, KeySymbol::ArrowKeyDown)
+                | (Self::Enter, KeySymbol::Enter | KeySymbol::Char('\n' | '\r'))
+                | (Self::Tab, KeySymbol::Char('\t'))
+                | (Self::Escape, KeySymbol::Escape)
+                | (Self::Backspace, KeySymbol::Backspace)
+                | (Self::PageUp, KeySymbol::PageUp)
+                | (Self::PageDown, KeySymbol::PageDown)
+        )
+    }
 }
 
 impl Keybind {
     pub fn matches(
         &self,
-        symbol: Option<char>,
+        symbol: Option<KeySymbol>,
         raw_keycode: u32,
         [ctrl, alt, shift, logo]: [bool; 4],
     ) -> bool {
@@ -126,23 +178,63 @@ impl Keybind {
             && has("logo") == logo
             && match self.key {
                 Key::Code(code) => code == raw_keycode,
-                Key::Char(c) => symbol.is_some_and(|s| s.to_lowercase().eq(c.to_lowercase())),
+                Key::Char(c) => {
+                    matches!(symbol, Some(KeySymbol::Char(s)) if s.to_lowercase().eq(c.to_lowercase()))
+                }
+                Key::Named(named) => symbol.is_some_and(|symbol| named.is(symbol)),
             }
     }
 
-    /// Runs the command without waiting for it.
-    pub fn run(&self) {
-        let mut command = Command::new("sh");
-        command.arg("-c").arg(&self.command);
+    /// `matches` for a key with a character (or none), eg Luau's `keymap.set`
+    pub fn matches_char(&self, symbol: Option<char>, raw_keycode: u32, mods: [bool; 4]) -> bool {
+        self.matches(symbol.map(KeySymbol::Char), raw_keycode, mods)
+    }
+
+    /// Runs a shell keybind's command without waiting for it
+    pub fn run_shell(command: &str) {
+        let mut child = Command::new("sh");
+        child.arg("-c").arg(command);
         // connect wl clients (grim, swappy, ...) to Sonamu
-        crate::connect_wl_client(&mut command);
-        match command.spawn() {
+        crate::connect_wl_client(&mut child);
+        match child.spawn() {
             Ok(mut child) => {
                 // reap it
                 thread::spawn(move || child.wait());
             }
-            Err(err) => eprintln!("keybind `{}` failed: {err}", self.command),
+            Err(err) => eprintln!("keybind `{command}` failed: {err}"),
         }
+    }
+}
+
+/// The command (and its args) of the first keybind for this key press with `modifiers`, if it's a command
+#[must_use]
+pub fn keybind_command(
+    ui_event: &UIEvent,
+    modifiers: KeyModifiers,
+) -> Option<(String, Vec<serde_json::Value>)> {
+    let UIEvent::Key {
+        symbol,
+        raw_keycode,
+        pressed: true,
+        ..
+    } = *ui_event
+    else {
+        return None;
+    };
+    let mods = [
+        modifiers.ctrl,
+        modifiers.alt,
+        modifiers.shift,
+        modifiers.logo,
+    ];
+    match get()
+        .keybinds
+        .into_iter()
+        .find(|keybind| keybind.matches(symbol, raw_keycode, mods))?
+        .action
+    {
+        Action::Command { command, args } => Some((command, args)),
+        Action::Shell { .. } => None,
     }
 }
 
@@ -668,6 +760,12 @@ mod tests {
         );
         assert_eq!(loaded.settings.palette, Palette::default());
         assert_eq!(loaded.watch, vec![PathBuf::from("/a")]);
+    }
+
+    #[test]
+    fn example_config_parses() {
+        let text = include_str!("../../examples/config/settings.json");
+        assert!(parse(text).unwrap().settings.keybinds.len() > 1);
     }
 
     /// Writes `assets/settings.schema.json` if it's out of date

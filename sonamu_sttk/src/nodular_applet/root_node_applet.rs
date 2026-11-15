@@ -1542,45 +1542,40 @@ fn swipe_strip(
 
 /// The root's own keybinds
 enum RootKeybind {
-    /// Super+?
     Help,
-    /// Super+V
+    /// Toggles the focused node as the view root
     ViewRoot,
-    /// Alt+r
+    /// The focus's parent as the view root
     ViewParent,
-    /// Ctrl+Super+arrow: like a 3 finger swipe, by one row
-    Swipe { vertical: bool, forward: bool },
+    /// Like a 3 finger swipe, by one row
+    Swipe {
+        vertical: bool,
+        forward: bool,
+    },
 }
 impl RootKeybind {
+    /// From the keybinds (setting `keybinds`): `help`, `view_root`, `view_parent`, `swipe` and a direction
     fn of(ui_event: &UIEvent) -> Option<Self> {
-        let UIEvent::Key {
-            symbol: Some(symbol),
-            modifiers,
-            pressed: true,
-            ..
-        } = *ui_event
-        else {
+        let &UIEvent::Key { modifiers, .. } = ui_event else {
             return None;
         };
-        if modifiers.ctrl && modifiers.logo && !modifiers.alt && !modifiers.shift {
-            let (vertical, forward) = match symbol {
-                KeySymbol::ArrowKeyLeft => (false, false),
-                KeySymbol::ArrowKeyRight => (false, true),
-                KeySymbol::ArrowKeyUp => (true, false),
-                KeySymbol::ArrowKeyDown => (true, true),
-                _ => return None,
-            };
-            return Some(Self::Swipe { vertical, forward });
-        }
-        let KeySymbol::Char(c) = symbol else {
-            return None;
-        };
-        match c {
-            '?' if modifiers.logo => Some(Self::Help),
-            'v' | 'V' if modifiers.logo => Some(Self::ViewRoot),
-            'r' if modifiers == KeyModifiers::ALT => Some(Self::ViewParent),
-            _ => None,
-        }
+        let (command, args) = settings::keybind_command(ui_event, modifiers)?;
+        Some(match command.as_str() {
+            "help" => Self::Help,
+            "view_root" => Self::ViewRoot,
+            "view_parent" => Self::ViewParent,
+            "swipe" => {
+                let (vertical, forward) = match args.first()?.as_str()? {
+                    "left" => (false, false),
+                    "right" => (false, true),
+                    "up" => (true, false),
+                    "down" => (true, true),
+                    _ => return None,
+                };
+                Self::Swipe { vertical, forward }
+            }
+            _ => return None,
+        })
     }
 }
 

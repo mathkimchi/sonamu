@@ -33,7 +33,7 @@
       "format": "float"
     },
     "keybinds": {
-      "description": "Global shortcuts that run a shell command",
+      "description": "Global shortcuts: Sonamu commands or shell commands. Given, it replaces the defaults (list the ones to keep)",
       "type": "array",
       "items": {
         "$ref": "#/$defs/Keybind"
@@ -144,7 +144,7 @@
       "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
     },
     "Key": {
-      "description": "A character (case-insensitive), or an evdev code for keys without one (eg 115 is volume up)",
+      "description": "A character (case-insensitive), a key's name, or an evdev code for other keys (eg 115 is volume up)",
       "anyOf": [
         {
           "type": "integer",
@@ -155,16 +155,16 @@
           "type": "string",
           "maxLength": 1,
           "minLength": 1
+        },
+        {
+          "$ref": "#/$defs/NamedKey"
         }
       ]
     },
     "Keybind": {
-      "description": "Runs `command` with `sh -c` when `key` is pressed with exactly `mods` held.",
+      "description": "Does `action` when `key` is pressed with exactly `mods` held",
       "type": "object",
       "properties": {
-        "command": {
-          "type": "string"
-        },
         "key": {
           "$ref": "#/$defs/Key"
         },
@@ -177,9 +177,54 @@
           }
         }
       },
+      "anyOf": [
+        {
+          "description": "Runs it with `sh -c`",
+          "type": "object",
+          "properties": {
+            "shell": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "shell"
+          ]
+        },
+        {
+          "description": "A Sonamu command (see `.claude/SETTINGS.md`), eg `close`",
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "array",
+              "default": [],
+              "items": true
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      ],
       "required": [
-        "key",
-        "command"
+        "key"
+      ]
+    },
+    "NamedKey": {
+      "type": "string",
+      "enum": [
+        "left",
+        "right",
+        "up",
+        "down",
+        "enter",
+        "tab",
+        "escape",
+        "backspace",
+        "page_up",
+        "page_down"
       ]
     },
     "NotificationSettings": {

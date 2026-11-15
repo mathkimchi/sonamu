@@ -9,7 +9,7 @@ Emacs-like: every action is a named command; keybinds, hub, buffer line and sock
 - Signatures: `AppletSpawnerTrait::commands` → `command::declare`; checked in the node's world (`command::check`). Clashes with `NODE_COMMANDS` dropped.
 - Type: derived when asked (`NodeTree::applet_type`), not stored. Right after `add_child` it's `applet` until the first publish.
 - Effects `read < modify < destructive < spawn` (`command::Effect`); limited evals (`eval_limited`, `sonamu-msg eval --max`) run in their own env and builtins check `allow`. Everything else unlimited.
-- Keybinds: `standard_keybinds::standard_keybind` → `KeybindCommand`, sent to the applet's own node (`command::send`). Rust, so a stuck script can't block them.
+- Keybinds: from setting `keybinds` (`.claude/SETTINGS.md`); `standard_keybinds::standard_keybind` → `KeybindCommand`, sent to the applet's own node (`command::send`). Rust, so a stuck script can't block them.
 
 ## Script thread (`sonamu_script`)
 

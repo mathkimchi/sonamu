@@ -3,7 +3,7 @@ use sonamu_common::{
     sap::packets::StandardRequest,
     settings,
 };
-use sonamu_ui::ui_event::{KeyModifiers, KeyTrait, UIEvent};
+use sonamu_ui::ui_event::UIEvent;
 
 use crate::nodular_applet::{AppletContext, NodeRequest, project_applet::ProjectApplet};
 
@@ -75,21 +75,14 @@ fn installed(program: &str) -> bool {
 
 /// A standard keybind's node command (see `.claude/COMMANDS.md`), with its args
 pub struct KeybindCommand {
-    pub name: &'static str,
+    pub name: String,
     pub args: Vec<Value>,
 }
 impl KeybindCommand {
-    const fn new(name: &'static str) -> Self {
-        Self {
-            name,
-            args: Vec::new(),
-        }
-    }
-
     /// The same as a request to the node (eg for applets that handle some keybinds differently)
     #[must_use]
     pub fn request(&self) -> Option<NodeRequest> {
-        Some(match (self.name, self.args.as_slice()) {
+        Some(match (self.name.as_str(), self.args.as_slice()) {
             ("quit", []) => StandardRequest::Quit.into(),
             ("wrap_project", []) => NodeRequest::Wrap(ProjectApplet::wrapper()),
             ("close", []) => NodeRequest::Close,
@@ -109,7 +102,7 @@ pub fn handle_standard_keybinds(ui_event: &UIEvent, hook: &AppletContext) -> boo
         return false;
     };
     match hook.uid() {
-        Some(uid) => command::send(uid, keybind.name, keybind.args),
+        Some(uid) => command::send(uid, &keybind.name, keybind.args),
         None => {
             if let Some(request) = keybind.request() {
                 hook.request(request);
@@ -125,76 +118,89 @@ pub fn standard_keybind_request(ui_event: &UIEvent) -> Option<NodeRequest> {
     standard_keybind(ui_event)?.request()
 }
 
-/// The standard keybinds:
-/// - `Ctrl+Shift+Q` - Quit
-/// - `Super+W` - Close tab
-/// - `Super+T` / `Super+N` - Start the terminal / browser (with `Shift`: as a sibling)
-/// - `Super+P` - Put the node in a project
-/// - `Super+F` - Toggle half width
-/// - `Alt+Shift+W` / `Alt+Shift+S` - swap with the previous / next sibling
+/// The keybind (setting `keybinds`) for this key, if it's a node command: `quit`, `wrap_project`, `close`,
+/// `toggle_half`, `spawn(program)`, `spawn_sibling(program)`, `swap_sibling(offset)`, and `spawn_terminal`,
+/// `spawn_browser` (`terminal()`, `browser()`; `_sibling` too).
 ///
-/// Traversal (`Alt+<traversal key>`, swipes) is the root's (`nodular_applet::traversal`).
+/// Traversal and the root's own keybinds are the root's (`nodular_applet::traversal`, `RootKeybind`).
+#[must_use]
 pub fn standard_keybind(ui_event: &UIEvent) -> Option<KeybindCommand> {
-    let UIEvent::Key {
-        symbol: Some(key),
-        modifiers,
-        pressed: true,
-        ..
-    } = *ui_event
-    else {
+    let &UIEvent::Key { modifiers, .. } = ui_event else {
         return None;
     };
-    // the case comes from Shift and Caps Lock; the modifiers decide (Caps Lock changes nothing)
-    let key = key.to_char()?.to_ascii_lowercase();
-    Some(match (key, modifiers) {
-        (
-            'q',
-            KeyModifiers {
-                ctrl: true,
-                shift: true,
-                alt: false,
-                logo: false,
-                ..
-            },
-        ) => KeybindCommand::new("quit"),
-        // the node and everything under it in a project
-        ('p', KeyModifiers { logo: true, .. }) => KeybindCommand::new("wrap_project"),
-        // its children move to the parent
-        (
-            'w',
-            KeyModifiers {
-                logo: true,
-                shift: false,
-                ..
-            },
-        ) => KeybindCommand::new("close"),
-        // #144
-        ('f', KeyModifiers { logo: true, .. }) => KeybindCommand::new("toggle_half"),
-        ('t' | 'n', KeyModifiers { logo: true, .. }) => KeybindCommand {
-            name: if modifiers.shift {
-                "spawn_sibling"
-            } else {
-                "spawn"
-            },
-            args: vec![Value::String(if key == 't' {
-                terminal()
-            } else {
-                browser()
-            })],
-        },
-        (
-            'w' | 's',
-            KeyModifiers {
-                alt: true,
-                shift: true,
-                ctrl: false,
-                logo: false,
-                ..
-            },
-        ) => KeybindCommand {
-            name: "swap_sibling",
-            args: vec![Value::Number(if key == 'w' { -1.0 } else { 1.0 })],
+    let (name, args) = settings::keybind_command(ui_event, modifiers)?;
+    let spawn = |name: &str, program| KeybindCommand {
+        name: name.to_owned(),
+        args: vec![Value::String(program)],
+    };
+    Some(match name.as_str() {
+        "spawn_terminal" => spawn("spawn", terminal()),
+        "spawn_terminal_sibling" => spawn("spawn_sibling", terminal()),
+        "spawn_browser" => spawn("spawn", browser()),
+        "spawn_browser_sibling" => spawn("spawn_sibling", browser()),
+        "quit" | "wrap_project" | "close" | "toggle_half" | "spawn" | "spawn_sibling"
+        | "swap_sibling" => KeybindCommand {
+            args: args.into_iter().map(json_value).collect(),
+            name,
         },
         _ => return None,
     })
+}
+
+/// A keybind's arg as a command's
+fn json_value(value: serde_json::Value) -> Value {
+    match value {
+        serde_json::Value::Null => Value::Nil,
+        serde_json::Value::Bool(value) => Value::Bool(value),
+        serde_json::Value::Number(value) => Value::Number(value.as_f64().unwrap_or_default()),
+        serde_json::Value::String(value) => Value::String(value),
+        serde_json::Value::Array(values) => {
+            Value::List(values.into_iter().map(json_value).collect())
+        }
+        serde_json::Value::Object(map) => Value::Map(
+            map.into_iter()
+                .map(|(key, value)| (key, json_value(value)))
+                .collect(),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::nodular_applet::traversal::Traversal;
+    use sonamu_common::settings::{Action, Settings};
+
+    /// Every default keybind's command is one something handles
+    #[test]
+    fn default_keybinds_are_known() {
+        for keybind in Settings::default().keybinds {
+            let Action::Command { command, args } = keybind.action else {
+                continue;
+            };
+            let known = match command.as_str() {
+                "traverse" => Traversal::from_args(&args).is_some(),
+                "swipe" => matches!(
+                    args.first().and_then(|arg| arg.as_str()),
+                    Some("left" | "right" | "up" | "down")
+                ),
+                _ => [
+                    "quit",
+                    "wrap_project",
+                    "close",
+                    "toggle_half",
+                    "spawn_terminal",
+                    "spawn_terminal_sibling",
+                    "spawn_browser",
+                    "spawn_browser_sibling",
+                    "swap_sibling",
+                    "pluck_place",
+                    "help",
+                    "view_root",
+                    "view_parent",
+                ]
+                .contains(&command.as_str()),
+            };
+            assert!(known, "{command} {args:?}");
+        }
+    }
 }

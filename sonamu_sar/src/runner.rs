@@ -11,6 +11,7 @@ use sonamu_common::{
         packets::{BarInput, BarRequest, StandardEvent, StandardRequest, StateKind, WlSurfaceId},
         raw_client_initializer::RawClientInitializer,
     },
+    settings::{Action, Keybind},
 };
 use sonamu_ui::{
     PointerGrab,
@@ -519,18 +520,9 @@ impl AppletRunner {
         }
 
         // global keybinds
-        if let UIEvent::Key {
-            symbol: Some(KeySymbol::Char('p' | 'P')),
-            modifiers:
-                KeyModifiers {
-                    alt: true,
-                    ctrl: false,
-                    logo: false,
-                    ..
-                },
-            pressed: true,
-            ..
-        } = event
+        if let UIEvent::Key { modifiers, .. } = event
+            && sonamu_common::settings::keybind_command(&event, modifiers)
+                .is_some_and(|(command, _)| command == "pluck_place")
         {
             self.toggle_pluck_place();
             return;
@@ -733,10 +725,6 @@ fn run_binding(event: &UIEvent) -> bool {
     {
         return false;
     }
-    let symbol = match symbol {
-        Some(KeySymbol::Char(c)) => Some(c),
-        _ => None,
-    };
     let mods = [
         modifiers.ctrl,
         modifiers.alt,
@@ -744,15 +732,21 @@ fn run_binding(event: &UIEvent) -> bool {
         modifiers.logo,
     ];
     let settings = sonamu_common::settings::get();
-    if let Some(keybind) = settings
+    // Sonamu commands go to the applets (`is_keybind`), after Luau's bindings
+    if let Some(Action::Shell { shell }) = settings
         .keybinds
         .iter()
         .find(|keybind| keybind.matches(symbol, raw_keycode, mods))
+        .map(|keybind| &keybind.action)
     {
-        keybind.run();
+        Keybind::run_shell(shell);
         return true;
     }
     // from Luau (`keymap.set`)
+    let symbol = match symbol {
+        Some(KeySymbol::Char(c)) => Some(c),
+        _ => None,
+    };
     if let Some(id) = sonamu_script::binding(symbol, raw_keycode, mods) {
         sonamu_script::run_binding(id);
         return true;

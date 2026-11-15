@@ -6,7 +6,7 @@ mod require;
 
 use mlua::{Lua, MetaMethod, MultiValue, UserData, UserDataMethods, Value as LuaValue, VmState};
 use sonamu_command::{self as command, CommandResult, Effect, NODE_COMMANDS, NodeUid, Value};
-use sonamu_common::settings::{Key, Keybind};
+use sonamu_common::settings::{Action, Key, Keybind};
 use std::{
     cell::RefCell,
     fmt::Write as _,
@@ -145,7 +145,7 @@ pub fn binding(symbol: Option<char>, raw_keycode: u32, mods: [bool; 4]) -> Optio
     let matching = || {
         bindings
             .iter()
-            .filter(|binding| binding.keybind.matches(symbol, raw_keycode, mods))
+            .filter(|binding| binding.keybind.matches_char(symbol, raw_keycode, mods))
     };
     matching()
         .find(|binding| binding.applet_type.is_some() && binding.applet_type == focus_type)
@@ -664,7 +664,9 @@ fn keymap_key(
     let keybind = Keybind {
         mods,
         key,
-        command: String::new(),
+        action: Action::Shell {
+            shell: String::new(),
+        },
     };
     Ok((keybind, applet_type))
 }

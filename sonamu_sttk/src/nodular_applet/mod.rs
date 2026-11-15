@@ -33,7 +33,7 @@ pub mod project_applet;
 pub mod root_node_applet;
 pub mod status_bar;
 pub mod swipe;
-mod traversal;
+pub(crate) mod traversal;
 pub(crate) mod treeview;
 
 // pub struct RootApplet<Applet: BasicApplet> {

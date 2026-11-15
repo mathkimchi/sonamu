@@ -1,0 +1,98 @@
+{
+  "$schema": "https://raw.githubusercontent.com/mathkimchi/sonamu/dev/assets/settings.schema.json",
+  "palette": {
+    "bg": "#111418",
+    "fg": "#e1e2e8",
+    "accent": "#d6bee4",
+    "inactive": "#8d9199"
+  },
+  "border": {
+    "width": 2,
+    "focused": "#a0cafd",
+    "unfocused": "#42474e",
+    "treeview": "#bbc7db"
+  },
+  "gap": 8.0,
+  "radius": 0,
+  "font_size": 24.0,
+  "treeview": {
+    "side": "left",
+    "floating": "center",
+    "width": 15,
+    "floating_size": [
+      50,
+      70
+    ]
+  },
+  "buffer_line": "always",
+  "swipe": {
+    "distance_x": 600.0,
+    "distance_y": 1200.0,
+    "rubber_band": 0.15,
+    "stiffness": 1000.0,
+    "damping_ratio": 1.0
+  },
+  "keybinds": [
+    {"mods": ["ctrl", "shift"], "key": "q", "command": "quit"},
+    {"mods": ["logo"], "key": "w", "command": "close"},
+    {"mods": ["logo"], "key": "t", "command": "spawn_terminal"},
+    {"mods": ["logo", "shift"], "key": "t", "command": "spawn_terminal_sibling"},
+    {"mods": ["logo"], "key": "n", "command": "spawn_browser"},
+    {"mods": ["logo", "shift"], "key": "n", "command": "spawn_browser_sibling"},
+    {"mods": ["logo"], "key": "p", "command": "wrap_project"},
+    {"mods": ["logo"], "key": "f", "command": "toggle_half"},
+    {"mods": ["alt", "shift"], "key": "w", "command": "swap_sibling", "args": [-1]},
+    {"mods": ["alt", "shift"], "key": "s", "command": "swap_sibling", "args": [1]},
+    {"mods": ["alt"], "key": "p", "command": "pluck_place"},
+    {"mods": ["logo", "shift"], "key": "?", "command": "help"},
+    {"mods": ["logo"], "key": "v", "command": "view_root"},
+    {"mods": ["alt"], "key": "r", "command": "view_parent"},
+    {"mods": ["ctrl", "logo"], "key": "left", "command": "swipe", "args": ["left"]},
+    {"mods": ["ctrl", "logo"], "key": "right", "command": "swipe", "args": ["right"]},
+    {"mods": ["ctrl", "logo"], "key": "up", "command": "swipe", "args": ["up"]},
+    {"mods": ["ctrl", "logo"], "key": "down", "command": "swipe", "args": ["down"]},
+    {"mods": ["alt"], "key": "tab", "command": "traverse", "args": ["next"]},
+    {"mods": ["alt", "shift"], "key": "tab", "command": "traverse", "args": ["prev"]},
+    {"mods": ["alt"], "key": "a", "command": "traverse", "args": ["parent"]},
+    {"mods": ["alt"], "key": "0", "command": "traverse", "args": ["parent"]},
+    {"mods": ["alt"], "key": "1", "command": "traverse", "args": ["child", 1]},
+    {"mods": ["alt"], "key": "2", "command": "traverse", "args": ["child", 2]},
+    {"mods": ["alt"], "key": "3", "command": "traverse", "args": ["child", 3]},
+    {"mods": ["alt"], "key": "4", "command": "traverse", "args": ["child", 4]},
+    {"mods": ["alt"], "key": "5", "command": "traverse", "args": ["child", 5]},
+    {"mods": ["alt"], "key": "6", "command": "traverse", "args": ["child", 6]},
+    {"mods": ["alt"], "key": "7", "command": "traverse", "args": ["child", 7]},
+    {"mods": ["alt"], "key": "8", "command": "traverse", "args": ["child", 8]},
+    {"mods": ["alt"], "key": "9", "command": "traverse", "args": ["last_child"]},
+    {"mods": ["alt"], "key": "d", "command": "traverse", "args": ["recent_child"]},
+    {"mods": ["alt"], "key": "w", "command": "traverse", "args": ["sibling", -1]},
+    {"mods": ["alt"], "key": "s", "command": "traverse", "args": ["sibling", 1]},
+    {"mods": ["alt"], "key": "enter", "command": "traverse", "args": ["enter"]},
+    {"key": 115, "shell": "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"},
+    {"key": 114, "shell": "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"},
+    {"key": 113, "shell": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"},
+    {"key": 225, "shell": "brightnessctl set 5%+"},
+    {"key": 224, "shell": "brightnessctl set 5%-"},
+    {"key": 99, "shell": "grim"},
+    {"mods": ["logo", "shift"], "key": "r", "shell": "\"${XDG_CONFIG_HOME:-$HOME/.config}/sonamu/toggle-record\""}
+  ],
+  "restore_programs": [
+    "hx",
+    {
+      "program": "claude",
+      "args": [
+        "--continue"
+      ]
+    },
+    "typst"
+  ],
+  "terminal": "foot",
+  "browser": "firefox",
+  "startup": [
+    "touch \"$XDG_RUNTIME_DIR/sonamu-hide-beeper\"; exec beeper --no-sandbox"
+  ],
+  "zoom_out": {
+    "child_previews": true,
+    "view": "free"
+  }
+}

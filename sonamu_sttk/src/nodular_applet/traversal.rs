@@ -2,8 +2,8 @@
 //! so it crosses into and out of applets' inner trees like any other level.
 
 use super::treeview::TreeviewRow;
-use sonamu_common::utils::tree::world_tree::WorldTreePath;
-use sonamu_ui::ui_event::{KeyTrait, UIEvent};
+use sonamu_common::{settings, utils::tree::world_tree::WorldTreePath};
+use sonamu_ui::ui_event::{KeyModifiers, UIEvent};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,44 +27,46 @@ pub enum Traversal {
     Enter,
 }
 impl Traversal {
-    /// The traversal a key does (swipes are the root's, `swipe`). While `traversing` (the treeview has the keys) plain keys do it,
-    /// otherwise only with Alt.
+    /// The traversal a key does (setting `keybinds`, command `traverse`; swipes are the root's, `swipe`). While
+    /// `traversing` (the treeview has the keys), keybinds with Alt also work without it, but `enter`.
     pub fn of(ui_event: &UIEvent, traversing: bool) -> Option<Self> {
-        match *ui_event {
-            UIEvent::Key {
-                symbol: Some(key),
-                modifiers,
-                pressed: true,
-                ..
-            } if !modifiers.ctrl && !modifiers.logo && (traversing || modifiers.alt) => {
-                let c = key.to_char()?;
-                if c == '\t' {
-                    return Some(if modifiers.shift {
-                        Self::Prev
-                    } else {
-                        Self::Next
-                    });
-                }
-                // Alt+Shift+W/S swap siblings
-                if modifiers.shift {
-                    return None;
-                }
-                // Alt+Enter goes in, like 4 fingers down
-                if c == '\n' {
-                    return modifiers.alt.then_some(Self::Enter);
-                }
-                Some(match c {
-                    'a' | '0' => Self::Parent,
-                    'd' => Self::RecentChild,
-                    '1'..='8' => Self::Child(c.to_digit(10)? as usize - 1),
-                    '9' => Self::LastChild,
-                    'w' => Self::Sibling(-1),
-                    's' => Self::Sibling(1),
-                    _ => return None,
-                })
-            }
-            _ => None,
-        }
+        let &UIEvent::Key { modifiers, .. } = ui_event else {
+            return None;
+        };
+        let traversal = |modifiers| {
+            let (command, args) = settings::keybind_command(ui_event, modifiers)?;
+            (command == "traverse")
+                .then(|| Self::from_args(&args))
+                .flatten()
+        };
+        traversal(modifiers).or_else(|| {
+            let with_alt = KeyModifiers {
+                alt: true,
+                ..modifiers
+            };
+            (traversing && !modifiers.alt)
+                .then(|| traversal(with_alt))
+                .flatten()
+                .filter(|traversal| *traversal != Self::Enter)
+        })
+    }
+
+    /// From a `traverse` keybind's args: `next`, `prev`, `parent`, `child` and n (from 1), `recent_child`,
+    /// `last_child`, `sibling` and an offset, `select`, `enter`
+    pub(crate) fn from_args(args: &[serde_json::Value]) -> Option<Self> {
+        let number = || args.get(1)?.as_i64();
+        Some(match args.first()?.as_str()? {
+            "next" => Self::Next,
+            "prev" => Self::Prev,
+            "parent" => Self::Parent,
+            "child" => Self::Child(usize::try_from(number()?).ok()?.checked_sub(1)?),
+            "recent_child" => Self::RecentChild,
+            "last_child" => Self::LastChild,
+            "sibling" => Self::Sibling(isize::try_from(number()?).ok()?),
+            "select" => Self::Select,
+            "enter" => Self::Enter,
+            _ => return None,
+        })
     }
 }
 

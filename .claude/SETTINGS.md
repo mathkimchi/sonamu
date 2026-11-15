@@ -9,7 +9,9 @@
   - `palette.bg` is only for hub/buffer line/help backgrounds (an opaque root background hid wallpaper layers). Other backgrounds: `Palette::raised`/`tinted`, translucent via `with_opacity` (0.8).
   - `always_frame`: a lone pane still gets border/gap/radius.
   - `frames_itself` panes (projects showing panes) aren't framed and grow by `gap`.
-  - `keybinds` (#114): checked in `AppletRunner::handle_ui_event`, exact mods, `sh -c`. One bad entry fails the whole parse.
+  - `keybinds` (#114, #147): `{mods, key, shell}` or `{mods, key, command, args}`; key = char, name (`left`, `tab`, `enter`, ...) or evdev code; exact mods; first match wins. Defaults are in `default_settings.json`; a user list replaces them (arrays aren't merged), so it lists the defaults it keeps. One bad entry fails the whole parse. An old `{"command": "<shell>"}` parses as an unknown command and does nothing.
+    - Shell: runner (`run_binding`), before Luau `keymap.set`; commands go after Luau, through `is_keybind`.
+    - Commands: node (`standard_keybind`: `quit`, `close`, `wrap_project`, `toggle_half`, `spawn(program)`, `spawn_sibling(program)`, `swap_sibling(n)`, `spawn_terminal`/`spawn_browser` (+`_sibling`)); root (`RootKeybind`: `help`, `view_root`, `view_parent`, `swipe(dir)`); `traverse(kind, n?)` (`Traversal::from_args`; while the treeview has keys, Alt ones also work without Alt, but `enter`); runner `pluck_place`. Super+Esc (buffer mode) stays hardcoded as a way out. Test `default_keybinds_are_known`.
   - `terminal`/`browser`/`pdf_viewer` unset: env, else first installed of `TERMINALS`/`BROWSERS`/`PDF_VIEWERS` (`standard_keybinds.rs`).
   - `startup`: run once at start (`run_startup`).
   - `treeview.side`/`floating*` are parsed but unused since the status bar (#150).
