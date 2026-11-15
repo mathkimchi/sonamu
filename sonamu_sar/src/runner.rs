@@ -718,6 +718,10 @@ fn run_binding(event: &UIEvent) -> bool {
     else {
         return false;
     };
+    // an applet recording a keybind gets every key
+    if sonamu_common::KEY_CAPTURE.load(std::sync::atomic::Ordering::Relaxed) {
+        return false;
+    }
     // the buffer line's keys shadow them, like a minibuffer's keymap
     if sonamu_common::BUFFER_MODE.load(std::sync::atomic::Ordering::Relaxed)
         && symbol.is_some()

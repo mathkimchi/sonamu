@@ -158,19 +158,25 @@ pub enum NamedKey {
 }
 impl NamedKey {
     fn is(self, symbol: KeySymbol) -> bool {
-        matches!(
-            (self, symbol),
-            (Self::Left, KeySymbol::ArrowKeyLeft)
-                | (Self::Right, KeySymbol::ArrowKeyRight)
-                | (Self::Up, KeySymbol::ArrowKeyUp)
-                | (Self::Down, KeySymbol::ArrowKeyDown)
-                | (Self::Enter, KeySymbol::Enter | KeySymbol::Char('\n' | '\r'))
-                | (Self::Tab, KeySymbol::Char('\t'))
-                | (Self::Escape, KeySymbol::Escape)
-                | (Self::Backspace, KeySymbol::Backspace)
-                | (Self::PageUp, KeySymbol::PageUp)
-                | (Self::PageDown, KeySymbol::PageDown)
-        )
+        Self::of(symbol) == Some(self)
+    }
+
+    /// The named key `symbol` is, if any
+    #[must_use]
+    pub const fn of(symbol: KeySymbol) -> Option<Self> {
+        Some(match symbol {
+            KeySymbol::ArrowKeyLeft => Self::Left,
+            KeySymbol::ArrowKeyRight => Self::Right,
+            KeySymbol::ArrowKeyUp => Self::Up,
+            KeySymbol::ArrowKeyDown => Self::Down,
+            KeySymbol::Enter | KeySymbol::Char('\n' | '\r') => Self::Enter,
+            KeySymbol::Char('\t') => Self::Tab,
+            KeySymbol::Escape => Self::Escape,
+            KeySymbol::Backspace => Self::Backspace,
+            KeySymbol::PageUp => Self::PageUp,
+            KeySymbol::PageDown => Self::PageDown,
+            KeySymbol::Char(_) => return None,
+        })
     }
 }
 
@@ -193,6 +199,35 @@ impl Keybind {
                 }
                 Key::Named(named) => symbol.is_some_and(|symbol| named.is(symbol)),
             }
+    }
+
+    /// A pressed key as a keybind's mods and key (eg while recording one); `None` for a modifier key
+    #[must_use]
+    pub fn recorded(
+        symbol: Option<KeySymbol>,
+        raw_keycode: u32,
+        modifiers: KeyModifiers,
+    ) -> Option<(Vec<String>, Key)> {
+        // evdev: ctrl, shift, alt, logo (left and right)
+        if matches!(raw_keycode, 29 | 42 | 54 | 56 | 97 | 100 | 125 | 126) {
+            return None;
+        }
+        let mods = [
+            ("ctrl", modifiers.ctrl),
+            ("alt", modifiers.alt),
+            ("shift", modifiers.shift),
+            ("logo", modifiers.logo),
+        ]
+        .into_iter()
+        .filter(|&(_, held)| held)
+        .map(|(name, _)| name.to_owned())
+        .collect();
+        let key = match symbol {
+            Some(symbol) if let Some(named) = NamedKey::of(symbol) => Key::Named(named),
+            Some(KeySymbol::Char(c)) => Key::Char(c.to_lowercase().next().unwrap_or(c)),
+            _ => Key::Code(raw_keycode),
+        };
+        Some((mods, key))
     }
 
     /// `matches` for a key with a character (or none), eg Luau's `keymap.set`
@@ -875,6 +910,28 @@ mod tests {
         let schema = schema();
         let defaults: serde_json::Value = serde_json::from_str(DEFAULTS).unwrap();
         check(&schema, &schema["$defs"], &defaults, "");
+    }
+
+    #[test]
+    fn recorded_keys() {
+        let logo = KeyModifiers {
+            logo: true,
+            ..KeyModifiers::NONE
+        };
+        let recorded = |symbol, code, mods| Keybind::recorded(symbol, code, mods);
+        assert_eq!(
+            recorded(Some(KeySymbol::Char('T')), 20, logo),
+            Some((vec!["logo".to_owned()], Key::Char('t')))
+        );
+        assert_eq!(
+            recorded(Some(KeySymbol::Escape), 1, logo),
+            Some((vec!["logo".to_owned()], Key::Named(NamedKey::Escape)))
+        );
+        assert_eq!(
+            recorded(None, 115, KeyModifiers::NONE),
+            Some((vec![], Key::Code(115)))
+        );
+        assert_eq!(recorded(None, 125, logo), None);
     }
 
     #[test]

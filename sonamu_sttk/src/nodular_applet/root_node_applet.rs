@@ -745,7 +745,11 @@ impl RootNodeApplet {
 
     /// From the runner
     fn handle_event(&mut self, event: StandardEvent) {
+        // an applet recording a keybind gets the key, whatever it is
+        let capturing = sonamu_common::KEY_CAPTURE.load(Ordering::Relaxed)
+            && matches!(event, StandardEvent::UIEvent(UIEvent::Key { .. }));
         if let StandardEvent::UIEvent(ui_event) = &event
+            && !capturing
             && self.handle_grabbed_key(ui_event)
         {
             return;
@@ -771,6 +775,7 @@ impl RootNodeApplet {
             self.alt_traversal = false;
         }
         if let StandardEvent::UIEvent(ui_event) = &event
+            && !capturing
             && let Some(keybind) = RootKeybind::of(ui_event)
         {
             match keybind {
@@ -787,6 +792,7 @@ impl RootNodeApplet {
             return;
         }
         if let StandardEvent::UIEvent(ui_event) = &event
+            && !capturing
             && let Some(traversal) = Traversal::of(ui_event, self.holder.tree.is_traversing())
         {
             if let UIEvent::Key { modifiers, .. } = ui_event {
@@ -1590,7 +1596,8 @@ fn is_buffer_mode_key(ui_event: &UIEvent) -> bool {
 /// Whether the root or a node acts on this key, rather than a focused wl client.
 /// The runner sends other keys straight to the client (#56).
 pub fn is_keybind(ui_event: &UIEvent) -> bool {
-    sonamu_common::BUFFER_MODE.load(Ordering::Relaxed)
+    sonamu_common::KEY_CAPTURE.load(Ordering::Relaxed)
+        || sonamu_common::BUFFER_MODE.load(Ordering::Relaxed)
         || is_buffer_mode_key(ui_event)
         || RootKeybind::of(ui_event).is_some()
         || standard_keybind_request(ui_event).is_some()
@@ -1689,6 +1696,20 @@ mod tests {
     use calloop::EventLoop;
     use sonamu_common::sap::session::{SavedApplet, SavedTree};
     use sonamu_ui::ui_element::PrimitiveScene;
+
+    #[test]
+    fn capture_takes_every_key() {
+        let key = UIEvent::Key {
+            symbol: Some(KeySymbol::Char('a')),
+            modifiers: KeyModifiers::NONE,
+            raw_keycode: 30,
+            pressed: true,
+        };
+        assert!(!is_keybind(&key));
+        let capture = sonamu_common::Capture::start();
+        assert!(is_keybind(&key));
+        drop(capture);
+    }
 
     /// A tab that saves itself, like a code editor
     struct Tab {

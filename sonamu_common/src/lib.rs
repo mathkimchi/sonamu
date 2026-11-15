@@ -19,6 +19,25 @@ pub const WAYLAND_DISPLAY_ENV: &str = "SONAMU_WAYLAND_DISPLAY";
 /// bindings that would take typing (keys with a symbol, without Super)
 pub static BUFFER_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// An applet is recording a keybind: every key goes to the focused applet; settings, `keymap.set` and the root's
+/// bindings are skipped. Set by holding a `Capture`
+pub static KEY_CAPTURE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Holds `KEY_CAPTURE` on; dropping it (eg its applet closing) ends the capture
+#[must_use = "the capture ends when it's dropped"]
+pub struct Capture(());
+impl Capture {
+    pub fn start() -> Self {
+        KEY_CAPTURE.store(true, std::sync::atomic::Ordering::Relaxed);
+        Self(())
+    }
+}
+impl Drop for Capture {
+    fn drop(&mut self) {
+        KEY_CAPTURE.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// Sonamu runs on the monitor as the actual compositor, not in a window (eg a test run); set before any client starts
 pub static ON_TTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -38,3 +57,15 @@ pub fn connect_wl_client(command: &mut std::process::Command) -> &mut std::proce
 /// Placeholder type: <https://www.reddit.com/r/rust/comments/1jbpfsh/todo_type>/
 #[deprecated]
 pub enum Todo {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn capture_ends_on_drop() {
+        drop(Capture::start());
+        assert!(!KEY_CAPTURE.load(Ordering::Relaxed));
+    }
+}
