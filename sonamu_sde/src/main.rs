@@ -5,7 +5,8 @@
 
 use sonamu_sar::runner::AppletRunner;
 use sonamu_standard_tabs::{
-    code_editor::CodeEditorApplet, file_manager::FileManagerApplet, image_viewer::ImageViewerApplet,
+    code_editor::CodeEditorApplet, file_manager::FileManagerApplet,
+    image_viewer::ImageViewerApplet, settings_editor::SettingsEditorApplet,
 };
 use sonamu_sttk::{
     command_hub::CommandHubApplet,
@@ -50,6 +51,10 @@ fn main() {
                     ImageViewerApplet::get_applet_spawner(),
                 ),
                 ("help".to_string(), ManPageApplet::get_applet_spawner()),
+                (
+                    "settings_editor".to_string(),
+                    SettingsEditorApplet::get_applet_spawner(),
+                ),
             ]),
             session::session_path(),
         ),

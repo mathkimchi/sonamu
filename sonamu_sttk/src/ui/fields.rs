@@ -110,11 +110,11 @@ pub const fn cycle(count: usize, current: usize, forward: bool) -> usize {
     }
 }
 
-/// A square of `color` with a `guide` edge, at `left` in row `index`
+/// A square of `color` with a `guide` edge, at `left` in a row of `rows` (place it in the row, like `Rows::text`)
 #[must_use]
-pub fn swatch(rows: &Rows, index: usize, left: f32, color: Color, palette: &Palette) -> UITree {
+pub fn swatch(rows: &Rows, left: f32, color: Color, palette: &Palette) -> UITree {
     let side = font_size();
-    let top = rows.top_of(index) + (rows.height - side) / 2.0;
+    let top = (rows.height - side) / 2.0;
     UITree::new_styled(
         UIElement::Nothing,
         Style::absolute([left, top], [side, side]),
