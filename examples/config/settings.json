@@ -13,7 +13,6 @@
   },
   "gap": 12.0,
   "radius": 0.0,
-  "wallpaper": {"shader": {"path": "wallpapers/sine.glsl"}},
   "font_size": 24.0,
   "treeview": {
     "floating": "center",
@@ -98,5 +97,8 @@
   "zoom_out": {
     "view": "free"
   },
-  "buffer_line": "always"
+  "buffer_line": "always",
+  "wallpaper": {
+    "color": "#fdff2b"
+  }
 }
