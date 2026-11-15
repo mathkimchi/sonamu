@@ -23,15 +23,19 @@ use sonamu_sttk::{
     standard_keybinds::handle_standard_keybinds,
     ui::{
         self, Rows,
+        color_picker::{ColorPicker, PickerKey},
         fields::{self, Edit, TextInput},
     },
 };
 use sonamu_ui::{
+    color::Color,
     display_units::DisplayContainerSize,
     ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{KeySymbol, MouseEventKind, UIEvent},
 };
 use std::{
+    cell::Cell,
+    collections::HashSet,
     path::Path,
     sync::{Mutex, PoisonError},
 };
@@ -52,6 +56,8 @@ enum Row {
     Item(usize, usize, usize),
     /// "+ add" below a list setting's items
     AddItem(usize, usize),
+    /// A line of the open color picker, below its field
+    Picker(usize),
     /// The Keybinds section's title
     KeybindsTitle,
     /// A keybind group's name
@@ -70,6 +76,9 @@ impl Row {
     }
 }
 
+/// Rows the color picker takes
+const PICKER_LINES: usize = 6;
+
 /// The setting the Keybinds section edits
 const KEYBINDS: &str = "keybinds";
 
@@ -80,7 +89,8 @@ const REVERT: &str = "Revert";
 pub struct SettingsEditorApplet {
     editor: Editor,
     palette: Palette,
-    size: DisplayContainerSize,
+    /// As last drawn (resizes don't always come as events), for hit-testing
+    size: Cell<DisplayContainerSize>,
     selected: Option<usize>,
     hovered: Option<usize>,
     scroll: usize,
@@ -92,6 +102,12 @@ pub struct SettingsEditorApplet {
     keybinds: Keybinds,
     /// The file's keybinds when `keybinds` last matched it, to see changes made elsewhere
     keybinds_seen: Value,
+    /// Folded sections: their index, the Keybinds section's is after the form's
+    collapsed: HashSet<usize>,
+    /// The color field being picked, and its picker
+    picker: Option<((usize, usize), ColorPicker)>,
+    /// A number field's slider being dragged, and the value it shows (written on release)
+    sliding: Option<((usize, usize), f64)>,
     /// The bind whose keys are being recorded; every key comes here meanwhile
     recording: Option<((usize, usize), Capture)>,
     hook: AppletContext,
@@ -103,9 +119,12 @@ impl SettingsEditorApplet {
             keybinds: Keybinds::from_json(&editor.value(&[KEYBINDS.to_owned()])),
             keybinds_seen: editor.value(&[KEYBINDS.to_owned()]),
             recording: None,
+            collapsed: HashSet::new(),
+            picker: None,
+            sliding: None,
             editor,
             palette: settings::get().palette,
-            size: DisplayContainerSize::new(800, 600),
+            size: Cell::new(DisplayContainerSize::new(800, 600)),
             selected: None,
             hovered: None,
             scroll: 0,
@@ -139,29 +158,8 @@ impl SettingsEditorApplet {
     }
 
     fn rows(&self) -> Vec<Row> {
-        let mut rows = Vec::new();
-        for (section_index, section) in self.editor.sections.iter().enumerate() {
-            rows.push(Row::Title(section_index));
-            if section.title == "Colors" && self.editor.read_only().is_none() {
-                rows.push(Row::Generate);
-            }
-            for (field_index, field) in section.fields.iter().enumerate() {
-                rows.push(Row::Field(section_index, field_index));
-                if field.kind == FieldKind::TextList {
-                    let count = self.items(field).len();
-                    rows.extend((0..count).map(|item| Row::Item(section_index, field_index, item)));
-                    rows.push(Row::AddItem(section_index, field_index));
-                }
-            }
-        }
-        rows.push(Row::KeybindsTitle);
-        for (group, (_, binds)) in self.keybinds.groups.iter().enumerate() {
-            rows.push(Row::Group(group));
-            rows.extend((0..binds.len()).map(|bind| Row::Bind(group, bind)));
-            rows.push(Row::AddBind(group));
-        }
-        rows.extend([Row::AddGroup, Row::AddDefaults]);
-        rows
+        let picker = self.picker.as_ref().map(|(at, _)| *at);
+        form_rows(&self.editor, &self.keybinds, &self.collapsed, picker)
     }
 
     /// Selects `row`, if it's shown
@@ -247,16 +245,7 @@ impl SettingsEditorApplet {
     }
 
     fn items(&self, field: &Field) -> Vec<String> {
-        self.editor
-            .value(&field.path)
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .map(|item| item.as_str().unwrap_or_default().to_owned())
-                    .collect()
-            })
-            .unwrap_or_default()
+        items(&self.editor, field)
     }
 
     fn list_rows(&self) -> Rows {
@@ -264,7 +253,7 @@ impl SettingsEditorApplet {
     }
 
     fn shown(&self) -> usize {
-        self.list_rows().fitting(self.size.height as f32)
+        self.list_rows().fitting(self.size.get().height as f32)
     }
 
     fn report(&mut self, result: Result<(), String>) {
@@ -273,11 +262,16 @@ impl SettingsEditorApplet {
 
     /// Enter or a click on `row`
     fn activate(&mut self, row: Row) {
+        match row {
+            Row::Title(section) => return self.toggle_collapsed(section),
+            Row::KeybindsTitle => return self.toggle_collapsed(self.editor.sections.len()),
+            _ => {}
+        }
         if self.editor.read_only().is_some() {
             return;
         }
         match row {
-            Row::Title(_) => {}
+            Row::Title(_) | Row::KeybindsTitle | Row::Picker(_) => {}
             Row::Generate => {
                 let result = self.editor.generate(pastel::random_hue());
                 self.report(result);
@@ -292,7 +286,10 @@ impl SettingsEditorApplet {
                         self.report(result);
                     }
                     FieldKind::Choice(_) => self.cycle(&field, true),
-                    FieldKind::Number { .. } | FieldKind::Color | FieldKind::Text { .. } => {
+                    FieldKind::Color => {
+                        self.toggle_picker((section_index_of(row), field_index_of(row)), &value)
+                    }
+                    FieldKind::Number { .. } | FieldKind::Text { .. } => {
                         self.editing = Some(TextInput::new(plain(&value)));
                     }
                     FieldKind::TextList | FieldKind::ReadOnly => {}
@@ -303,7 +300,6 @@ impl SettingsEditorApplet {
                 self.editing = Some(TextInput::new(text));
             }
             Row::AddItem(..) => self.editing = Some(TextInput::new(String::new())),
-            Row::KeybindsTitle => {}
             Row::Group(group) => {
                 self.editing = Some(TextInput::new(self.keybinds.groups[group].0.clone()));
             }
@@ -369,6 +365,95 @@ impl SettingsEditorApplet {
             _ => return false,
         }
         true
+    }
+
+    fn toggle_collapsed(&mut self, section: usize) {
+        if !self.collapsed.remove(&section) {
+            self.collapsed.insert(section);
+        }
+        self.selected = self.selected.min(Some(self.rows().len().saturating_sub(1)));
+    }
+
+    /// Opens the color picker under a color field, or closes it if it's open there
+    fn toggle_picker(&mut self, at: (usize, usize), value: &Value) {
+        if self.picker.as_ref().is_some_and(|(open, _)| *open == at) {
+            self.picker = None;
+            return;
+        }
+        let color = value
+            .as_str()
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(Color([0, 0, 0, 0xFF]));
+        self.picker = Some((at, ColorPicker::new(color)));
+        if let Some(index) = self
+            .rows()
+            .iter()
+            .position(|row| *row == Row::Field(at.0, at.1))
+        {
+            self.scroll = ui::scroll_to(self.scroll, index + PICKER_LINES, self.shown());
+        }
+    }
+
+    /// Writes the picker's color (`original` to undo it)
+    fn commit_picker(&mut self, original: bool) {
+        let Some(((section, field), picker)) = &self.picker else {
+            return;
+        };
+        let color = if original {
+            picker.original
+        } else {
+            picker.color()
+        };
+        let path = self.field(*section, *field).path.clone();
+        let result = self.editor.commit(&[path], &[Value::from(hex(color))]);
+        self.report(result);
+    }
+
+    /// The picker's top left and height in the window, while its first line is shown
+    fn picker_area(&self) -> Option<([f32; 2], f32)> {
+        let index = self.rows().iter().position(|row| *row == Row::Picker(0))?;
+        let rows = self.list_rows();
+        (index >= self.scroll).then(|| {
+            let top = rows.top_of(index) + ui::PAD / 2.0;
+            let left = value_left(self.size.get().width as f32);
+            ([left, top], PICKER_LINES as f32 * rows.height - ui::PAD)
+        })
+    }
+
+    /// Steps a number field one step up (`up`) or down
+    fn step_number(&mut self, field: &Field, up: bool) {
+        let FieldKind::Number { min, max, integer } = field.kind else {
+            return;
+        };
+        let current = self.editor.value(&field.path).as_f64().unwrap_or_default();
+        let next = fields::stepped(
+            current,
+            fields::step_size(min, max, integer),
+            up,
+            (min, max),
+        );
+        let result = self.editor.commit_text(field, &next.to_string());
+        self.report(result);
+    }
+
+    /// A number field's value at `x` on its slider, if it has one
+    fn slider_value_at(&self, field: &Field, x: f32) -> Option<f64> {
+        let FieldKind::Number {
+            min: Some(min),
+            max: Some(max),
+            integer,
+        } = field.kind
+        else {
+            return None;
+        };
+        let (left, width) = number_layout(self.size.get().width as f32).slider?;
+        let step = fields::step_size(Some(min), Some(max), integer);
+        Some(fields::slider_value(
+            f64::from((x - left) / width),
+            min,
+            max,
+            step,
+        ))
     }
 
     /// Moves a choice to its next (`forward`) or previous option
@@ -465,8 +550,33 @@ impl SettingsEditorApplet {
             }
             return;
         }
+        if let Some((_, picker)) = &mut self.picker {
+            match picker.handle_key(symbol, modifiers) {
+                PickerKey::Changed => return self.commit_picker(false),
+                PickerKey::Done => {
+                    self.picker = None;
+                    return;
+                }
+                PickerKey::Cancel => {
+                    self.commit_picker(true);
+                    self.picker = None;
+                    return;
+                }
+                PickerKey::Ignored => {}
+            }
+        }
         let rows = self.rows();
         let row = self.selected.and_then(|index| rows.get(index).copied());
+        if let (
+            Some(Row::Field(section, field)),
+            KeySymbol::ArrowKeyLeft | KeySymbol::ArrowKeyRight,
+        ) = (row, symbol)
+            && let field = self.field(section, field).clone()
+            && matches!(field.kind, FieldKind::Number { .. })
+            && self.editor.read_only().is_none()
+        {
+            return self.step_number(&field, matches!(symbol, KeySymbol::ArrowKeyRight));
+        }
         if let Some(row) = row
             && self.editor.read_only().is_none()
             && self.handle_keybind_key(row, symbol, modifiers)
@@ -512,7 +622,7 @@ impl SettingsEditorApplet {
 
     /// The Revert button's left edge in the header
     fn revert_left(&self) -> f32 {
-        self.size.width as f32 - ui::PAD - text_width(REVERT)
+        self.size.get().width as f32 - ui::PAD - text_width(REVERT)
     }
 
     fn handle_mouse(&mut self, position: [f64; 2], kind: MouseEventKind) {
@@ -520,12 +630,71 @@ impl SettingsEditorApplet {
         let list = self.list_rows();
         let count = self.rows().len();
         let row_at = list.row_at(y).filter(|&index| index < count);
+        let point = [x as f32, y as f32];
         match kind {
-            MouseEventKind::Motion => self.hovered = row_at,
+            MouseEventKind::Motion => {
+                self.hovered = row_at;
+                if let (Some(([left, top], height)), Some((_, picker))) =
+                    (self.picker_area(), &mut self.picker)
+                {
+                    picker.drag([point[0] - left, point[1] - top], height);
+                }
+                if let Some((at, _)) = self.sliding {
+                    let field = self.field(at.0, at.1).clone();
+                    if let Some(value) = self.slider_value_at(&field, point[0]) {
+                        self.sliding = Some((at, value));
+                    }
+                }
+            }
+            MouseEventKind::Button {
+                button: ui::BTN_LEFT,
+                pressed: false,
+            } => {
+                if let Some((_, picker)) = &mut self.picker
+                    && picker.release()
+                {
+                    self.commit_picker(false);
+                }
+                if let Some(((section, field), value)) = self.sliding.take() {
+                    let field = self.field(section, field).clone();
+                    let result = self.editor.commit_text(&field, &value.to_string());
+                    self.report(result);
+                }
+            }
             MouseEventKind::Button {
                 button: ui::BTN_LEFT,
                 pressed: true,
             } => {
+                if let (Some(([left, top], height)), Some((_, picker))) =
+                    (self.picker_area(), &mut self.picker)
+                    && self.editor.read_only().is_none()
+                    && picker.press([point[0] - left, point[1] - top], height)
+                {
+                    return;
+                }
+                if let Some(index) = row_at
+                    && let Row::Field(section, field_index) = self.rows()[index]
+                    && let field = self.field(section, field_index).clone()
+                    && matches!(field.kind, FieldKind::Number { .. })
+                    && self.editor.read_only().is_none()
+                {
+                    self.select(Some(index));
+                    let layout = number_layout(self.size.get().width as f32);
+                    let within = |(from, to): (f32, f32)| (from..to).contains(&point[0]);
+                    if within(layout.minus) || within(layout.plus) {
+                        self.step_number(&field, within(layout.plus));
+                    } else if let Some(value) = self.slider_value_at(&field, point[0])
+                        && point[0]
+                            >= layout
+                                .slider
+                                .map_or(f32::MAX, |(left, _)| left - font_size() / 2.0)
+                    {
+                        self.sliding = Some(((section, field_index), value));
+                    } else if self.editing.is_none() {
+                        self.activate(Row::Field(section, field_index));
+                    }
+                    return;
+                }
                 if y < f64::from(ui::row_height()) && x >= f64::from(self.revert_left()) {
                     self.commit_editing();
                     let result = self.editor.revert();
@@ -566,7 +735,15 @@ impl SettingsEditorApplet {
                     .to_owned();
             }
             Some(Row::KeybindsTitle) => {
-                return "Shortcuts in named groups, shown as sections in help (Super+?)".to_owned();
+                return "Shortcuts in named groups, shown as sections in help (Super+?). Enter or click: fold"
+                    .to_owned();
+            }
+            Some(Row::Title(_)) => return "Enter or click: fold".to_owned(),
+            Some(Row::Field(section, field))
+                if matches!(self.field(section, field).kind, FieldKind::Number { .. }) =>
+            {
+                let help = &self.field(section, field).help;
+                return format!("{help} (−/+ or Left/Right: step, drag the slider, Enter: type)");
             }
             _ => {}
         }
@@ -674,9 +851,146 @@ impl SettingsEditorApplet {
         .collect()
     }
 
+    /// A number field's −, value, + and slider
+    fn number_parts(
+        &self,
+        rows: &Rows,
+        value: f64,
+        (min, max): (Option<f64>, Option<f64>),
+        width: f32,
+    ) -> Vec<UITree> {
+        let palette = &self.palette;
+        let layout = number_layout(width);
+        let mut parts = vec![
+            rows.text(
+                ui::text("−", palette.accent),
+                layout.minus.0,
+                layout.minus.1,
+            ),
+            rows.text(
+                ui::text(format_number(value), palette.fg),
+                layout.text.0,
+                layout.text.1,
+            ),
+            rows.text(ui::text("+", palette.accent), layout.plus.0, layout.plus.1),
+        ];
+        if let (Some(min), Some(max), Some((left, slider_width))) = (min, max, layout.slider) {
+            let fraction = fields::slider_fraction(value, min, max);
+            parts.push(fields::slider(rows, left, slider_width, fraction, palette));
+        }
+        parts
+    }
+
+    /// The open picker, its color and hints beside it
+    fn picker_parts(&self) -> Vec<UITree> {
+        let (Some(((section, field), picker)), Some((origin, height))) =
+            (&self.picker, self.picker_area())
+        else {
+            return Vec::new();
+        };
+        let palette = &self.palette;
+        let mut parts = picker.draw(origin, height, palette);
+        let left = origin[0]
+            + height
+            + ui::color_picker::STRIP_GAP
+            + ui::color_picker::STRIP_WIDTH
+            + ui::PAD;
+        let right = self.size.get().width as f32 - ui::PAD;
+        let lines = [
+            (
+                format!(
+                    "{}: {}",
+                    self.field(*section, *field).label,
+                    hex(picker.color())
+                ),
+                palette.fg,
+            ),
+            (
+                "Drag; arrows: saturation, value".to_owned(),
+                palette.inactive,
+            ),
+            ("Shift+Up/Down: hue".to_owned(), palette.inactive),
+            ("Enter: done, Esc: undo".to_owned(), palette.inactive),
+        ];
+        let line = ui::row_height();
+        for (index, (text, color)) in lines.into_iter().enumerate() {
+            parts.push(UITree::leaf_styled(
+                ui::text(text, color),
+                Style::absolute(
+                    [left, origin[1] + index as f32 * line],
+                    [(right - left).max(0.0), line],
+                ),
+            ));
+        }
+        parts
+    }
+
+    /// A setting's label and value
+    fn field_parts(
+        &self,
+        rows: &Rows,
+        (section, field_index): (usize, usize),
+        editing: Option<&TextInput>,
+        width: f32,
+    ) -> Vec<UITree> {
+        let palette = &self.palette;
+        let value_left = value_left(width);
+        let label = |text: &str, color| rows.text(ui::text(text, color), ui::PAD, value_left);
+        let value = |element| rows.text(element, value_left, width - ui::PAD);
+        let field = self.field(section, field_index);
+        let current = self.editor.value(&field.path);
+        let mut parts = vec![label(&field.label, palette.fg)];
+        match (&field.kind, editing) {
+            (_, Some(input)) => parts.push(value(input.element(true, palette))),
+            (FieldKind::Toggle, None) => {
+                parts.push(value(fields::toggle(
+                    current.as_bool().unwrap_or_default(),
+                    palette,
+                )));
+            }
+            (FieldKind::Choice(_), None) => {
+                parts.push(value(fields::choice(
+                    current.as_str().unwrap_or_default(),
+                    palette,
+                )));
+            }
+            (FieldKind::Number { min, max, .. }, None) => {
+                let shown = self
+                    .sliding
+                    .filter(|(at, _)| *at == (section, field_index))
+                    .map_or_else(|| current.as_f64().unwrap_or_default(), |(_, value)| value);
+                parts.extend(self.number_parts(rows, shown, (*min, *max), width));
+            }
+            (FieldKind::Color, None) => {
+                let picked = self
+                    .picker
+                    .as_ref()
+                    .filter(|(at, _)| *at == (section, field_index))
+                    .map(|(_, picker)| picker.color());
+                let color = picked.or_else(|| current.as_str().and_then(|text| text.parse().ok()));
+                if let Some(color) = color {
+                    parts.push(fields::swatch(rows, value_left, color, palette));
+                }
+                let left = value_left + font_size() + 8.0;
+                let text = color.map_or_else(|| plain(&current), hex);
+                parts.push(rows.text(ui::text(text, palette.fg), left, width - ui::PAD));
+            }
+            (FieldKind::TextList, None) => {}
+            (FieldKind::ReadOnly, None) => parts.push(value(ui::text(
+                format!("{current} (edit in settings.json)"),
+                palette.inactive,
+            ))),
+            (_, None) if current.is_null() => {
+                parts.push(value(ui::text("unset", palette.inactive)))
+            }
+            (_, None) => parts.push(value(ui::text(plain(&current), palette.fg))),
+        }
+        parts
+    }
+
     fn draw_row(&self, rows: &Rows, index: usize, row: Row, width: f32) -> UITree {
         let palette = &self.palette;
-        let value_left = (width * 0.4).max(ui::PAD + 8.0 * font_size());
+        let value_left = value_left(width);
         let selected = self.selected == Some(index);
         let background = if selected {
             Some(ui::selected_bg(palette))
@@ -690,48 +1004,17 @@ impl SettingsEditorApplet {
         let value = |element| rows.text(element, value_left, width - ui::PAD);
         let parts = match row {
             Row::Title(section) => {
-                vec![label(&self.editor.sections[section].title, palette.accent)]
+                let arrow = if self.collapsed.contains(&section) {
+                    "▸"
+                } else {
+                    "▾"
+                };
+                let title = format!("{arrow} {}", self.editor.sections[section].title);
+                vec![label(&title, palette.accent)]
             }
-            Row::Generate => vec![label("✨ Generate pastel", palette.fg)],
-            Row::Field(section, field) => {
-                let field = self.field(section, field);
-                let current = self.editor.value(&field.path);
-                let mut parts = vec![label(&field.label, palette.fg)];
-                match (&field.kind, editing) {
-                    (_, Some(input)) => parts.push(value(input.element(true, palette))),
-                    (FieldKind::Toggle, None) => {
-                        parts.push(value(fields::toggle(
-                            current.as_bool().unwrap_or_default(),
-                            palette,
-                        )));
-                    }
-                    (FieldKind::Choice(_), None) => {
-                        parts.push(value(fields::choice(
-                            current.as_str().unwrap_or_default(),
-                            palette,
-                        )));
-                    }
-                    (FieldKind::Color, None) => {
-                        let color = current.as_str().and_then(|text| text.parse().ok());
-                        if let Some(color) = color {
-                            parts.push(fields::swatch(rows, value_left, color, palette));
-                        }
-                        let left = value_left + font_size() + 8.0;
-                        let text = color.map_or_else(|| plain(&current), hex);
-                        parts.push(rows.text(ui::text(text, palette.fg), left, width - ui::PAD));
-                    }
-                    (FieldKind::TextList, None) => {}
-                    (FieldKind::ReadOnly, None) => parts.push(value(ui::text(
-                        format!("{current} (edit in settings.json)"),
-                        palette.inactive,
-                    ))),
-                    (_, None) if current.is_null() => {
-                        parts.push(value(ui::text("unset", palette.inactive)))
-                    }
-                    (_, None) => parts.push(value(ui::text(plain(&current), palette.fg))),
-                }
-                parts
-            }
+            Row::Generate => vec![label("Generate pastel", palette.fg)],
+            Row::Picker(_) => Vec::new(),
+            Row::Field(section, field) => self.field_parts(rows, (section, field), editing, width),
             Row::Item(section, field, item) => {
                 let text = self.items(self.field(section, field)).swap_remove(item);
                 let element = editing.map_or_else(
@@ -747,7 +1030,11 @@ impl SettingsEditorApplet {
                 );
                 vec![value(element)]
             }
-            Row::KeybindsTitle => vec![label("Keybinds", palette.accent)],
+            Row::KeybindsTitle => {
+                let folded = self.collapsed.contains(&self.editor.sections.len());
+                let arrow = if folded { "▸" } else { "▾" };
+                vec![label(&format!("{arrow} Keybinds"), palette.accent)]
+            }
             Row::Group(group) => {
                 let name = &self.keybinds.groups[group].0;
                 let element = editing.map_or_else(
@@ -787,6 +1074,109 @@ impl Drop for SettingsEditorApplet {
 fn keybinds_changed(last: &Value, now: &Value) -> bool {
     // as text: maps compare without their order, which is the groups' order
     serde_json::to_vec(last).ok() != serde_json::to_vec(now).ok()
+}
+
+fn section_index_of(row: Row) -> usize {
+    match row {
+        Row::Field(section, _) => section,
+        _ => 0,
+    }
+}
+
+fn field_index_of(row: Row) -> usize {
+    match row {
+        Row::Field(_, field) => field,
+        _ => 0,
+    }
+}
+
+/// Where values start in a row of an applet `width` wide
+fn value_left(width: f32) -> f32 {
+    (width * 0.4).max(ui::PAD + 8.0 * font_size())
+}
+
+/// Where a number field's parts are in a row: −, the value, +, and the slider (left and width) if there's room
+struct NumberLayout {
+    minus: (f32, f32),
+    text: (f32, f32),
+    plus: (f32, f32),
+    slider: Option<(f32, f32)>,
+}
+
+fn number_layout(width: f32) -> NumberLayout {
+    let em = font_size();
+    let left = value_left(width);
+    let slider_left = left + 9.0 * em;
+    let slider_width = width - ui::PAD - em - slider_left;
+    NumberLayout {
+        minus: (left, left + 1.5 * em),
+        text: (left + 1.5 * em, left + 6.5 * em),
+        plus: (left + 6.5 * em, left + 8.0 * em),
+        slider: (slider_width >= 4.0 * em).then_some((slider_left, slider_width)),
+    }
+}
+
+/// Every row: sections' titles, their fields (and list items, the color picker) unless folded, then keybinds
+fn form_rows(
+    editor: &Editor,
+    keybinds: &Keybinds,
+    collapsed: &HashSet<usize>,
+    picker: Option<(usize, usize)>,
+) -> Vec<Row> {
+    let mut rows = Vec::new();
+    for (section_index, section) in editor.sections.iter().enumerate() {
+        rows.push(Row::Title(section_index));
+        if collapsed.contains(&section_index) {
+            continue;
+        }
+        if section.title == "Colors" && editor.read_only().is_none() {
+            rows.push(Row::Generate);
+        }
+        for (field_index, field) in section.fields.iter().enumerate() {
+            rows.push(Row::Field(section_index, field_index));
+            if field.kind == FieldKind::TextList {
+                let count = items(editor, field).len();
+                rows.extend((0..count).map(|item| Row::Item(section_index, field_index, item)));
+                rows.push(Row::AddItem(section_index, field_index));
+            }
+            if picker == Some((section_index, field_index)) {
+                rows.extend((0..PICKER_LINES).map(Row::Picker));
+            }
+        }
+    }
+    rows.push(Row::KeybindsTitle);
+    if !collapsed.contains(&editor.sections.len()) {
+        for (group, (_, binds)) in keybinds.groups.iter().enumerate() {
+            rows.push(Row::Group(group));
+            rows.extend((0..binds.len()).map(|bind| Row::Bind(group, bind)));
+            rows.push(Row::AddBind(group));
+        }
+        rows.extend([Row::AddGroup, Row::AddDefaults]);
+    }
+    rows
+}
+
+/// A list setting's items
+fn items(editor: &Editor, field: &Field) -> Vec<String> {
+    editor
+        .value(&field.path)
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| item.as_str().unwrap_or_default().to_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A number as shown: whole ones without `.0`, others to 2 places
+fn format_number(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.2}").trim_end_matches('0').to_owned()
+    }
 }
 
 /// A setting as text to edit: strings without quotes
@@ -839,7 +1229,7 @@ impl StandardApplet for SettingsEditorApplet {
                     } => self.handle_key(symbol, modifiers),
                     UIEvent::Mouse(mouse) => self.handle_mouse(mouse.position, mouse.kind),
                     UIEvent::WindowResized(size) => {
-                        self.size = size;
+                        self.size.set(size);
                         let max = ui::max_scroll(self.rows().len(), self.shown());
                         self.scroll = self.scroll.min(max);
                     }
@@ -857,6 +1247,7 @@ impl StandardApplet for SettingsEditorApplet {
     }
 
     fn get_window_standard_applet(&self, container_size: DisplayContainerSize) -> UITree {
+        self.size.set(container_size);
         let [width, height] = [container_size.width, container_size.height].map(|px| px as f32);
         let rows = self.list_rows();
         let all = self.rows();
@@ -865,6 +1256,7 @@ impl StandardApplet for SettingsEditorApplet {
         for (index, &row) in all.iter().enumerate().skip(self.scroll).take(shown) {
             parts.push(self.draw_row(&rows, index, row, width));
         }
+        parts.extend(self.picker_parts());
         parts.extend(ui::scrollbar(
             &self.palette,
             ui::scrollbar_x(width),
@@ -888,6 +1280,45 @@ impl StandardApplet for SettingsEditorApplet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn editor(name: &str) -> (Editor, Keybinds) {
+        let dir = std::env::temp_dir().join(format!("sonamu-rows-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let editor = Editor::open(&dir);
+        let keybinds = Keybinds::from_json(&editor.value(&[KEYBINDS.to_owned()]));
+        (editor, keybinds)
+    }
+
+    #[test]
+    fn collapsed_sections_hide_their_rows() {
+        let (editor, keybinds) = editor("collapse");
+        let open = form_rows(&editor, &keybinds, &HashSet::new(), None);
+        let keybinds_section = editor.sections.len();
+        let collapsed = form_rows(
+            &editor,
+            &keybinds,
+            &HashSet::from([0, keybinds_section]),
+            None,
+        );
+        assert_eq!(collapsed[0], Row::Title(0));
+        assert_eq!(collapsed[1], Row::Title(1));
+        assert!(!collapsed.iter().any(|row| matches!(row, Row::Group(_))));
+        assert!(collapsed.contains(&Row::KeybindsTitle));
+        assert!(collapsed.len() < open.len());
+    }
+
+    #[test]
+    fn picker_rows_follow_its_field() {
+        let (editor, keybinds) = editor("picker");
+        let rows = form_rows(&editor, &keybinds, &HashSet::new(), Some((0, 0)));
+        let at = rows
+            .iter()
+            .position(|row| *row == Row::Field(0, 0))
+            .unwrap();
+        let lines: Vec<Row> = (0..PICKER_LINES).map(Row::Picker).collect();
+        assert_eq!(rows[at + 1..=at + PICKER_LINES], lines[..]);
+    }
 
     #[test]
     fn keybinds_changed_sees_order() {
