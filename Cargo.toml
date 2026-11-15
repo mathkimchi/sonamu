@@ -17,7 +17,7 @@ resolver = "2"
 [workspace.dependencies]
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = "^1.0"
-schemars = "^1.0"                                         # json schema for the settings
+schemars = "^1.0"                                          # json schema for the settings
 uuid = { version = "^1.23.3", features = ["v4", "serde"] }
 slotmap = { version = "^1.1" }                             # like a hashmap but it generates the keys
 libc = { version = "^0.2" }
@@ -77,6 +77,8 @@ pedantic = { level = "warn", priority = -1 }
 # nursery = "warn" # these are for experimental lints
 cargo = { level = "warn", priority = -1 }
 
+allow_attributes_without_reason = "warn"
+
 # all the pedantic stuff I'm not going to listen to:
 
 # something with common things to put in a Crate like liscence and stuff
@@ -108,7 +110,7 @@ must_use_candidate = "allow"                 # having must_use everywhere is get
 
 [workspace.lints.rust]
 unused_qualifications = "warn"
-# unused_crate_dependencies = "warn"
+unused_crate_dependencies = "warn"
 
 # The PDF preview's renderer is ~35x slower unoptimized (1.5 s a page)
 [profile.dev.package]
