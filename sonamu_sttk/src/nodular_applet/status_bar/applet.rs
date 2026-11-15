@@ -10,7 +10,7 @@ use calloop::{
 use sonamu_common::{
     command::{self, Value},
     sap::{
-        packets::{self, BarInput, BarRequest, StandardEvent, StateKind, Treeview},
+        packets::{self, BarInput, BarRequest, OpenApplet, StandardEvent, StateKind, Treeview},
         raw_client_initializer::RawClientInitializer,
         shared_state::{SharedState, StatePublisher},
     },
@@ -187,8 +187,17 @@ impl StatusBarApplet {
         if response.damaged {
             self.surface.damage();
         }
-        if let Some(BarAction::ToggleTreeview) = response.action {
-            let _ = self.request_sender.send(BarRequest::ToggleTreeview);
+        match response.action {
+            Some(BarAction::ToggleTreeview) => {
+                let _ = self.request_sender.send(BarRequest::ToggleTreeview);
+            }
+            Some(BarAction::OpenSettings) => {
+                let _ = self.request_sender.send(BarRequest::Open(OpenApplet {
+                    applet: "settings_editor".to_owned(),
+                    args: Vec::new(),
+                }));
+            }
+            None => {}
         }
     }
 

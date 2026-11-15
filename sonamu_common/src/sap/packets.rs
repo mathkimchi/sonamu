@@ -182,6 +182,8 @@ pub enum BarRequest {
     ToggleTreeview,
     /// A screen's bar was pressed, so it's active: passed to the root as `StandardEvent::ActivateScreen`
     ActivateScreen(usize),
+    /// Open an applet (eg the hub's Settings row): passed to the root as `StandardEvent::Open`
+    Open(OpenApplet),
 }
 impl From<StandardRequest> for BarRequest {
     fn from(request: StandardRequest) -> Self {

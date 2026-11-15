@@ -341,6 +341,7 @@ impl AppletRunner {
                 self.root_client
                     .send_event(StandardEvent::ActivateScreen(index));
             }
+            BarRequest::Open(open) => self.root_client.send_event(StandardEvent::Open(open)),
         }
     }
 

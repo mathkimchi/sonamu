@@ -163,6 +163,8 @@ const LEFT_OUT: [Segment; 6] = [
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BarAction {
     ToggleTreeview,
+    /// The hub's Settings row: open the settings editor
+    OpenSettings,
 }
 
 /// What the root tells the bar
@@ -298,6 +300,8 @@ pub struct StatusBar {
     hovered_cell: Option<Cell>,
     /// The notification popping up under the pointer (by id), and its line and column there
     hovered_notification: Option<(u32, Cell)>,
+    /// From a popup's click, for the next `BarResponse`
+    action: Option<BarAction>,
 }
 
 /// Under the bar's right end: the notifications popping up, `GAP` apart
@@ -320,6 +324,7 @@ impl StatusBar {
             hovered: None,
             hovered_cell: None,
             hovered_notification: None,
+            action: None,
             icons: Icons::start(changed),
             launcher: None,
             shown: Default::default(),
@@ -742,6 +747,7 @@ impl StatusBar {
         self.hovered_cell = cell;
         self.hovered_notification = notification;
         response.damaged |= hover_changed || cell_changed;
+        response.action = response.action.or(self.action.take());
         response
     }
 
@@ -1078,6 +1084,10 @@ impl StatusBar {
             hub::Click::Volume(level) => controls.set_volume(level),
             hub::Click::Output(id) => controls.set_default_sink(id),
             hub::Click::Brightness(level) => controls.set_brightness(level),
+            hub::Click::Settings => {
+                self.action = Some(BarAction::OpenSettings);
+                self.set_popup(None);
+            }
         }
     }
 

@@ -11,6 +11,7 @@ use keybinds::Keybinds;
 use serde_json::Value;
 use sonamu_common::{
     Capture,
+    command::{self, NodeUid},
     sap::packets::StandardEvent,
     settings::{self, ERROR, Keybind, Palette, Settings},
     utils::tree::world_tree::WorldTree,
@@ -30,7 +31,13 @@ use sonamu_ui::{
     ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{KeySymbol, MouseEventKind, UIEvent},
 };
-use std::path::Path;
+use std::{
+    path::Path,
+    sync::{Mutex, PoisonError},
+};
+
+/// The open editor's node: opening Settings again focuses it instead of making another
+static OPEN: Mutex<Option<NodeUid>> = Mutex::new(None);
 
 /// One line of the form
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +118,10 @@ impl SettingsEditorApplet {
         struct Spawner;
         impl AppletSpawnerTrait for Spawner {
             fn create_initializer(&self, _args: &[&str]) -> Option<NodularAppletInitializer> {
+                if let Some(uid) = *OPEN.lock().unwrap_or_else(PoisonError::into_inner) {
+                    command::send(uid, "focus", Vec::new());
+                    return None;
+                }
                 let dir = settings::config_dir()?;
                 Some(NodularAppletInitializer::new(move |hook: AppletContext| {
                     Box::new(SettingsEditorApplet::new(&dir, hook))
@@ -745,6 +756,15 @@ impl SettingsEditorApplet {
     }
 }
 
+impl Drop for SettingsEditorApplet {
+    fn drop(&mut self) {
+        let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
+        if *open == self.hook.uid() {
+            *open = None;
+        }
+    }
+}
+
 /// A setting as text to edit: strings without quotes
 fn plain(value: &Value) -> String {
     match value {
@@ -768,6 +788,10 @@ impl StandardApplet for SettingsEditorApplet {
     }
 
     fn handle_standard_event(&mut self, standard_event: StandardEvent) {
+        // known once the node has its uid
+        if let Some(uid) = self.hook.uid() {
+            *OPEN.lock().unwrap_or_else(PoisonError::into_inner) = Some(uid);
+        }
         match standard_event {
             StandardEvent::UIEvent(ui_event) => {
                 if self.recording.is_some() && matches!(ui_event, UIEvent::Key { .. }) {
@@ -830,5 +854,19 @@ impl StandardApplet for SettingsEditorApplet {
 
     fn get_treeview(&self) -> WorldTree<String> {
         WorldTree::Base("Settings".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Opening Settings while one is open focuses it instead of making another
+    #[test]
+    fn second_open_focuses_the_first() {
+        *OPEN.lock().unwrap() = Some(NodeUid::new());
+        let initializer = SettingsEditorApplet::get_applet_spawner().create_initializer(&[]);
+        *OPEN.lock().unwrap() = None;
+        assert!(initializer.is_none());
     }
 }

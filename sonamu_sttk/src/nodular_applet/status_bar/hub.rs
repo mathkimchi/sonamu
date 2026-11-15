@@ -68,6 +68,7 @@ pub enum Click {
     Volume(f32),
     Output(String),
     Brightness(f32),
+    Settings,
 }
 
 fn wifi_icon(state: &State) -> &'static str {
@@ -273,10 +274,7 @@ fn line_parts(
             )],
             Vec::new(),
         ),
-        Line::Settings => (
-            vec![(format!("{SETTINGS} Settings ›"), palette.inactive)],
-            Vec::new(),
-        ),
+        Line::Settings => row(format!("{SETTINGS} Settings"), false, Click::Settings),
     }
 }
 
