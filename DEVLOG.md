@@ -10501,3 +10501,9 @@ grant me courage.
 
 Took a bunch of screenshots with grim and swappy.
 But swappy sucks and didn't actually save any of them.
+
+2026-11-15 02:43PM
+
+Been coding agentically, but I want to hand-write a cool wallpaper shader.
+I'm going to use https://youtu.be/3CycKKJiwis as my starting point.
+I'll make Claude add support for wgsl tho.

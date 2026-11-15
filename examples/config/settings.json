@@ -99,6 +99,8 @@
   },
   "buffer_line": "always",
   "wallpaper": {
-    "color": "#fdff2b"
+    "shader": {
+      "path": "wallpapers/constellation.wgsl"
+    }
   }
 }
