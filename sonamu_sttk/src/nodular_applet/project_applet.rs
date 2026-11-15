@@ -307,6 +307,10 @@ pub struct ProjectApplet {
     color: Option<Color>,
     /// The hue slider is being dragged
     dragging_hue: bool,
+    /// The first icon or directory option shown
+    options_scroll: usize,
+    /// Mouse scrolling of the options not yet a row
+    options_scrolled: ui::ScrollSteps,
     /// Where the pointer is over the overview's rows (above the zoom-out view), to highlight what it's on
     hovered: Option<[f64; 2]>,
     size: DisplayContainerSize,
@@ -443,6 +447,8 @@ impl ProjectApplet {
             color: None,
             dragging_hue: false,
             hovered: None,
+            options_scroll: 0,
+            options_scrolled: ui::ScrollSteps::default(),
             // until it gets one
             size: DisplayContainerSize::new(800, 600),
         }
@@ -477,6 +483,7 @@ impl ProjectApplet {
         self.renaming = None;
         self.picking_icon = None;
         self.setting_directory = Some(DirectoryInput::new(directory));
+        self.options_scroll = 0;
     }
 
     /// Starts picking an icon, at the current one if it is listed
@@ -490,6 +497,41 @@ impl ProjectApplet {
                 .position(|&(icon, _)| Some(icon) == current)
                 .unwrap_or(0),
         );
+        self.options_scroll = 0;
+        self.follow_selection();
+    }
+
+    /// How many icons or directory options there are to pick from
+    fn options_count(&self) -> usize {
+        match (&self.setting_directory, self.picking_icon) {
+            (_, Some(_)) => ICONS.len(),
+            (Some(input), None) => input.options.len().min(MAX_OPTIONS),
+            (None, None) => 0,
+        }
+    }
+
+    /// How many options fit under the overview's other rows
+    fn options_shown(&self) -> usize {
+        overview_rows()
+            .fitting(self.size.height as f32)
+            .saturating_sub(OPTIONS_ROW)
+            .max(1)
+    }
+
+    /// Scrolls the options the least that shows the selected one, and no further than the last at the bottom
+    fn follow_selection(&mut self) {
+        let shown = self.options_shown();
+        let selected = match (&self.setting_directory, self.picking_icon) {
+            (_, Some(selected)) => Some(selected),
+            (Some(input), None) => input.selected,
+            (None, None) => None,
+        };
+        if let Some(selected) = selected {
+            self.options_scroll = ui::scroll_to(self.options_scroll, selected, shown);
+        }
+        self.options_scroll = self
+            .options_scroll
+            .min(ui::max_scroll(self.options_count(), shown));
     }
 
     /// Sets the icon (`None`: the default) and stops picking
@@ -674,13 +716,21 @@ impl ProjectApplet {
             UIEvent::Mouse(MouseEvent {
                 kind:
                     MouseEventKind::Scroll {
-                        delta, stop, ctrl, ..
+                        delta,
+                        v120,
+                        stop,
+                        ctrl,
+                        ..
                     },
                 ..
             }) => {
                 if let Some(top) = self.zoom_top() {
                     let size = self.zoom_size(top);
                     self.holder.tree.zoom_scroll(size, delta, stop, ctrl);
+                } else {
+                    let steps = self.options_scrolled.add(delta, v120) as isize;
+                    let max = ui::max_scroll(self.options_count(), self.options_shown());
+                    self.options_scroll = self.options_scroll.saturating_add_signed(steps).min(max);
                 }
             }
             // a drag in its tree's zoom-out view
@@ -708,6 +758,7 @@ impl ProjectApplet {
                 if !self.handle_overview_key(key, modifiers) {
                     return Some(ui_event);
                 }
+                self.follow_selection();
                 return None;
             }
             _ => return Some(ui_event),
@@ -739,13 +790,15 @@ impl ProjectApplet {
         match overview_rows().row_at(y) {
             None => {}
             Some(row) if row >= OPTIONS_ROW && self.picking_icon.is_some() => {
-                if let Some(&(icon, _)) = ICONS.get(row - OPTIONS_ROW) {
+                if let Some(&(icon, _)) = ICONS.get(row - OPTIONS_ROW + self.options_scroll) {
                     self.set_icon(Some(icon.to_string()));
                 }
             }
             Some(row) if row >= OPTIONS_ROW && self.setting_directory.is_some() => {
                 if let Some(input) = &mut self.setting_directory
-                    && let Some(option) = input.options.get(row - OPTIONS_ROW).cloned()
+                    && let Some(option) = (input.options.iter().take(MAX_OPTIONS))
+                        .nth(row - OPTIONS_ROW + self.options_scroll)
+                        .cloned()
                 {
                     input.set(option);
                 }
@@ -833,10 +886,11 @@ impl ProjectApplet {
         true
     }
 
-    /// The rows under the hint: the icons or directories to pick from, else what can be added
+    /// The rows under the hint: the shown icons or directories to pick from, else none (what can be added is on
+    /// one line)
     fn overview_options(&self) -> Vec<(String, Color)> {
         let text = settings::get().palette.fg;
-        match (&self.setting_directory, self.picking_icon) {
+        let all: Vec<_> = match (&self.setting_directory, self.picking_icon) {
             (_, Some(_)) => ICONS
                 .iter()
                 .map(|(icon, name)| (format!("{icon}  {name}"), text))
@@ -847,9 +901,12 @@ impl ProjectApplet {
                 .take(MAX_OPTIONS)
                 .map(|option| (option.clone(), text))
                 .collect(),
-            // `NEW_ROWS` are on one line instead
             (None, None) => Vec::new(),
-        }
+        };
+        all.into_iter()
+            .skip(self.options_scroll)
+            .take(self.options_shown())
+            .collect()
     }
 
     fn get_overview(&self, size: DisplayContainerSize) -> UITree {
@@ -940,6 +997,7 @@ impl ProjectApplet {
         let rows = header
             .into_iter()
             .chain(self.overview_selected(width))
+            .chain(self.options_scrollbar(width))
             .chain(self.overview_hover(width, count, options))
             .chain(rows)
             .chain(self.color_controls(width))
@@ -959,7 +1017,24 @@ impl ProjectApplet {
             (Some(input), None) => input.selected?,
             (None, None) => return None,
         };
-        Some(OPTIONS_ROW + selected)
+        let shown = selected.checked_sub(self.options_scroll)?;
+        (shown < self.options_shown()).then_some(OPTIONS_ROW + shown)
+    }
+
+    /// Beside the icons or directory options, inside the overview's box
+    fn options_scrollbar(&self, width: f32) -> Option<UITree> {
+        let shown = self.options_shown();
+        ui::scrollbar(
+            &settings::get().palette,
+            ui::scrollbar_x(width - PAD / 2.0),
+            [
+                overview_rows().top_of(OPTIONS_ROW),
+                shown as f32 * row_height(),
+            ],
+            self.options_scroll,
+            shown,
+            self.options_count(),
+        )
     }
 
     /// Behind the selected icon or directory option, like selected rows elsewhere
@@ -1048,6 +1123,7 @@ impl StandardApplet for ProjectApplet {
         }
         if let StandardEvent::UIEvent(UIEvent::WindowResized(size)) = standard_event {
             self.size = size;
+            self.follow_selection();
         }
         let standard_event = match standard_event {
             StandardEvent::UIEvent(ui_event) if self.at_root() => {
