@@ -25,7 +25,7 @@ struct ManSection {
     entries: &'static [(&'static str, &'static str)],
 }
 
-/// The basic usage bullet points of `docs/usage.md` past the keybinds (`keybind_rows`)
+/// The basic usage bullet points of `docs/usage.md` past the keybinds (`keybind_sections`)
 const MAN_PAGE: &[ManSection] = &[
     ManSection {
         title: "Actions while focused on tree view",
@@ -49,15 +49,21 @@ const MAN_PAGE: &[ManSection] = &[
     },
 ];
 
-/// The setting `keybinds` as keys and descriptions
-fn keybind_rows(settings: &Settings) -> Vec<(String, String)> {
+/// The setting `keybinds`: each group's name, and its binds as keys and descriptions
+fn keybind_sections(settings: &Settings) -> Vec<(String, Vec<(String, String)>)> {
     settings
-        .all_keybinds()
-        .map(|keybind| (keys_label(keybind), describe(&keybind.action)))
+        .keybinds
+        .iter()
+        .map(|(group, keybinds)| {
+            let entries = keybinds
+                .iter()
+                .map(|keybind| (keys_label(keybind), describe(&keybind.action)))
+                .collect();
+            (group.clone(), entries)
+        })
         .collect()
 }
 
-/// Eg `Ctrl+Super+Left`
 fn keys_label(keybind: &Keybind) -> String {
     let has = |name: &str| keybind.mods.iter().any(|m| m.eq_ignore_ascii_case(name));
     let mut label = String::new();
@@ -171,8 +177,8 @@ pub struct ManPageApplet {
     /// The palette, and keys in `border.focused` (`settings_changed`)
     palette: settings::Palette,
     key_color: Color,
-    /// `keybind_rows`
-    keybinds: Vec<(String, String)>,
+    /// `keybind_sections`
+    keybinds: Vec<(String, Vec<(String, String)>)>,
     hook: AppletContext,
 }
 impl ManPageApplet {
@@ -184,7 +190,7 @@ impl ManPageApplet {
                 scroll: 0,
                 scrolled: ui::ScrollSteps::default(),
                 size: DisplayContainerSize::new(800, 600),
-                keybinds: keybind_rows(&settings),
+                keybinds: keybind_sections(&settings),
                 palette: settings.palette,
                 key_color: settings.border.focused,
                 hook,
@@ -209,17 +215,20 @@ impl ManPageApplet {
 
     /// Every row at `width`, descriptions word-wrapped
     fn rows(&self, width: usize) -> Vec<Row> {
-        let sections = std::iter::once(("Keybinds (setting `keybinds`)", self.keybinds.clone()))
+        let sections = self
+            .keybinds
+            .iter()
+            .cloned()
             .chain(MAN_PAGE.iter().map(|section| {
                 let entries = section.entries.iter();
                 (
-                    section.title,
+                    section.title.to_owned(),
                     entries
                         .map(|&(keys, text)| (keys.to_owned(), text.to_owned()))
                         .collect(),
                 )
             }));
-        let sections: Vec<(&str, Vec<(String, String)>)> = sections.collect();
+        let sections: Vec<(String, Vec<(String, String)>)> = sections.collect();
         let key_width = sections
             .iter()
             .flat_map(|(_, entries)| entries)
@@ -238,7 +247,7 @@ impl ManPageApplet {
             }
             rows.push(Row {
                 keys: String::new(),
-                text: title.to_string(),
+                text: title,
                 section: true,
             });
             for (keys, description) in entries {
@@ -289,7 +298,7 @@ impl StandardApplet for ManPageApplet {
     fn settings_changed(&mut self, settings: &Settings) {
         self.palette = settings.palette.clone();
         self.key_color = settings.border.focused;
-        self.keybinds = keybind_rows(settings);
+        self.keybinds = keybind_sections(settings);
         self.hook.damage_window();
     }
 
@@ -402,9 +411,19 @@ mod tests {
     /// Every default keybind has its own words
     #[test]
     fn default_keybinds_described() {
-        for (keys, text) in super::keybind_rows(&Settings::default()) {
+        let sections = super::keybind_sections(&Settings::default());
+        for (keys, text) in sections.into_iter().flat_map(|(_, entries)| entries) {
             println!("{keys:<20} {text}");
             assert!(!text.contains('['), "{keys}: {text}");
         }
+    }
+
+    #[test]
+    fn sections_follow_keybind_groups() {
+        let titles: Vec<_> = super::keybind_sections(&Settings::default())
+            .into_iter()
+            .map(|(title, _)| title)
+            .collect();
+        assert_eq!(titles, ["Global", "Windows", "Tree", "Traversal", "Swipe"]);
     }
 }
