@@ -1,35 +1,27 @@
 {
   "$schema": "https://raw.githubusercontent.com/mathkimchi/sonamu/dev/assets/settings.schema.json",
   "palette": {
-    "bg": "#111418",
-    "fg": "#e1e2e8",
-    "accent": "#d6bee4",
-    "inactive": "#8d9199"
+    "bg": "#07210f",
+    "fg": "#e7efe9",
+    "accent": "#c2adeb",
+    "inactive": "#84ad90"
   },
   "border": {
-    "width": 2,
-    "focused": "#a0cafd",
-    "unfocused": "#42474e",
-    "treeview": "#bbc7db"
+    "focused": "#97e6d4",
+    "unfocused": "#404f44",
+    "treeview": "#62846b"
   },
-  "gap": 8.0,
-  "radius": 0,
+  "gap": 12.0,
+  "radius": 0.0,
   "font_size": 24.0,
   "treeview": {
-    "side": "left",
     "floating": "center",
     "width": 15,
-    "floating_size": [
-      50,
-      70
-    ]
+    "floating_size": [50, 70]
   },
-  "buffer_line": "always",
   "swipe": {
     "distance_x": 600.0,
     "distance_y": 1200.0,
-    "rubber_band": 0.15,
-    "stiffness": 1000.0,
     "damping_ratio": 1.0
   },
   "keybinds": {
@@ -95,19 +87,14 @@
     "hx",
     {
       "program": "claude",
-      "args": [
-        "--continue"
-      ]
+      "args": ["--continue"]
     },
     "typst"
   ],
   "terminal": "foot",
   "browser": "firefox",
-  "startup": [
-    "touch \"$XDG_RUNTIME_DIR/sonamu-hide-beeper\"; exec beeper --no-sandbox"
-  ],
+  "startup": ["touch \"$XDG_RUNTIME_DIR/sonamu-hide-beeper\"; exec beeper --no-sandbox"],
   "zoom_out": {
-    "child_previews": true,
     "view": "free"
   }
 }
