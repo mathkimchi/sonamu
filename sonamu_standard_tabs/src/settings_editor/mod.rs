@@ -14,7 +14,11 @@ use sonamu_common::{
     command::{self, NodeUid},
     sap::packets::StandardEvent,
     settings::{self, ERROR, Keybind, Palette, Settings},
-    utils::tree::world_tree::WorldTree,
+    utils::tree::{
+        recursive_tree::RecursiveTreeNode,
+        tree_node_path::TreeNodePath,
+        world_tree::{WorldTree, WorldTreePath},
+    },
 };
 use sonamu_sttk::{
     nodular_applet::{
@@ -263,8 +267,8 @@ impl SettingsEditorApplet {
     /// Enter or a click on `row`
     fn activate(&mut self, row: Row) {
         match row {
-            Row::Title(section) => return self.toggle_collapsed(section),
-            Row::KeybindsTitle => return self.toggle_collapsed(self.editor.sections.len()),
+            Row::Title(section) => return self.fold(section),
+            Row::KeybindsTitle => return self.fold(self.editor.sections.len()),
             _ => {}
         }
         if self.editor.read_only().is_some() {
@@ -367,7 +371,8 @@ impl SettingsEditorApplet {
         true
     }
 
-    fn toggle_collapsed(&mut self, section: usize) {
+    /// Folds or unfolds a section
+    fn fold(&mut self, section: usize) {
         if !self.collapsed.remove(&section) {
             self.collapsed.insert(section);
         }
@@ -1116,6 +1121,39 @@ fn number_layout(width: f32) -> NumberLayout {
     }
 }
 
+/// The editor's treeview: "Settings", with each section (Keybinds last) as an inner child
+fn section_tree(editor: &Editor) -> WorldTree<String> {
+    let titles = editor
+        .sections
+        .iter()
+        .map(|section| section.title.clone())
+        .chain(["Keybinds".to_owned()]);
+    WorldTree::World(Box::new(RecursiveTreeNode::new(
+        WorldTree::Base("Settings".to_owned()),
+        titles
+            .map(|title| RecursiveTreeNode::from_value(WorldTree::Base(title)))
+            .collect(),
+    )))
+}
+
+/// The section `row` is in (`keybinds` is the Keybinds section's index); the picker's is its field's
+fn section_of(row: Row, picker: Option<(usize, usize)>, keybinds: usize) -> Option<usize> {
+    match row {
+        Row::Title(section)
+        | Row::Field(section, _)
+        | Row::Item(section, ..)
+        | Row::AddItem(section, _) => Some(section),
+        Row::Generate => Some(0),
+        Row::Picker(_) => picker.map(|(section, _)| section),
+        Row::KeybindsTitle
+        | Row::Group(_)
+        | Row::Bind(..)
+        | Row::AddBind(_)
+        | Row::AddGroup
+        | Row::AddDefaults => Some(keybinds),
+    }
+}
+
 /// Every row: sections' titles, their fields (and list items, the color picker) unless folded, then keybinds
 fn form_rows(
     editor: &Editor,
@@ -1199,6 +1237,7 @@ impl StandardApplet for SettingsEditorApplet {
         self.editor.reload();
         self.sync_keybinds();
         self.hook.damage_window();
+        self.hook.damage_treeview();
     }
 
     fn handle_standard_event(&mut self, standard_event: StandardEvent) {
@@ -1215,6 +1254,7 @@ impl StandardApplet for SettingsEditorApplet {
                 if self.recording.is_some() && matches!(ui_event, UIEvent::Key { .. }) {
                     self.record(ui_event);
                     self.hook.damage_window();
+                    self.hook.damage_treeview();
                     return;
                 }
                 if self.editing.is_none() && handle_standard_keybinds(&ui_event, &self.hook) {
@@ -1236,11 +1276,13 @@ impl StandardApplet for SettingsEditorApplet {
                     _ => return,
                 }
                 self.hook.damage_window();
+                self.hook.damage_treeview();
             }
             StandardEvent::FocusChanged(false) => {
                 self.recording = None;
                 self.commit_editing();
                 self.hook.damage_window();
+                self.hook.damage_treeview();
             }
             _ => {}
         }
@@ -1273,13 +1315,54 @@ impl StandardApplet for SettingsEditorApplet {
     }
 
     fn get_treeview(&self) -> WorldTree<String> {
-        WorldTree::Base("Settings".to_owned())
+        section_tree(&self.editor)
+    }
+
+    /// The selected row's section
+    fn get_focus_path(&self) -> WorldTreePath {
+        let row = self
+            .selected
+            .and_then(|index| self.rows().get(index).copied());
+        let picker = self.picker.as_ref().map(|(at, _)| *at);
+        row.and_then(|row| section_of(row, picker, self.editor.sections.len()))
+            .map_or_else(WorldTreePath::root, |section| {
+                WorldTreePath::from_tree_path(&TreeNodePath(vec![section]))
+            })
+    }
+
+    /// A section's row in the treeview: selects its title, at the top
+    fn focus(&mut self, path: &WorldTreePath) {
+        let (TreeNodePath(steps), _) = path.split_world();
+        let title = match steps.as_slice() {
+            [section] if *section < self.editor.sections.len() => Row::Title(*section),
+            [section] if *section == self.editor.sections.len() => Row::KeybindsTitle,
+            _ => return,
+        };
+        if let Some(index) = self.rows().iter().position(|row| *row == title) {
+            self.select(Some(index));
+            self.scroll = index.min(ui::max_scroll(self.rows().len(), self.shown()));
+        }
+        self.hook.damage_window();
+        self.hook.damage_treeview();
+    }
+
+    /// Space on a section's row in the treeview folds it
+    fn toggle_collapsed(&mut self, path: &WorldTreePath) {
+        let (TreeNodePath(steps), _) = path.split_world();
+        if let [section] = *steps.as_slice()
+            && section <= self.editor.sections.len()
+        {
+            self.fold(section);
+            self.hook.damage_window();
+            self.hook.damage_treeview();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sonamu_common::utils::tree::tree_node_path::TreeNodePath;
 
     fn editor(name: &str) -> (Editor, Keybinds) {
         let dir = std::env::temp_dir().join(format!("sonamu-rows-{name}-{}", std::process::id()));
@@ -1318,6 +1401,50 @@ mod tests {
             .unwrap();
         let lines: Vec<Row> = (0..PICKER_LINES).map(Row::Picker).collect();
         assert_eq!(rows[at + 1..=at + PICKER_LINES], lines[..]);
+    }
+
+    /// The treeview shows each section, Keybinds last, as an inner child
+    #[test]
+    fn treeview_lists_sections() {
+        let (editor, _) = editor("treeview");
+        let WorldTree::World(tree) = section_tree(&editor) else {
+            panic!("no inner tree");
+        };
+        let labels: Vec<String> = (0..)
+            .map_while(|index| tree.safe_get(&TreeNodePath(vec![index])))
+            .map(|child| child.get_value().get_root_value().clone())
+            .collect();
+        let mut titles: Vec<String> = editor
+            .sections
+            .iter()
+            .map(|section| section.title.clone())
+            .collect();
+        titles.push("Keybinds".to_owned());
+        assert_eq!(labels, titles);
+    }
+
+    #[test]
+    fn rows_belong_to_sections() {
+        let (editor, _) = editor("sections");
+        let keybinds_section = editor.sections.len();
+        assert_eq!(section_of(Row::Title(2), None, keybinds_section), Some(2));
+        assert_eq!(
+            section_of(Row::Field(3, 1), None, keybinds_section),
+            Some(3)
+        );
+        assert_eq!(section_of(Row::Generate, None, keybinds_section), Some(0));
+        assert_eq!(
+            section_of(Row::Picker(2), Some((0, 4)), keybinds_section),
+            Some(0)
+        );
+        assert_eq!(
+            section_of(Row::Bind(1, 0), None, keybinds_section),
+            Some(keybinds_section)
+        );
+        assert_eq!(
+            section_of(Row::AddDefaults, None, keybinds_section),
+            Some(keybinds_section)
+        );
     }
 
     #[test]
