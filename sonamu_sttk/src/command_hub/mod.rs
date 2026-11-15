@@ -49,8 +49,8 @@ const COMMANDS: [Signature; 3] = [
     },
 ];
 
-/// Lines per wheel notch
-const SCROLL_STEP: usize = 3;
+/// Lines per scroll step
+const SCROLL_STEP: isize = 3;
 pub(crate) const PROMPT: &str = "> ";
 
 /// The hub's, buffer line's and help's background: the palette's, translucent like the treeview
@@ -75,6 +75,8 @@ pub struct CommandHubApplet {
     palette: Palette,
     /// Lines scrolled up from the bottom
     scroll: usize,
+    /// Mouse scrolling not yet a step
+    scrolled: ui::ScrollSteps,
 
     /// Where `open("wl", ..)` starts programs: the directory of the tree it is in (eg a project's); the runner's if `None`
     directory: Option<PathBuf>,
@@ -93,6 +95,7 @@ impl CommandHubApplet {
                 waker.wake();
             })),
             scroll: 0,
+            scrolled: ui::ScrollSteps::default(),
             palette: settings::get().palette,
             directory: None,
             size: DisplayContainerSize::new(800, 600),
@@ -211,11 +214,12 @@ impl StandardApplet for CommandHubApplet {
                         ..
                     } => self.handle_key(key, modifiers),
                     UIEvent::Mouse(mouse_event) => {
-                        let MouseEventKind::Scroll { delta, .. } = mouse_event.kind else {
+                        let MouseEventKind::Scroll { delta, v120, .. } = mouse_event.kind else {
                             return;
                         };
                         // positive scrolls down, toward the newest
-                        self.scroll_by(-ui::scroll_rows(delta, SCROLL_STEP));
+                        let steps = self.scrolled.add(delta, v120) as isize;
+                        self.scroll_by(-steps * SCROLL_STEP);
                     }
                     UIEvent::WindowResized(size) => self.size = size,
                     UIEvent::Key { .. } | UIEvent::Swipe { .. } | UIEvent::Pinch(_) => return,

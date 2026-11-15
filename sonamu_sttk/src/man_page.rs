@@ -88,7 +88,8 @@ const MAN_PAGE: &[ManSection] = &[
 
 /// Below this, keys go above their descriptions instead of beside them
 const MIN_DESCRIPTION_WIDTH: usize = 24;
-const SCROLL_STEP: usize = 3;
+/// Rows per scroll step
+const SCROLL_STEP: isize = 3;
 
 /// A row of the list: keys (if any) and text
 struct Row {
@@ -100,6 +101,8 @@ struct Row {
 pub struct ManPageApplet {
     /// Rows scrolled past
     scroll: usize,
+    /// Mouse scrolling not yet a step
+    scrolled: ui::ScrollSteps,
     size: DisplayContainerSize,
     /// The palette, and keys in `border.focused` (`settings_changed`)
     palette: settings::Palette,
@@ -113,6 +116,7 @@ impl ManPageApplet {
             let settings = settings::get();
             Box::new(Self {
                 scroll: 0,
+                scrolled: ui::ScrollSteps::default(),
                 size: DisplayContainerSize::new(800, 600),
                 palette: settings.palette,
                 key_color: settings.border.focused,
@@ -232,8 +236,9 @@ impl StandardApplet for ManPageApplet {
                 _ => {}
             },
             UIEvent::Mouse(mouse_event) => {
-                if let MouseEventKind::Scroll { delta, .. } = mouse_event.kind {
-                    self.scroll_by(ui::scroll_rows(delta, SCROLL_STEP));
+                if let MouseEventKind::Scroll { delta, v120, .. } = mouse_event.kind {
+                    let steps = self.scrolled.add(delta, v120) as isize;
+                    self.scroll_by(steps * SCROLL_STEP);
                 }
             }
             UIEvent::WindowResized(size) => {

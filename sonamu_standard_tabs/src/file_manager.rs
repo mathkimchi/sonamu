@@ -146,6 +146,8 @@ pub struct FileManagerApplet {
     selected: usize,
     /// First visible entry
     scroll: usize,
+    /// Mouse scrolling not yet a row
+    scrolled: ui::ScrollSteps,
     /// Only the header (toggle button and title) shows, and the document takes the width under it
     list_collapsed: bool,
 
@@ -186,6 +188,7 @@ impl CreatableNodularApplet<PathBuf> for FileManagerApplet {
             entries: Vec::new(),
             selected: 0,
             scroll: 0,
+            scrolled: ui::ScrollSteps::default(),
             list_collapsed: false,
             documents: Vec::new(),
             active: None,
@@ -809,12 +812,10 @@ impl FileManagerApplet {
                     self.activate_selected();
                 }
             }
-            MouseEventKind::Scroll { delta, .. } => {
+            MouseEventKind::Scroll { delta, v120, .. } => {
                 let max_scroll = ui::max_scroll(self.entries.len(), self.visible_rows());
-                self.scroll = self
-                    .scroll
-                    .saturating_add_signed(ui::scroll_rows(delta, 1))
-                    .min(max_scroll);
+                let steps = self.scrolled.add(delta, v120) as isize;
+                self.scroll = self.scroll.saturating_add_signed(steps).min(max_scroll);
             }
             MouseEventKind::Button { .. } | MouseEventKind::Motion => {}
         }
