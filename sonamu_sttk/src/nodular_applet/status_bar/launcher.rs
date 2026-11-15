@@ -8,7 +8,7 @@ use super::{
     notification_list,
     widgets::{Button, Cell, ScrollList, label_color},
 };
-use crate::{command_hub::program_command, standard_keybinds::terminal};
+use crate::{command_hub::program_command, standard_keybinds::terminal, ui};
 use sonamu_common::settings::Settings;
 use sonamu_ui::{ui_element::UITree, ui_event::KeySymbol};
 
@@ -113,12 +113,9 @@ impl Launcher {
                 }
                 return KeyResult::Close;
             }
-            KeySymbol::ArrowKeyDown => {
-                self.selected = (self.selected + 1).min(count.saturating_sub(1));
-                self.list.show(self.selected, SHOWN);
-            }
-            KeySymbol::ArrowKeyUp => {
-                self.selected = self.selected.saturating_sub(1);
+            KeySymbol::ArrowKeyDown | KeySymbol::ArrowKeyUp => {
+                let down = matches!(key, KeySymbol::ArrowKeyDown);
+                self.selected = ui::step(Some(self.selected), down, count).unwrap_or(0);
                 self.list.show(self.selected, SHOWN);
             }
             KeySymbol::Backspace => {

@@ -231,18 +231,10 @@ impl DirectoryInput {
         self.selected = None;
     }
 
-    /// Moves the arrow selection through the shown options, down if `down`; wraps around
+    /// Moves the arrow selection through the shown options, down if `down`
     fn select(&mut self, down: bool) {
         let shown = self.options.len().min(MAX_OPTIONS);
-        if shown == 0 {
-            return;
-        }
-        self.selected = Some(match (self.selected, down) {
-            (None, true) => 0,
-            (None, false) => shown - 1,
-            (Some(index), true) => (index + 1) % shown,
-            (Some(index), false) => (index + shown - 1) % shown,
-        });
+        self.selected = ui::step(self.selected, down, shown).or(self.selected);
     }
 
     /// Fills in the selected option, else completes to the options' longest common prefix,
@@ -515,9 +507,9 @@ impl ProjectApplet {
             KeySymbol::Enter => self.set_icon(Some(ICONS[selected].0.to_string())),
             KeySymbol::Escape => self.picking_icon = None,
             KeySymbol::Backspace => self.set_icon(None),
-            KeySymbol::ArrowKeyDown => self.picking_icon = Some((selected + 1) % ICONS.len()),
-            KeySymbol::ArrowKeyUp => {
-                self.picking_icon = Some((selected + ICONS.len() - 1) % ICONS.len());
+            KeySymbol::ArrowKeyDown | KeySymbol::ArrowKeyUp => {
+                let down = matches!(key, KeySymbol::ArrowKeyDown);
+                self.picking_icon = ui::step(Some(selected), down, ICONS.len());
             }
             // any character, eg an emoji
             KeySymbol::Char(key_char) if !key_char.is_control() => {

@@ -317,6 +317,13 @@ impl FileManagerApplet {
         }
     }
 
+    /// Selects the next entry (`down`) or the previous one
+    fn step(&mut self, down: bool) {
+        if let Some(index) = ui::step(Some(self.selected), down, self.entries.len()) {
+            self.select(index);
+        }
+    }
+
     fn select(&mut self, index: usize) {
         self.selected = index.min(self.entries.len().saturating_sub(1));
         self.clamp_scroll();
@@ -737,10 +744,10 @@ impl FileManagerApplet {
                 }
                 match (key, modifiers) {
                     (KeySymbol::ArrowKeyUp | KeySymbol::Char('k'), KeyModifiers::NONE) => {
-                        self.select(self.selected.saturating_sub(1));
+                        self.step(false);
                     }
                     (KeySymbol::ArrowKeyDown | KeySymbol::Char('j'), KeyModifiers::NONE) => {
-                        self.select(self.selected + 1);
+                        self.step(true);
                     }
                     (
                         KeySymbol::Enter | KeySymbol::ArrowKeyRight | KeySymbol::Char('l'),

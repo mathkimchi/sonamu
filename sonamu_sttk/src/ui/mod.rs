@@ -273,6 +273,17 @@ pub fn grid_scrollbar(
     )
 }
 
+/// The selection after Down (`down`) or Up in a list of `count`: stops at the ends; from none, the first or last
+pub fn step(selected: Option<usize>, down: bool, count: usize) -> Option<usize> {
+    let last = count.checked_sub(1)?;
+    Some(match (selected, down) {
+        (None, true) => 0,
+        (None, false) => last,
+        (Some(index), true) => (index + 1).min(last),
+        (Some(index), false) => index.saturating_sub(1).min(last),
+    })
+}
+
 /// How far PageUp/PageDown scroll with `shown` rows: all but one, which stays in view
 pub const fn page(shown: usize) -> usize {
     if shown > 1 { shown - 1 } else { 1 }
@@ -314,5 +325,10 @@ mod tests {
         assert_eq!(scroll_to(4, 5, 5), 4);
         assert_eq!(max_scroll(10, 4), 6);
         assert_eq!(max_scroll(3, 4), 0);
+        assert_eq!(step(None, true, 3), Some(0));
+        assert_eq!(step(None, false, 3), Some(2));
+        assert_eq!(step(Some(2), true, 3), Some(2));
+        assert_eq!(step(Some(0), false, 3), Some(0));
+        assert_eq!(step(Some(1), true, 0), None);
     }
 }
