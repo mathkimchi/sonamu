@@ -37,12 +37,6 @@ impl ViewOffset {
         display_row + self.scroll
     }
 
-    /// Positive is down
-    /// Negative is up
-    const fn add_scroll(&mut self, offset: isize) {
-        self.scroll = self.scroll.saturating_add_signed(offset);
-    }
-
     fn clamp_to_cursor(&mut self, cursor_line: usize) {
         // the top row displayed (scroll) should be at cursor_line or above (minus)
         self.scroll = self.scroll.clamp(
@@ -201,6 +195,26 @@ impl CodeEditorApplet {
         self.buffer.line_to_char(line) + column.min(line_slice.len_chars() - line_break)
     }
 
+    /// Scrolls `lines` (positive down), no further than the last line at the bottom, taking the cursor along to stay
+    /// in view (so the next key doesn't jump back)
+    fn scroll_by(&mut self, lines: isize) {
+        let shown = self.view_offset.most_recent_num_rows.unwrap_or(0).max(1);
+        let line_count = self.buffer.len_lines();
+        let scroll = self
+            .view_offset
+            .scroll
+            .saturating_add_signed(lines)
+            .min(ui::max_scroll(line_count, shown));
+        self.view_offset.scroll = scroll;
+
+        let line = self.buffer.char_to_line(self.cursor);
+        let in_view = line.clamp(scroll, scroll + shown - 1).min(line_count - 1);
+        if in_view != line {
+            let column = self.cursor - self.buffer.line_to_char(line);
+            self.cursor = self.cursor_at(in_view, column);
+        }
+    }
+
     fn clamp_view_to_cursor(&mut self) {
         self.view_offset
             .clamp_to_cursor(self.buffer.char_to_line(self.cursor));
@@ -292,8 +306,8 @@ impl CodeEditorApplet {
                 self.clamp_view_to_cursor();
             }
             // these are mostly here for debug purposes
-            (KeySymbol::PageDown, KeyModifiers::NONE) => self.view_offset.add_scroll(1),
-            (KeySymbol::PageUp, KeyModifiers::NONE) => self.view_offset.add_scroll(-1),
+            (KeySymbol::PageDown, KeyModifiers::NONE) => self.scroll_by(1),
+            (KeySymbol::PageUp, KeyModifiers::NONE) => self.scroll_by(-1),
             _ => match self.mode {
                 EditorMode::Normal => self.handle_keypress_normal(key, key_modifiers),
                 EditorMode::Insert => self.handle_keypress_insert(key, key_modifiers),
@@ -347,10 +361,7 @@ impl StandardApplet for CodeEditorApplet {
                         ..
                     }) => {
                         let steps = self.scrolled.add(delta, v120) as isize;
-                        let shown = self.view_offset.most_recent_num_rows.unwrap_or(0);
-                        let max = ui::max_scroll(self.buffer.len_lines(), shown);
-                        let offset = &mut self.view_offset;
-                        offset.scroll = offset.scroll.saturating_add_signed(steps).min(max);
+                        self.scroll_by(steps);
                     }
                     sonamu_ui::ui_event::UIEvent::Mouse(_) => {}
                 }
