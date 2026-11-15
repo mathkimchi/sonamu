@@ -27,7 +27,7 @@ use std::{
 
 const PROGRAM_TIMEOUT: Duration = Duration::from_secs(5);
 /// Every setting; a settings file or program only gives the ones it changes
-const DEFAULTS: &str = include_str!("../../assets/default_settings.json");
+pub(crate) const DEFAULTS: &str = include_str!("../../assets/default_settings.json");
 
 /// Every field can be left out, since the defaults fill it in
 fn optional_fields(schema: &mut Schema) {
@@ -503,7 +503,7 @@ pub fn load(dir: &Path) -> Result<Loaded, LoadError> {
 }
 
 /// `text`'s settings over the defaults
-fn parse(text: &str) -> Result<Loaded, LoadError> {
+pub(crate) fn parse(text: &str) -> Result<Loaded, LoadError> {
     let mut value: serde_json::Value =
         serde_json::from_str(DEFAULTS).expect("valid default settings");
     let over: serde_json::Value = serde_json::from_str(text)?;
@@ -534,7 +534,7 @@ fn merge(base: &mut serde_json::Value, over: serde_json::Value) {
     }
 }
 
-fn is_executable(path: &Path) -> bool {
+pub(crate) fn is_executable(path: &Path) -> bool {
     fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
 }
 
