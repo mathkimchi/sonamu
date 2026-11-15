@@ -13,12 +13,16 @@
     "gap": {
       "description": "Between panes and around them, in px",
       "type": "number",
-      "format": "float"
+      "format": "float",
+      "minimum": 0,
+      "maximum": 64
     },
     "radius": {
       "description": "Of pane corners, in px",
       "type": "number",
-      "format": "float"
+      "format": "float",
+      "minimum": 0,
+      "maximum": 64
     },
     "always_frame": {
       "description": "Border, gap and radius also on a pane alone in its tree, and on the treeview",
@@ -27,7 +31,9 @@
     "font_size": {
       "description": "Text height in px (Sonamu's own UI isn't scaled)",
       "type": "number",
-      "format": "float"
+      "format": "float",
+      "minimum": 8,
+      "maximum": 64
     },
     "mipmaps": {
       "description": "Smaller copies of windows and images, so they look smooth when drawn small (eg the zoom-out view); a bit\nmore GPU work each time a window updates",
@@ -137,7 +143,9 @@
         "width": {
           "description": "Of panes, in px",
           "type": "number",
-          "format": "float"
+          "format": "float",
+          "minimum": 0,
+          "maximum": 16
         },
         "focused": {
           "description": "Focus is inside the pane's applet (keys go to it); also its treeview marker",
@@ -164,7 +172,8 @@
           "description": "The side column's width, in percent of the window's",
           "type": "integer",
           "format": "uint32",
-          "minimum": 0
+          "minimum": 10,
+          "maximum": 60
         },
         "floating": {
           "description": "Where an unpinned one floats (only while focus is on a node)",
@@ -228,27 +237,37 @@
         "distance_x": {
           "description": "How far the fingers move left / right to go one node, in px",
           "type": "number",
-          "format": "float"
+          "format": "float",
+          "minimum": 100,
+          "maximum": 5000
         },
         "distance_y": {
           "description": "How far the fingers move up / down to go one node, in px",
           "type": "number",
-          "format": "float"
+          "format": "float",
+          "minimum": 100,
+          "maximum": 5000
         },
         "rubber_band": {
           "description": "How far past the first / last node it stretches at most, in nodes",
           "type": "number",
-          "format": "float"
+          "format": "float",
+          "minimum": 0,
+          "maximum": 1
         },
         "stiffness": {
           "description": "Of the spring settling on a node after the fingers lift (mass 1): higher is faster",
           "type": "number",
-          "format": "float"
+          "format": "float",
+          "minimum": 100,
+          "maximum": 5000
         },
         "damping_ratio": {
           "description": "Of that spring: 1 is critically damped (no bounce), below 1 overshoots and bounces, above 1 is sluggish",
           "type": "number",
-          "format": "float"
+          "format": "float",
+          "minimum": 0.1,
+          "maximum": 2
         }
       }
     },
@@ -288,7 +307,9 @@
         "timeout": {
           "description": "How long a new one pops up, in seconds (unless it asks for its own time; critical ones stay)",
           "type": "number",
-          "format": "float"
+          "format": "float",
+          "minimum": 0,
+          "maximum": 60
         }
       }
     },

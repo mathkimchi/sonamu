@@ -55,12 +55,15 @@ pub struct Settings {
     pub palette: Palette,
     pub border: Border,
     /// Between panes and around them, in px
+    #[schemars(range(min = 0, max = 64))]
     pub gap: f32,
     /// Of pane corners, in px
+    #[schemars(range(min = 0, max = 64))]
     pub radius: f32,
     /// Border, gap and radius also on a pane alone in its tree, and on the treeview
     pub always_frame: bool,
     /// Text height in px (Sonamu's own UI isn't scaled)
+    #[schemars(range(min = 8, max = 64))]
     pub font_size: f32,
     /// Smaller copies of windows and images, so they look smooth when drawn small (eg the zoom-out view); a bit
     /// more GPU work each time a window updates
@@ -268,6 +271,7 @@ pub struct TreeviewSettings {
     /// The side a pinned one is on
     pub side: TreeviewSide,
     /// The side column's width, in percent of the window's
+    #[schemars(range(min = 10, max = 60))]
     pub width: u32,
     /// Where an unpinned one floats (only while focus is on a node)
     pub floating: TreeviewFloating,
@@ -280,14 +284,19 @@ pub struct TreeviewSettings {
 #[schemars(transform = optional_fields)]
 pub struct SwipeSettings {
     /// How far the fingers move left / right to go one node, in px
+    #[schemars(range(min = 100, max = 5000))]
     pub distance_x: f32,
     /// How far the fingers move up / down to go one node, in px
+    #[schemars(range(min = 100, max = 5000))]
     pub distance_y: f32,
     /// How far past the first / last node it stretches at most, in nodes
+    #[schemars(range(min = 0, max = 1))]
     pub rubber_band: f32,
     /// Of the spring settling on a node after the fingers lift (mass 1): higher is faster
+    #[schemars(range(min = 100, max = 5000))]
     pub stiffness: f32,
     /// Of that spring: 1 is critically damped (no bounce), below 1 overshoots and bounces, above 1 is sluggish
+    #[schemars(range(min = 0.1, max = 2))]
     pub damping_ratio: f32,
 }
 
@@ -296,6 +305,7 @@ pub struct SwipeSettings {
 #[schemars(transform = optional_fields)]
 pub struct NotificationSettings {
     /// How long a new one pops up, in seconds (unless it asks for its own time; critical ones stay)
+    #[schemars(range(min = 0, max = 60))]
     pub timeout: f32,
 }
 
@@ -408,6 +418,7 @@ pub const ERROR: Color = Color([0xFF, 0x6A, 0x6A, 0xFF]);
 #[schemars(transform = optional_fields)]
 pub struct Border {
     /// Of panes, in px
+    #[schemars(range(min = 0, max = 16))]
     pub width: f32,
     /// Focus is inside the pane's applet (keys go to it); also its treeview marker
     #[schemars(with = "ColorSchema")]
@@ -455,6 +466,12 @@ impl From<serde_json::Error> for LoadError {
     fn from(err: serde_json::Error) -> Self {
         Self::Json(err)
     }
+}
+
+/// The settings' JSON schema (`assets/settings.schema.json`)
+#[must_use]
+pub fn schema() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(Loaded)).expect("schema is JSON")
 }
 
 /// `$SONAMU_CONFIG`, else `$XDG_CONFIG_HOME/sonamu`, else `~/.config/sonamu`.
@@ -809,11 +826,55 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../assets/settings.schema.json"
         );
-        let schema = serde_json::to_string_pretty(&schemars::schema_for!(Loaded)).unwrap() + "\n";
+        let schema = serde_json::to_string_pretty(&schema()).unwrap() + "\n";
         if fs::read_to_string(path).ok().as_deref() != Some(&schema) {
             fs::write(path, schema).unwrap();
             panic!("{path} was out of date and is rewritten; commit it");
         }
+    }
+
+    #[test]
+    fn font_size_range_in_schema() {
+        let font = &schema()["properties"]["font_size"];
+        assert_eq!(
+            (font["minimum"].as_f64(), font["maximum"].as_f64()),
+            (Some(8.0), Some(64.0))
+        );
+    }
+
+    /// Every default is inside its schema range
+    #[test]
+    fn defaults_within_ranges() {
+        fn check(
+            schema: &serde_json::Value,
+            defs: &serde_json::Value,
+            value: &serde_json::Value,
+            path: &str,
+        ) {
+            let schema = match schema["$ref"].as_str() {
+                Some(reference) => &defs[reference.trim_start_matches("#/$defs/")],
+                None => schema,
+            };
+            if let (Some(number), Some(min)) = (value.as_f64(), schema["minimum"].as_f64()) {
+                assert!(number >= min, "{path}");
+            }
+            if let (Some(number), Some(max)) = (value.as_f64(), schema["maximum"].as_f64()) {
+                assert!(number <= max, "{path}");
+            }
+            if let Some(object) = value.as_object() {
+                for (key, value) in object {
+                    check(
+                        &schema["properties"][key],
+                        defs,
+                        value,
+                        &format!("{path}.{key}"),
+                    );
+                }
+            }
+        }
+        let schema = schema();
+        let defaults: serde_json::Value = serde_json::from_str(DEFAULTS).unwrap();
+        check(&schema, &schema["$defs"], &defaults, "");
     }
 
     #[test]
