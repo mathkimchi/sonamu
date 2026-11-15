@@ -208,6 +208,7 @@ each holder focuses its node (`Here`), sending its main the rest of the path, or
 
 ## Screens (#60)
 
+- DRM: each connected monitor, side by side in one scene; in a window `SONAMU_SCREENS=N` splits it. Last clicked screen is active (keys, treeview). The one wl output (layer surfaces, capture) is the main screen.
 - The root's tree is shown on every screen (`StandardEvent::Screens`), each with its own focus, view root
   (`NodeTree`) and inner view root (`view_path`) and treeview state (`RootNodeApplet`). The **active** screen's are the usual fields
   (nodes' `FocusIndex`, `view_root`, `panes`, ...); the others are kept in `screens` and swapped in by
