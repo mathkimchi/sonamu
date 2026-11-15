@@ -837,28 +837,15 @@ impl ProjectApplet {
     fn overview_options(&self) -> Vec<(String, Color)> {
         let text = settings::get().palette.fg;
         match (&self.setting_directory, self.picking_icon) {
-            (_, Some(selected)) => (0..)
-                .zip(ICONS)
-                .map(|(index, (icon, name))| {
-                    if index == selected {
-                        (format!("› {icon}  {name}"), settings::get().palette.accent)
-                    } else {
-                        (format!("  {icon}  {name}"), text)
-                    }
-                })
+            (_, Some(_)) => ICONS
+                .iter()
+                .map(|(icon, name)| (format!("{icon}  {name}"), text))
                 .collect(),
             (Some(input), None) => input
                 .options
                 .iter()
                 .take(MAX_OPTIONS)
-                .enumerate()
-                .map(|(index, option)| {
-                    if input.selected == Some(index) {
-                        (format!("› {option}"), settings::get().palette.accent)
-                    } else {
-                        (format!("  {option}"), text)
-                    }
-                })
+                .map(|option| (option.clone(), text))
                 .collect(),
             // `NEW_ROWS` are on one line instead
             (None, None) => Vec::new(),
@@ -952,6 +939,7 @@ impl ProjectApplet {
         let header = Self::overview_header(width, count, options);
         let rows = header
             .into_iter()
+            .chain(self.overview_selected(width))
             .chain(self.overview_hover(width, count, options))
             .chain(rows)
             .chain(self.color_controls(width))
@@ -964,13 +952,33 @@ impl ProjectApplet {
         )
     }
 
+    /// The row of the selected icon or directory option
+    fn selected_option_row(&self) -> Option<usize> {
+        let selected = match (&self.setting_directory, self.picking_icon) {
+            (_, Some(selected)) => selected,
+            (Some(input), None) => input.selected?,
+            (None, None) => return None,
+        };
+        Some(OPTIONS_ROW + selected)
+    }
+
+    /// Behind the selected icon or directory option, like selected rows elsewhere
+    fn overview_selected(&self, width: f32) -> Option<UITree> {
+        let layout = overview_rows();
+        Some(ui::rect(
+            ui::selected_bg(&settings::get().palette),
+            [PAD / 2.0, layout.top_of(self.selected_option_row()?)],
+            [(width - PAD).max(0.0), layout.height],
+        ))
+    }
+
     /// Behind the clickable row (or `NEW_ROWS` cell) of the overview's `count` the pointer is on, like hovered rows
-    /// elsewhere; the color row's parts aren't the whole row, so it isn't lit
+    /// elsewhere; not the color row (its parts aren't the whole row) or the selected one
     fn overview_hover(&self, width: f32, count: usize, options: bool) -> Option<UITree> {
         let [x, y] = self.hovered?;
         let layout = overview_rows();
         let row = layout.row_at(y).filter(|&row| row < count)?;
-        if matches!(row, HINT_ROW | COLOR_ROW) {
+        if matches!(row, HINT_ROW | COLOR_ROW) || self.selected_option_row() == Some(row) {
             return None;
         }
         let [left, w] = if row == OPTIONS_ROW && !options {

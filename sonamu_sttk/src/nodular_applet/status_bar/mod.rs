@@ -481,13 +481,15 @@ impl StatusBar {
             span: [left, w],
         } in &placed
         {
-            // the hovered one, or the one whose popup is open, on a lighter background
-            let lit = active
-                && (self.hovered == Some(*segment)
-                    || self.popup.map(Popup::segment) == Some(*segment));
-            if lit {
+            // the one whose popup is open selected, the hovered one lighter, like rows elsewhere
+            let background = if self.popup.map(Popup::segment) == Some(*segment) {
+                Some(ui::selected_bg(&settings.palette))
+            } else {
+                (self.hovered == Some(*segment)).then(|| ui::raised_bg(&settings.palette))
+            };
+            if let Some(background) = background.filter(|_| active) {
                 children.push(ui::rect(
-                    settings.palette.raised(30),
+                    background,
                     [left - GAP / 2.0 + 2.0, 4.0],
                     [w + GAP - 4.0, height - 8.0],
                 ));

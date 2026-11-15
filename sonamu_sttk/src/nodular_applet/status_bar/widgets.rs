@@ -42,7 +42,8 @@ impl Button {
             && (self.columns[0]..self.columns[1]).contains(&column)
     }
 
-    /// `spans` from its start, lit while `on` (eg the current choice), lighter while `hover` is on it
+    /// `spans` from its start, on `selected_bg` while `on` (eg the current choice), else `raised_bg` while `hover` is
+    /// on it, like rows elsewhere
     pub fn draw(
         &self,
         lines: &Lines,
@@ -53,9 +54,8 @@ impl Button {
     ) -> Vec<UITree> {
         let hovered = hover.is_some_and(|cell| self.contains(cell));
         let background = match (on, hovered) {
-            (true, true) => Some(palette.raised(40)),
-            (true, false) => Some(palette.raised(30)),
-            (false, true) => Some(palette.raised(20)),
+            (true, _) => Some(ui::selected_bg(palette)),
+            (false, true) => Some(ui::raised_bg(palette)),
             (false, false) => None,
         };
         let mut items: Vec<UITree> = background
