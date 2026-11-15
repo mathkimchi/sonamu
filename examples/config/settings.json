@@ -102,5 +102,8 @@
     "shader": {
       "path": "wallpapers/constellation.wgsl"
     }
+  },
+  "battery_wallpaper": {
+    "color": "#588633"
   }
 }
