@@ -9,7 +9,7 @@ use crate::{
 };
 use sonamu_common::{
     sap::packets::StandardEvent,
-    settings::{self, Settings},
+    settings::{self, Action, Key, Keybind, NamedKey, Settings},
     utils::tree::world_tree::WorldTree,
 };
 use sonamu_ui::color::Color;
@@ -19,78 +19,150 @@ use sonamu_ui::{
     ui_event::{KeySymbol, MouseEventKind, UIEvent},
 };
 
-struct ManEntry {
-    key: &'static str,
-    description: &'static str,
-}
-
 struct ManSection {
     title: &'static str,
-    entries: &'static [ManEntry],
+    /// Keys and description
+    entries: &'static [(&'static str, &'static str)],
 }
 
-const fn entry(key: &'static str, description: &'static str) -> ManEntry {
-    ManEntry { key, description }
-}
-
-/// The basic usage bullet points of `docs/usage.md`
+/// The basic usage bullet points of `docs/usage.md` past the keybinds (`keybind_rows`)
 const MAN_PAGE: &[ManSection] = &[
-    ManSection {
-        title: "Global Shortcuts",
-        entries: &[
-            entry(
-                "Super+Shift+/ (Super+?)",
-                "bring up this basic usage manual",
-            ),
-            entry("Super+T", "spawn terminal"),
-            entry("Super+N", "spawn browser"),
-            entry("Super+Shift+T/N", "spawn terminal/browser as sibling"),
-            entry("Super+P", "wrap current tab in a project"),
-            entry("Super+W", "close current tab"),
-            entry("Super+F", "toggle half-view"),
-            entry("Super+Esc", "buffer line: Luau prompt (Esc leaves)"),
-            // entry("Super+Shift+\\ (Super+|)", "split to right"),
-            // entry("Super+Shift+-", "split to bottom"),
-        ],
-    },
-    ManSection {
-        title: "Traversal Keys (Alt+<traversal key> focuses the tree view)",
-        entries: &[
-            entry("(Shift+)Tab", "goes (up)/down in the tree view"),
-            entry("W/S", "goes to prev/next sibling"),
-            entry("A/D", "goes to parent/child"),
-            entry("Alt+Enter", "focus tree view/main content (toggles)"),
-        ],
-    },
     ManSection {
         title: "Actions while focused on tree view",
         entries: &[
-            entry("Traversal keys", "as above"),
-            entry("Enter", "focus on main content"),
-            entry("Space", "toggle children visibility"),
-            entry("Click top right circle", "pin/unpin tree view"),
-            entry("Double click on node", "makes it the view root"),
-            entry("Drag/drop nodes", "moves them"),
-            entry("Right click", "brings up options"),
+            ("Traversal keys", "as above, without Alt (but Alt+Enter)"),
+            ("Enter", "focus on main content"),
+            ("Space", "toggle children visibility"),
+            ("Click top right circle", "pin/unpin tree view"),
+            ("Double click on node", "makes it the view root"),
+            ("Drag/drop nodes", "moves them"),
+            ("Right click", "brings up options"),
         ],
     },
     ManSection {
         title: "Gestures",
         entries: &[
-            entry("3-finger swipe up/down", "previous/next sibling"),
-            entry("3-finger swipe left/right", "child/parent"),
-            entry("4-finger swipe up/down", "focus tree view/main content"),
-            entry("Ctrl+Super+arrow", "3-finger swipe by one node"),
+            ("3-finger swipe up/down", "previous/next sibling"),
+            ("3-finger swipe left/right", "child/parent"),
+            ("4-finger swipe up/down", "focus tree view/main content"),
         ],
     },
 ];
+
+/// The setting `keybinds` as keys and descriptions, and Super+Esc (hardcoded)
+fn keybind_rows(settings: &Settings) -> Vec<(String, String)> {
+    let mut rows: Vec<_> = settings
+        .keybinds
+        .iter()
+        .map(|keybind| (keys_label(keybind), describe(&keybind.action)))
+        .collect();
+    rows.push((
+        "Super+Esc".to_owned(),
+        "buffer line: Luau prompt (Esc leaves)".to_owned(),
+    ));
+    rows
+}
+
+/// Eg `Ctrl+Super+Left`
+fn keys_label(keybind: &Keybind) -> String {
+    let has = |name: &str| keybind.mods.iter().any(|m| m.eq_ignore_ascii_case(name));
+    let mut label = String::new();
+    for (name, shown) in [
+        ("ctrl", "Ctrl"),
+        ("logo", "Super"),
+        ("alt", "Alt"),
+        ("shift", "Shift"),
+    ] {
+        if has(name) {
+            label += shown;
+            label.push('+');
+        }
+    }
+    let key = match keybind.key {
+        Key::Char(c) => c.to_uppercase().to_string(),
+        Key::Named(named) => match named {
+            NamedKey::Left => "Left",
+            NamedKey::Right => "Right",
+            NamedKey::Up => "Up",
+            NamedKey::Down => "Down",
+            NamedKey::Enter => "Enter",
+            NamedKey::Tab => "Tab",
+            NamedKey::Escape => "Esc",
+            NamedKey::Backspace => "Backspace",
+            NamedKey::PageUp => "PageUp",
+            NamedKey::PageDown => "PageDown",
+        }
+        .to_owned(),
+        // evdev codes
+        Key::Code(code) => match code {
+            99 => "Print".to_owned(),
+            113 => "Mute".to_owned(),
+            114 => "VolumeDown".to_owned(),
+            115 => "VolumeUp".to_owned(),
+            224 => "BrightnessDown".to_owned(),
+            225 => "BrightnessUp".to_owned(),
+            code => format!("key {code}"),
+        },
+    };
+    label + &key
+}
+
+/// What a keybind does, in words
+fn describe(action: &Action) -> String {
+    let (command, args) = match action {
+        Action::Shell { shell } => return format!("run `{shell}`"),
+        Action::Command { command, args } => (command.as_str(), args.as_slice()),
+    };
+    let text = |index: usize| args.get(index).and_then(|arg| arg.as_str());
+    let number = |index: usize| args.get(index).and_then(serde_json::Value::as_i64);
+    let direction = |offset: Option<i64>| if offset < Some(0) { "previous" } else { "next" };
+    match (command, text(0)) {
+        ("quit", _) => "quit".to_owned(),
+        ("close", _) => "close current tab".to_owned(),
+        ("wrap_project", _) => "wrap current tab in a project".to_owned(),
+        ("toggle_half", _) => "toggle half-view".to_owned(),
+        ("spawn", Some(program)) => format!("spawn {program}"),
+        ("spawn_sibling", Some(program)) => format!("spawn {program} as sibling"),
+        ("spawn_terminal", _) => "spawn terminal".to_owned(),
+        ("spawn_terminal_sibling", _) => "spawn terminal as sibling".to_owned(),
+        ("spawn_browser", _) => "spawn browser".to_owned(),
+        ("spawn_browser_sibling", _) => "spawn browser as sibling".to_owned(),
+        ("swap_sibling", _) => format!("swap with the {} sibling", direction(number(0))),
+        ("pluck_place", _) => "pluck/place the focused node".to_owned(),
+        ("help", _) => "bring up this basic usage manual".to_owned(),
+        ("view_root", _) => "toggle the focused node as view root".to_owned(),
+        ("view_parent", _) => "view root to the focus's parent".to_owned(),
+        ("swipe", Some(direction)) => format!(
+            "swipe to the {}",
+            match direction {
+                "left" => "previous sibling",
+                "right" => "next sibling",
+                "up" => "parent",
+                _ => "child",
+            }
+        ),
+        ("traverse", Some(kind)) => match kind {
+            "next" => "next row in the tree view".to_owned(),
+            "prev" => "previous row in the tree view".to_owned(),
+            "parent" => "go to parent".to_owned(),
+            "child" => format!("go to child {}", number(1).unwrap_or(1)),
+            "recent_child" => "go to the child last focused".to_owned(),
+            "last_child" => "go to the last child".to_owned(),
+            "sibling" => format!("go to the {} sibling", direction(number(1))),
+            "select" => "out of this applet".to_owned(),
+            "enter" => "focus tree view/main content (toggles)".to_owned(),
+            kind => format!("traverse {kind}"),
+        },
+        _ => format!("{command} {args:?}"),
+    }
+}
 
 /// Below this, keys go above their descriptions instead of beside them
 const MIN_DESCRIPTION_WIDTH: usize = 24;
 
 /// A row of the list: keys (if any) and text
 struct Row {
-    keys: &'static str,
+    keys: String,
     text: String,
     section: bool,
 }
@@ -104,6 +176,8 @@ pub struct ManPageApplet {
     /// The palette, and keys in `border.focused` (`settings_changed`)
     palette: settings::Palette,
     key_color: Color,
+    /// `keybind_rows`
+    keybinds: Vec<(String, String)>,
     hook: AppletContext,
 }
 impl ManPageApplet {
@@ -115,6 +189,7 @@ impl ManPageApplet {
                 scroll: 0,
                 scrolled: ui::ScrollSteps::default(),
                 size: DisplayContainerSize::new(800, 600),
+                keybinds: keybind_rows(&settings),
                 palette: settings.palette,
                 key_color: settings.border.focused,
                 hook,
@@ -138,47 +213,58 @@ impl ManPageApplet {
     }
 
     /// Every row at `width`, descriptions word-wrapped
-    fn rows(width: usize) -> Vec<Row> {
-        let key_width = MAN_PAGE
+    fn rows(&self, width: usize) -> Vec<Row> {
+        let sections = std::iter::once(("Keybinds (setting `keybinds`)", self.keybinds.clone()))
+            .chain(MAN_PAGE.iter().map(|section| {
+                let entries = section.entries.iter();
+                (
+                    section.title,
+                    entries
+                        .map(|&(keys, text)| (keys.to_owned(), text.to_owned()))
+                        .collect(),
+                )
+            }));
+        let sections: Vec<(&str, Vec<(String, String)>)> = sections.collect();
+        let key_width = sections
             .iter()
-            .flat_map(|section| section.entries)
-            .map(|entry| entry.key.len())
+            .flat_map(|(_, entries)| entries)
+            .map(|(keys, _)| keys.len())
             .max()
             .unwrap_or(0);
         let beside = width >= 2 + key_width + 2 + MIN_DESCRIPTION_WIDTH;
         let mut rows = Vec::new();
-        for section in MAN_PAGE {
+        for (title, entries) in sections {
             if !rows.is_empty() {
                 rows.push(Row {
-                    keys: "",
+                    keys: String::new(),
                     text: String::new(),
                     section: false,
                 });
             }
             rows.push(Row {
-                keys: "",
-                text: section.title.to_string(),
+                keys: String::new(),
+                text: title.to_string(),
                 section: true,
             });
-            for &ManEntry {
-                key: keys,
-                description,
-            } in section.entries
-            {
+            for (keys, description) in entries {
                 if !beside {
                     rows.push(Row {
-                        keys,
+                        keys: keys.clone(),
                         text: String::new(),
                         section: false,
                     });
                 }
                 let indent = if beside { 2 + key_width + 2 } else { 4 };
-                for (index, line) in word_wrap(description, width.saturating_sub(indent))
+                for (index, line) in word_wrap(&description, width.saturating_sub(indent))
                     .into_iter()
                     .enumerate()
                 {
                     rows.push(Row {
-                        keys: if beside && index == 0 { keys } else { "" },
+                        keys: if beside && index == 0 {
+                            keys.clone()
+                        } else {
+                            String::new()
+                        },
                         text: format!("{}{line}", " ".repeat(indent)),
                         section: false,
                     });
@@ -190,7 +276,7 @@ impl ManPageApplet {
 
     fn max_scroll(&self) -> usize {
         let (width, height) = CharGrid::largest_fittable_size(self.size);
-        Self::rows(width)
+        self.rows(width)
             .len()
             .saturating_sub(height.saturating_sub(1))
     }
@@ -208,6 +294,8 @@ impl StandardApplet for ManPageApplet {
     fn settings_changed(&mut self, settings: &Settings) {
         self.palette = settings.palette.clone();
         self.key_color = settings.border.focused;
+        self.keybinds = keybind_rows(settings);
+        self.hook.damage_window();
     }
 
     fn handle_standard_event(&mut self, standard_event: StandardEvent) {
@@ -266,13 +354,13 @@ impl StandardApplet for ManPageApplet {
             ui::put(&mut grid, 0, column, note, self.palette.inactive);
         }
 
-        let rows = Self::rows(width);
+        let rows = self.rows(width);
         for (row, line) in (1..height).zip(rows.iter().skip(self.scroll)) {
             if line.section {
                 ui::put(&mut grid, row, 1, &line.text, self.palette.accent);
             } else {
                 ui::put(&mut grid, row, 0, &line.text, self.palette.fg);
-                ui::put(&mut grid, row, 2, line.keys, self.key_color);
+                ui::put(&mut grid, row, 2, &line.keys, self.key_color);
             }
         }
 
@@ -310,4 +398,18 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
                 .collect::<Vec<String>>()
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use sonamu_common::settings::Settings;
+
+    /// Every default keybind has its own words
+    #[test]
+    fn default_keybinds_described() {
+        for (keys, text) in super::keybind_rows(&Settings::default()) {
+            println!("{keys:<20} {text}");
+            assert!(!text.contains('['), "{keys}: {text}");
+        }
+    }
 }
