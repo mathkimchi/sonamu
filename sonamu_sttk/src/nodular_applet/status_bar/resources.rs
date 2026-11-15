@@ -213,7 +213,7 @@ pub fn draw(
         [HEADER_LINES, COLUMNS, 1],
         processes.len(),
         PROCESSES,
-        palette.inactive,
+        palette,
     ));
     items
 }

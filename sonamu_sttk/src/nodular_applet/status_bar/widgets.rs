@@ -123,20 +123,19 @@ impl ScrollList {
         [first, width, item_lines]: [usize; 3],
         count: usize,
         shown: usize,
-        color: Color,
+        palette: &Palette,
     ) -> Option<UITree> {
-        if count <= shown {
-            return None;
-        }
-        let top = lines.rows.top_of(first);
-        let height = (shown * item_lines) as f32 * lines.rows.height;
-        let start = self.visible(count, shown).start as f32 / count as f32;
-        let x = POPUP_PAD + width as f32 * char_width() + POPUP_PAD / 2.0 - 1.5;
-        Some(ui::rect(
-            color,
-            [x, top + start * height],
-            [3.0, height * shown as f32 / count as f32],
-        ))
+        ui::scrollbar(
+            palette,
+            POPUP_PAD + width as f32 * char_width() + POPUP_PAD / 2.0,
+            [
+                lines.rows.top_of(first),
+                (shown * item_lines) as f32 * lines.rows.height,
+            ],
+            self.visible(count, shown).start,
+            shown,
+            count,
+        )
     }
 }
 

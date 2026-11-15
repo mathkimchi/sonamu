@@ -29,7 +29,7 @@ use sonamu_sttk::{
     },
     session,
     standard_keybinds::{handle_standard_keybinds, pdf_viewer, standard_keybind_request},
-    ui::{self, Rows, compact_row_height as row_height},
+    ui::{self, INDENT, PAD, Rows, row_height},
     wl_surface_applet::WlSurfaceApplet,
 };
 use sonamu_ui::{
@@ -45,8 +45,6 @@ use std::{
     sync::mpsc,
 };
 
-const INDENT: f32 = 28.0;
-const LEFT_PAD: f32 = 12.0;
 /// Of the width, for the file list
 const LIST_SPLIT: f32 = 0.3;
 /// Directory names: the focused border's color, so they differ from files (`fg`) and the open one (`accent`)
@@ -786,7 +784,7 @@ impl FileManagerApplet {
                 button: ui::BTN_LEFT,
                 pressed: true,
             } => {
-                if in_header && x < f64::from(LEFT_PAD + INDENT) {
+                if in_header && x < f64::from(PAD + INDENT) {
                     self.toggle_list();
                     return;
                 }
@@ -812,18 +810,14 @@ impl FileManagerApplet {
         let toggle = header_row
             .row(
                 0,
-                LEFT_PAD + INDENT,
+                PAD + INDENT,
                 None,
-                vec![header_row.text(
-                    ui::text(toggle, self.palette.fg),
-                    LEFT_PAD,
-                    LEFT_PAD + INDENT,
-                )],
+                vec![header_row.text(ui::text(toggle, self.palette.fg), PAD, PAD + INDENT)],
             )
             .with_pointer();
         let title = header_row.text(
             ui::text(self.title(), self.palette.inactive),
-            LEFT_PAD + INDENT,
+            PAD + INDENT,
             width,
         );
         let header = header_row.row(
@@ -879,11 +873,20 @@ impl FileManagerApplet {
             };
             let label = list_rows.text(
                 ui::text(label, color),
-                LEFT_PAD + entry.depth as f32 * INDENT,
+                PAD + entry.depth as f32 * INDENT,
                 width,
             );
             rows.push(list_rows.row(index, width, background, vec![label]));
         }
+        let shown = self.visible_rows();
+        rows.extend(ui::scrollbar(
+            &self.palette,
+            ui::scrollbar_x(width),
+            [row_height(), shown as f32 * row_height()],
+            self.scroll.min(ui::max_scroll(self.entries.len(), shown)),
+            shown,
+            self.entries.len(),
+        ));
         UITree::new_styled(
             UIElement::Backgrounded(ui::panel_bg(&settings::get().palette)),
             Style::full_size(),
@@ -918,7 +921,7 @@ impl FileManagerApplet {
         let header = UITree::new_styled(
             UIElement::Backgrounded(ui::bg(&settings::get().palette)),
             header_row.style(0, header_left, width - header_left),
-            vec![header_row.text(ui::spans(header), LEFT_PAD, width - header_left)],
+            vec![header_row.text(ui::spans(header), PAD, width - header_left)],
         );
 
         let size = self.document_size();
@@ -939,7 +942,7 @@ impl FileManagerApplet {
                     Style::full_size(),
                     vec![header_row.text(
                         ui::text(note, self.palette.inactive),
-                        LEFT_PAD,
+                        PAD,
                         size.width as f32,
                     )],
                 ),

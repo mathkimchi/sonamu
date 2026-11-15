@@ -439,7 +439,7 @@ pub fn draw_menu(
                 return vec![lines.text(
                     index,
                     0,
-                    vec![("─".repeat(MENU_COLUMNS), palette.raised(30))],
+                    vec![("─".repeat(MENU_COLUMNS), crate::ui::guide(palette))],
                 )];
             }
             let check = match entry.checked {

@@ -222,7 +222,7 @@ pub fn draw(
         [HEADER_LINES, COLUMNS, 2],
         store.list.len(),
         LISTED,
-        palette.inactive,
+        palette,
     ));
     items
 }

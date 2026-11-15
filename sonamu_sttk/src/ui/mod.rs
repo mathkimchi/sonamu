@@ -6,13 +6,10 @@ use sonamu_common::settings::Palette;
 use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
-    ui_element::{Length, Style, UIElement, UITree, font_size},
+    ui_element::{Length, Style, UIElement, UITree, cell_height, cell_width, font_size},
 };
 
-// Mouse buttons (evdev)
-pub const BTN_LEFT: u32 = 0x110;
-pub const BTN_RIGHT: u32 = 0x111;
-pub const BTN_MIDDLE: u32 = 0x112;
+pub use sonamu_ui::ui_event::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
 
 /// How far the pointer moves while pressed before it's a drag
 const DRAG_THRESHOLD: f64 = 12.0;
@@ -60,12 +57,14 @@ pub fn guide(palette: &Palette) -> Color {
 pub fn row_height() -> f32 {
     font_size() + 14.0
 }
-/// Denser rows (the file manager's)
+/// Denser rows (status bar popups' lines)
 pub fn compact_row_height() -> f32 {
     font_size() + 10.0
 }
 /// Space around content (eg the project overview's margin, the treeview's text inset)
 pub const PAD: f32 = 16.0;
+/// How far a tree's rows (treeview, file list) step in per level
+pub const INDENT: f32 = 32.0;
 
 /// One run of text in one color
 pub fn text(text: impl Into<String>, color: Color) -> UIElement {
@@ -220,6 +219,58 @@ impl ScrollSteps {
         self.0 -= f64::from(steps) * SCROLL_STEP_PX;
         steps
     }
+}
+
+/// A scrollbar's width (px)
+const SCROLLBAR_WIDTH: f32 = 3.0;
+
+/// The scrollbar beside a list showing `shown` of its `count` items from `start`, along `[top, height]` (px), centered
+/// on `x`; none while all fit
+pub fn scrollbar(
+    palette: &Palette,
+    x: f32,
+    [top, height]: [f32; 2],
+    start: usize,
+    shown: usize,
+    count: usize,
+) -> Option<UITree> {
+    if count <= shown {
+        return None;
+    }
+    let count = count as f32;
+    Some(rect(
+        palette.inactive,
+        [
+            x - SCROLLBAR_WIDTH / 2.0,
+            top + height * start as f32 / count,
+        ],
+        [SCROLLBAR_WIDTH, height * shown as f32 / count],
+    ))
+}
+
+/// Where a scrollbar goes in an area `width` wide: in its right pad
+pub fn scrollbar_x(width: f32) -> f32 {
+    width - PAD / 2.0
+}
+
+/// `scrollbar` for a char grid `columns` wide whose rows `first..first + shown` show the list
+pub fn grid_scrollbar(
+    palette: &Palette,
+    columns: usize,
+    first: usize,
+    start: usize,
+    shown: usize,
+    count: usize,
+) -> Option<UITree> {
+    let [cell_width, cell_height] = [cell_width(), cell_height()].map(|px| px as f32);
+    scrollbar(
+        palette,
+        scrollbar_x(columns as f32 * cell_width),
+        [first as f32 * cell_height, shown as f32 * cell_height],
+        start,
+        shown,
+        count,
+    )
 }
 
 /// The furthest `count` rows can scroll with `shown` rows: until the last one is at the bottom

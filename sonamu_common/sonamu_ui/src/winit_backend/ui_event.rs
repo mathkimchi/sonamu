@@ -63,6 +63,11 @@ pub struct MouseEvent {
     /// Clients use it for scroll velocity, so it matters when events get handled in batches.
     pub time_msec: Option<u32>,
 }
+// Mouse buttons (evdev), as in `MouseEventKind::Button`
+pub const BTN_LEFT: u32 = 0x110;
+pub const BTN_RIGHT: u32 = 0x111;
+pub const BTN_MIDDLE: u32 = 0x112;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MouseEventKind {
     Motion,

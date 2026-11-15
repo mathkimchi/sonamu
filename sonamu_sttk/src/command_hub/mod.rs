@@ -49,8 +49,6 @@ const COMMANDS: [Signature; 3] = [
     },
 ];
 
-/// Lines per scroll step
-const SCROLL_STEP: isize = 3;
 pub(crate) const PROMPT: &str = "> ";
 
 /// Technically, this is a standard app, but it is so essential
@@ -209,7 +207,7 @@ impl StandardApplet for CommandHubApplet {
                         };
                         // positive scrolls down, toward the newest
                         let steps = self.scrolled.add(delta, v120) as isize;
-                        self.scroll_by(-steps * SCROLL_STEP);
+                        self.scroll_by(-steps);
                     }
                     UIEvent::WindowResized(size) => self.size = size,
                     UIEvent::Key { .. } | UIEvent::Swipe { .. } | UIEvent::Pinch(_) => return,
@@ -329,7 +327,9 @@ impl StandardApplet for CommandHubApplet {
         let top = 1 + body_rows - shown.len();
         repl::draw_lines(&mut grid, top, shown, self.palette.accent);
 
-        grid.element().into()
+        let start = end.saturating_sub(body_rows);
+        let bar = ui::grid_scrollbar(&self.palette, width, 1, start, body_rows, lines.len());
+        UITree::new(grid.element(), bar.into_iter().collect())
     }
 }
 

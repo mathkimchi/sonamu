@@ -10,11 +10,12 @@ use sonamu_sttk::{
         AppletContext, AppletSpawner, AppletSpawnerTrait, NodularAppletInitializer, StandardApplet,
     },
     standard_keybinds::handle_standard_keybinds,
+    ui,
 };
 use sonamu_ui::{
     color::Color,
     ui_element::{CharCellStyle, CharGrid, Style, UIElement, UITree},
-    ui_event::{KeyModifiers, KeySymbol},
+    ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind},
 };
 use std::{
     fs::File,
@@ -100,6 +101,8 @@ pub struct CodeEditorApplet {
     mode: EditorMode,
 
     view_offset: ViewOffset,
+    /// Mouse scrolling not yet a line
+    scrolled: ui::ScrollSteps,
     palette: Palette,
 
     hook: AppletContext,
@@ -137,6 +140,7 @@ where
                 scroll: 0,
                 most_recent_num_rows: None,
             },
+            scrolled: ui::ScrollSteps::default(),
             palette: Palette::default(),
 
             hook,
@@ -338,9 +342,17 @@ impl StandardApplet for CodeEditorApplet {
 
                         self.view_offset.most_recent_num_rows = Some(height);
                     }
-                    sonamu_ui::ui_event::UIEvent::Mouse(_) => {
-                        log::debug!("TODO");
+                    sonamu_ui::ui_event::UIEvent::Mouse(MouseEvent {
+                        kind: MouseEventKind::Scroll { delta, v120, .. },
+                        ..
+                    }) => {
+                        let steps = self.scrolled.add(delta, v120) as isize;
+                        let shown = self.view_offset.most_recent_num_rows.unwrap_or(0);
+                        let max = ui::max_scroll(self.buffer.len_lines(), shown);
+                        let offset = &mut self.view_offset;
+                        offset.scroll = offset.scroll.saturating_add_signed(steps).min(max);
                     }
+                    sonamu_ui::ui_event::UIEvent::Mouse(_) => {}
                 }
 
                 self.hook.damage_window();
@@ -428,10 +440,18 @@ impl StandardApplet for CodeEditorApplet {
         } else {
             content.contained_element()
         };
+        let bar = ui::grid_scrollbar(
+            &self.palette,
+            width,
+            0,
+            self.view_offset.scroll,
+            height,
+            self.buffer.len_lines(),
+        );
         UITree::new_styled(
-            UIElement::Backgrounded(sonamu_sttk::ui::bg(&self.palette)),
+            UIElement::Backgrounded(ui::bg(&self.palette)),
             Style::full_size(),
-            vec![content],
+            std::iter::once(content).chain(bar).collect(),
         )
 
         // UIElement::Text(vec![

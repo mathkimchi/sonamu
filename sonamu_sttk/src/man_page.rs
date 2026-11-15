@@ -88,8 +88,6 @@ const MAN_PAGE: &[ManSection] = &[
 
 /// Below this, keys go above their descriptions instead of beside them
 const MIN_DESCRIPTION_WIDTH: usize = 24;
-/// Rows per scroll step
-const SCROLL_STEP: isize = 3;
 
 /// A row of the list: keys (if any) and text
 struct Row {
@@ -238,7 +236,7 @@ impl StandardApplet for ManPageApplet {
             UIEvent::Mouse(mouse_event) => {
                 if let MouseEventKind::Scroll { delta, v120, .. } = mouse_event.kind {
                     let steps = self.scrolled.add(delta, v120) as isize;
-                    self.scroll_by(steps * SCROLL_STEP);
+                    self.scroll_by(steps);
                 }
             }
             UIEvent::WindowResized(size) => {
@@ -269,7 +267,8 @@ impl StandardApplet for ManPageApplet {
             put(&mut grid, 0, column, note, self.palette.inactive);
         }
 
-        for (row, line) in (1..height).zip(Self::rows(width).iter().skip(self.scroll)) {
+        let rows = Self::rows(width);
+        for (row, line) in (1..height).zip(rows.iter().skip(self.scroll)) {
             if line.section {
                 put(&mut grid, row, 1, &line.text, self.palette.accent);
             } else {
@@ -278,7 +277,8 @@ impl StandardApplet for ManPageApplet {
             }
         }
 
-        grid.element().into()
+        let bar = ui::grid_scrollbar(&self.palette, width, 1, self.scroll, height - 1, rows.len());
+        UITree::new(grid.element(), bar.into_iter().collect())
     }
 
     fn get_treeview(&self) -> WorldTree<String> {

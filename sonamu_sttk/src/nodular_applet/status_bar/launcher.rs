@@ -96,13 +96,10 @@ impl Launcher {
                 items.push(lines.icon(line, 0, icon));
             }
         }
-        items.extend(self.list.bar(
-            &lines,
-            [1, COLUMNS, 1],
-            matches.len(),
-            SHOWN,
-            palette.inactive,
-        ));
+        items.extend(
+            self.list
+                .bar(&lines, [1, COLUMNS, 1], matches.len(), SHOWN, palette),
+        );
         items
     }
 

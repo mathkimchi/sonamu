@@ -3,7 +3,7 @@
 //! Rows are placed at a fixed height, so the root can hit-test them itself.
 
 use super::node_tree::INACTIVE_MARK;
-use crate::ui::{self, BTN_LEFT, BTN_RIGHT, Rows, rect, row_height, with_opacity};
+use crate::ui::{self, BTN_LEFT, BTN_RIGHT, INDENT, PAD, Rows, rect, row_height, with_opacity};
 use sonamu_common::{
     sap::packets::{NewApplet, NodeAction, SpawnPosition},
     settings::{self, Settings},
@@ -21,8 +21,6 @@ use sonamu_ui::{
 };
 
 const TOP_PAD: f32 = 8.0;
-const LEFT_PAD: f32 = 16.0;
-const INDENT: f32 = 32.0;
 const MARKER_WIDTH: f32 = 6.0;
 /// The clickable width of a row's `▾`/`▸`, from the start of its label
 fn triangle_width() -> f32 {
@@ -514,7 +512,7 @@ impl TreeviewPointer {
             } => {
                 if let Some(index) = row {
                     let row = &rows[index];
-                    let text_left = f64::from(LEFT_PAD + row.depth as f32 * INDENT);
+                    let text_left = f64::from(PAD + row.depth as f32 * INDENT);
                     self.press = Some(Press {
                         path: row.path.clone(),
                         position: event.position,
@@ -588,7 +586,7 @@ impl TreeviewPointer {
                 },
             )
         } else {
-            let line_left = LEFT_PAD + row.depth as f32 * INDENT;
+            let line_left = PAD + row.depth as f32 * INDENT;
             let line_top = if self.zone == DropZone::Top {
                 0.0
             } else {
@@ -621,7 +619,7 @@ impl TreeviewPointer {
         for level in 0..row.depth {
             parts.push(rect(
                 ui::guide(&settings::get().palette),
-                [LEFT_PAD + level as f32 * INDENT + INDENT / 2.0 - 1.0, 0.0],
+                [PAD + level as f32 * INDENT + INDENT / 2.0 - 1.0, 0.0],
                 [2.0, row_height()],
             ));
         }
@@ -638,7 +636,7 @@ impl TreeviewPointer {
             ));
         }
 
-        let text_left = LEFT_PAD + row.depth as f32 * INDENT;
+        let text_left = PAD + row.depth as f32 * INDENT;
         let rows = self.rows();
         // like a browser tab's, only on the hovered row
         let shows_close = row.closable && is_hovered && dragging.is_none();
@@ -720,6 +718,15 @@ impl TreeviewPointer {
             })
             .collect();
 
+        let shown = shown_rows(height);
+        children.extend(ui::scrollbar(
+            &settings.palette,
+            ui::scrollbar_x(width),
+            [TOP_PAD, shown as f32 * row_height()],
+            self.scroll,
+            shown,
+            rows.len(),
+        ));
         if let Some(menu) = &self.menu {
             children.push(menu.render([width, height]));
         }

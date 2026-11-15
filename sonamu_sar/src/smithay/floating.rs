@@ -14,10 +14,8 @@ use smithay::{
 };
 use sonamu_ui::{
     ui_element::{Cursor, CursorIcon, Style, UITree},
-    ui_event::{MouseEvent, MouseEventKind},
+    ui_event::{BTN_LEFT, MouseEvent, MouseEventKind},
 };
-
-const BTN_LEFT: u32 = 0x110;
 
 /// A floating toplevel, centered on its screen (read when drawn: it may map before the screens are known)
 /// and moved by `offset` (Super+drag)
