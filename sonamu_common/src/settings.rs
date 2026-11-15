@@ -235,11 +235,18 @@ pub fn config_path(path: &Path, dir: &Path) -> PathBuf {
     }
 }
 
-/// `path` as a setting writes it (`config_path` reverses it): relative inside the config dir `dir`, else `~/` inside
+/// `path` as a setting writes it (`config_path` reverses it): relative inside the config dir `dir` (also through
+/// symlinks), else `~/` inside
 /// the home dir, else as it is
 #[must_use]
 pub fn config_relative(path: &Path, dir: &Path) -> PathBuf {
     if let Ok(inside) = path.strip_prefix(dir) {
+        return inside.to_owned();
+    }
+    // the config dir may be a symlink (eg to a dotfiles repo), reached either way
+    if let (Ok(path), Ok(dir)) = (fs::canonicalize(path), fs::canonicalize(dir))
+        && let Ok(inside) = path.strip_prefix(dir)
+    {
         return inside.to_owned();
     }
     match std::env::var_os("HOME").and_then(|home| path.strip_prefix(home).ok().map(Path::to_owned))
@@ -1162,6 +1169,19 @@ mod tests {
             config_path(Path::new("~/a.png"), dir),
             Path::new(&home).join("a.png")
         );
+        // through a symlinked config dir
+        let real = std::env::temp_dir().join(format!("sonamu-real-{}", std::process::id()));
+        let link = real.with_extension("link");
+        let _ = (fs::remove_dir_all(&real), fs::remove_file(&link));
+        fs::create_dir_all(real.join("w")).unwrap();
+        fs::write(real.join("w/a.png"), "").unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(
+            config_relative(&real.join("w/a.png"), &link),
+            PathBuf::from("w/a.png")
+        );
+        fs::remove_file(&link).unwrap();
+        fs::remove_dir_all(&real).unwrap();
         // config_relative reverses it
         for written in ["w/sine.glsl", "/abs.png", "~/a.png"] {
             let path = config_path(Path::new(written), dir);
