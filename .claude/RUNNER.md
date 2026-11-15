@@ -1,12 +1,39 @@
-# Runner features
+# Runner (sar)
 
-Runner-only unless noted; the tree doesn't know about them.
+Runner-only unless noted; the tree doesn't know about these.
 
-- Fullscreen (#121, `SmithayState::fullscreen`): a wl toplevel that asks is drawn over the whole window (only overlay layers above it) and gets the mouse, until it asks to stop or Sonamu focus leaves its tile (`focus_wl_keyboard`).
-- Floating toplevels (#148, like niri): one with a parent or a fixed size (min == max, eg GTK password prompts) isn't in the tree. Decided when it maps (first buffer; GTK sets the size only then), which is also when tiles register. `SmithayState::floating` (`smithay/floating.rs`): centered on the screen under the pointer, drawn over the layers, takes the keyboard on map and click, hit-tested and focused like a layer surface (`layer_focus`). Super+left drag moves (and raises) one, with a grabbing cursor (`floating_drag_mouse`; `AppletRunner::super_held` from key events).
-- Touchpad pinches (#152, DRM only) go to the wl pointer's focus (`AppletRunner::pinch`, `zwp_pointer_gestures_v1`), eg Firefox's pinch zoom; with none when one begins (`pinch_to_root`), to the root as `UIEvent::Pinch`, which scales the zoom-out view (`NodeTree::zoom_pinch`). Swipes and holds aren't forwarded.
-- Magnifier (KDE's zoom): Ctrl+Super+scroll (`MouseEventKind::Scroll::logo`) sets `AppletRunner::magnification`; `redraw_ui` wraps the whole scene in `UIElement::Scaled` around the pointer (proportional tracking: the spot under the pointer doesn't move, so input isn't remapped; tile areas are unmagnified for smithay). Cursor: DRM's software cursor scales with it (`PrimitiveScene::cursor_scale`); in a window the host's cursor doesn't. Huge text can fill glyphon's atlas: that text is skipped (logged). Multi-screen: scales the whole window, not per screen.
-- Socket: other processes reach the runner over `$SONAMU_SOCKET` (`sonamu_common::msg`, `sonamu_sar/src/msg_socket.rs`): `sonamu-msg open <applet> [args]` becomes `StandardEvent::Open` to the root, which places that registered applet like a new wl surface: into the focused applet if focus is inside it (`StandardApplet::take_open`, else `NodeRequest::Open` back), otherwise as the focused node's child (`NodeHolder::open`). `assets/sonamu-file-manager.desktop` makes the file manager the default for folders. `sonamu-msg eval '<luau>'` runs Luau like the buffer line, `sonamu-msg subscribe` streams events (`COMMANDS.md`).
-- No Xwayland: the runner sets `XDG_SESSION_TYPE=wayland`, `ELECTRON_OZONE_PLATFORM_HINT=auto` and `NIXOS_OZONE_WL=1` in its own env at start, so clients inherit them (and on the tty exports them to D-Bus with `WAYLAND_DISPLAY`). `WAYLAND_DISPLAY` can't be set that way (see `AppletRunner::run`), so each launch sets it from `SONAMU_WAYLAND_DISPLAY`.
-- Clipboard: native applets paste with `sonamu_common::clipboard::paste` (not `arboard`, which reaches the host's or no compositor): it sends the runner a pipe, and `SmithayState::write_clipboard` has the selection's owner (a wl client, incl. data-control like `wl-copy`) write into it; 1 s timeout. `clipboard::copy(text)` makes the runner the selection's owner (`SmithayState::set_clipboard`, `SelectionUserData` = the text, written from a thread in `send_selection`); pasting that back reads it directly. `clipboard::Target::Primary` (`copy_primary`/`paste_primary`): the same for the primary selection. Luau: `clipboard.copy`/`paste` (`{primary = true}`). Prompts (hub, buffer line) copy their last output with Ctrl+Shift+C; the code editor has no selection to copy yet.
-- Desktop notifications (freedesktop D-Bus; the status bar serves them, `STATUS_BAR.md`; while another server like DMS has the name, it waits in the bus's queue): `sonamu_common::notification::Replacing`, sent with `busctl`; used by settings reloads and low battery warnings (`sonamu_sar::battery`, 20% then a critical one at 10%, polled every 30 s). Keep tests from sending them.
+## Wayland
+
+- Scale: only wl clients are scaled; Sonamu's UI is physical px. Logical space = physical / scale. Display info comes from the UI thread as `DisplayNotification::Info`.
+- Keyboard focus follows Sonamu focus: the root sends `StandardRequest::WlKeyboardFocus(Option<WlSurfaceId>)` after each batch (`StandardApplet::focused_wl_surface`). Clipboard, IME, pointer locks follow. Only the focused toplevel is `Activated`.
+- Toplevels register on map (first buffer, `register_toplevel`), so app id and fixed size are known.
+- Window geometry is the tile (#55, like niri): drawn at `-window_geometry.loc`, `Tiled*` states, clipped to geometry.
+- Event times are CLOCK_MONOTONIC ms (`now_input_time`; libinput's own for its events): Firefox's pan gestures rely on it. Touchpad scroll stop → `wl_pointer.axis_stop`.
+- IME text and relative motion are `DisplayNotification`s, not `UIEvent`s (`UIEvent` must stay `Copy`).
+- Fullscreen (#121, `SmithayState::fullscreen`): covers its screen (overlay layers above), gets the mouse, until it stops or focus leaves its tile (`focus_wl_keyboard`).
+- Floating (#148, `smithay/floating.rs`): toplevels with a parent or min == max size. Centered on the pointer's screen, over layers, focused like a layer surface (`layer_focus`). Super+left drag moves (`floating_drag_mouse`, `super_held`).
+- Pinch (#152, DRM): to the wl pointer focus (`AppletRunner::pinch`, `zwp_pointer_gestures_v1`); with none, to the root as `UIEvent::Pinch` (`NodeTree::zoom_pinch`). Swipes/holds aren't forwarded.
+- Magnifier: Ctrl+Super+scroll sets `magnification`; `redraw_ui` wraps the scene in `UIElement::Scaled` around the pointer (input not remapped). DRM cursor scales (`cursor_scale`). Huge text overflowing glyphon's atlas is skipped.
+- No Xwayland: sets `XDG_SESSION_TYPE=wayland`, `ELECTRON_OZONE_PLATFORM_HINT=auto`, `NIXOS_OZONE_WL=1` at start (exported to D-Bus on tty). `WAYLAND_DISPLAY` can't be set that way (`AppletRunner::run`): each launch sets it from `SONAMU_WAYLAND_DISPLAY`.
+- Gotcha: a client whose buffer fills (eg resize flood) is dropped with only `ConnectionClosed` in the log.
+
+## Socket (`$SONAMU_SOCKET`, `sonamu_common::msg`, `msg_socket.rs`)
+
+- `$XDG_RUNTIME_DIR/sonamu-<wl socket>.sock`. `sonamu-msg open <applet> [args]` → `StandardEvent::Open` to the root, placed like a new wl surface: into the focused applet (`take_open`) or as the focused node's child (`NodeHolder::open`). Relative path args are made absolute. Exit 1 if unreachable (xdg-open falls back).
+- `eval`, `subscribe`: COMMANDS.md. `assets/sonamu-file-manager.desktop`: default folder handler.
+
+## Clipboard
+
+Native applets use `sonamu_common::clipboard` (not `arboard`: wrong compositor). `paste`: runner pipe, the selection owner writes (`SmithayState::write_clipboard`, 1 s timeout). `copy`: runner owns the selection (`set_clipboard`). `Target::Primary` likewise. Luau `clipboard.copy/paste`. Prompts copy last output with Ctrl+Shift+C.
+
+## Notifications
+
+`sonamu_common::notification::Replacing` via `busctl`, served by the status bar. Used by settings reloads and battery (`sonamu_sar::battery`: 20%, critical 10%, polled 30 s). Keep tests from sending them.
+
+## Rendering
+
+- `TextCache` (`rendering.rs`): shaped buffers by (text, size); `Family::Monospace` resolved to a name once (scanning all fonts per word was the main CPU cost).
+- Elements are scissored to their clip (`draw_primitive_scene`); `Clip` keeps the pane's rounded rect apart from the cut `area`. `DisplayAreaPx` is signed. Text is only cut to rects.
+- Colors are sRGB everywhere (shaders decode).
+- Hidden tiles get no frame callbacks (`Suspended`). Surface textures cached per commit (`TextureCache`). linux-dmabuf imported as `VkImage` (`smithay/dmabuf.rs`, `sonamu_ui::dmabuf`).
+- `atlas.trim()` is never called (glyph atlas only grows).

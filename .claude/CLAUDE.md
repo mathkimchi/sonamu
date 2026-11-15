@@ -21,14 +21,13 @@ Rust Wayland compositor: native applets and wl clients in one recursive tree.
 
 # Docs
 
-- Runner features (fullscreen, floating, pinch, magnifier, socket/`sonamu-msg`, env, clipboard, notifications): `RUNNER.md`
-- World tree, paths, focus, selectors, ownership, projects, screens: `WORLD_TREE.md`
-- Sessions (save/restore): `SESSIONS.md`
-- Settings: `SETTINGS.md`
-- Status bar: `STATUS_BAR.md`
+- Runner (Wayland, socket, clipboard, notifications, rendering): `RUNNER.md`
+- World tree, ownership, pluck/place, projects, focus, traversal, zoom-out, treeview, screens: `WORLD_TREE.md`
+- Glossary: `CONTEXT.md`
+- Sessions: `SESSIONS.md`; settings: `SETTINGS.md`; status bar: `STATUS_BAR.md`
 - Commands, Luau: `COMMANDS.md`
-- Native applet UI kit (`sonamu_sttk::ui`): `UI_KIT.md`
-- Headless testing (input, screenshots): `TESTING.md`
+- Native applet UI kit: `UI_KIT.md`
+- Headless testing: `TESTING.md`
 
 # Rules
 
