@@ -35,25 +35,45 @@ fn star_uv(grid_coord: vec2f, time: f32) -> vec2f {
 
     let shifted_time = time + 100;
 
-    // 6.28 is tau, 0.8 an attempt to avoid clipping at borders
-    return vec2f(sin(shifted_time * 6.28 / periods.x), sin(shifted_time * 6.28 / periods.y)) * 0.8;
+    // 6.28 is tau, 1.2 to allow more flexibility
+    return vec2f(sin(shifted_time * 6.28 / periods.x), sin(shifted_time * 6.28 / periods.y)) * 1.2;
 }
 
 fn main_image(position: vec2f) -> vec4f {
     // -1 to 1
     let uv = (position - wallpaper.resolution * 0.5) / wallpaper.resolution.y;
 
-    let grid_scale = 10.0;
+    let grid_scale = 5.0;
+    let drift_vel = vec2f(0, -0.5);
+    let pos = grid_scale * uv - drift_vel * wallpaper.time;
     // -1 to 1
-    let grid_uv = 2 * fract(uv * grid_scale) - 1;
+    let grid_uv = 2 * fract(pos) - 1;
     // integer
-    let grid_coord = floor(uv * grid_scale);
+    let grid_coord = floor(pos);
 
-    let highlight_color = vec3(0.1, 1, 0.1);
+    let highlight_color = vec3(0.4, 1, 0.4);
 
-    let wave = 0.4 * sin(uv.x * 12.0 + wallpaper.time);
-    // return vec4<f32>(0.0, 0.005 / abs(uv.y - wave), 0.0, 1.0);
-    // return vec4f(hash22(grid_coord), 0, 1);
-    // return vec4f(grid_uv, 0,1);
-    return vec4f(highlight_color * smoothstep(0, 1, 0.05/distance(grid_uv, star_uv(grid_coord, wallpaper.time))), 1);
+    var intensity = 0.;
+
+    // add this cell's and neighboring stars
+    for (var neighbor_x = -1; neighbor_x <= 1; neighbor_x++) {
+        for (var neighbor_y = -1; neighbor_y <= 1; neighbor_y++) {
+            let neighbor_offset = vec2f(vec2i(neighbor_x, neighbor_y));
+            let neighbor_coord = grid_coord + neighbor_offset;
+
+            // relative to our grid cell's uv
+            // Need to + 2*neighbor offset because cells are 2 apart 
+            let star_pos = star_uv(neighbor_coord, wallpaper.time) + 2 * neighbor_offset;
+
+            let dist_to_star = distance(grid_uv, star_pos);
+
+            // reciprocal is good for making it look glowy
+            intensity += smoothstep(0, 1, 0.05/dist_to_star);
+        }
+    }
+
+    // add lines
+    // for 
+
+    return vec4f(highlight_color * intensity, 1);
 }

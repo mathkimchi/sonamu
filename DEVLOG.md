@@ -10507,3 +10507,11 @@ But swappy sucks and didn't actually save any of them.
 Been coding agentically, but I want to hand-write a cool wallpaper shader.
 I'm going to use https://youtu.be/3CycKKJiwis as my starting point.
 I'll make Claude add support for wgsl tho.
+
+2026-11-15 04:27PM
+
+Bro, I've been just ooga booga-ing for 2 hours,
+but it's fun so I'm happy.
+
+I made it draw moving dots slowly drifting downwards.
+It's more like falling leaves or snow than stars now.
