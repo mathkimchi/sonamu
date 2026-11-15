@@ -1,5 +1,6 @@
 use crate::{
     msg_socket::MsgSocket, pluck_place::PluckPlace, smithay::SmithayState, ui_handle::UIHandle,
+    wallpaper::Wallpaper,
 };
 use calloop::{EventLoop, LoopHandle, LoopSignal};
 use sonamu_common::clipboard::{self, Request};
@@ -46,6 +47,8 @@ pub struct AppletRunner {
     pub(crate) display_screens: Option<Vec<[u32; 4]>>,
     /// Set by damage; the redraw happens once per event loop iteration
     pub(crate) needs_redraw: bool,
+    /// The setting `wallpaper`, drawn under everything
+    wallpaper: Wallpaper,
     /// What the display was last asked to do with the pointer
     pointer_grab: PointerGrab,
     /// Stops `run` once the display closes
@@ -104,6 +107,7 @@ impl AppletRunner {
             },
             display_screens: None,
             needs_redraw: true,
+            wallpaper: Wallpaper::new(),
             pointer_grab: PointerGrab::None,
             loop_signal,
             plucked: None,
@@ -193,6 +197,7 @@ impl AppletRunner {
         if let Some(msg_socket) = msg_socket {
             msg_socket.insert(&event_loop.handle());
         }
+        runner.follow_wallpaper(&event_loop.handle());
         // native applets' paste and copy (`sonamu_common::clipboard`)
         let (clipboard, clipboard_requests) = calloop::channel::channel();
         event_loop
@@ -222,6 +227,39 @@ impl AppletRunner {
                 // events sent outside client dispatch (eg frame callbacks after a present)
                 // only reach clients once flushed
                 runner.smithay_state.flush_clients();
+            })
+            .unwrap();
+    }
+
+    /// Keeps the wallpaper in sync with the setting, and redraws a shader one at its frame rate (not under a
+    /// fullscreen toplevel, which covers it)
+    fn follow_wallpaper(&mut self, handle: &LoopHandle<'static, Self>) {
+        self.wallpaper.update(
+            &sonamu_common::settings::get().wallpaper,
+            &self.ui_handle.device,
+        );
+        let (settings_tx, settings_rx) = calloop::channel::channel();
+        sonamu_common::settings::subscribe(settings_tx);
+        handle
+            .insert_source(settings_rx, |_, (), runner| {
+                runner.wallpaper.update(
+                    &sonamu_common::settings::get().wallpaper,
+                    &runner.ui_handle.device,
+                );
+                runner.needs_redraw = true;
+            })
+            .unwrap();
+        handle
+            .insert_source(calloop::timer::Timer::immediate(), |_, (), runner| {
+                runner.wallpaper.reload_changed(&runner.ui_handle.device);
+                let interval = runner.wallpaper.frame_interval();
+                if interval.is_some() && runner.smithay_state.fullscreen().is_none() {
+                    runner.needs_redraw = true;
+                }
+                // an idle check for a changed shader file otherwise
+                calloop::timer::TimeoutAction::ToDuration(
+                    interval.unwrap_or(std::time::Duration::from_secs(1)),
+                )
             })
             .unwrap();
     }
@@ -632,11 +670,17 @@ impl AppletRunner {
             if self.smithay_state.fullscreen().is_some() && self.smithay_state.screens.len() <= 1 {
                 Vec::new()
             } else {
-                let mut layers = self.smithay_state.layer_surface_elements(
+                let size = [self.window_size.width, self.window_size.height];
+                let mut layers: Vec<UITree> = self
+                    .wallpaper
+                    .element(size, &self.ui_handle.device, &self.ui_handle.queue)
+                    .into_iter()
+                    .collect();
+                layers.extend(self.smithay_state.layer_surface_elements(
                     true,
                     &self.ui_handle.device,
                     &self.ui_handle.queue,
-                );
+                ));
                 // over the whole window; its screens leave the exclusive zones free
                 layers.push(UITree::new_container_styled(
                     Style::absolute(

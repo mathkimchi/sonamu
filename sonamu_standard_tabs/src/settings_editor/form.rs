@@ -17,6 +17,8 @@ pub struct Field {
     pub label: String,
     /// The schema's description
     pub help: String,
+    /// The schema's default, for a field the settings can leave out (eg a shader wallpaper's `fps`)
+    pub default: Option<Value>,
     pub kind: FieldKind,
 }
 
@@ -42,12 +44,16 @@ pub enum FieldKind {
     TextList,
     /// Shown as JSON, edited in `settings.json`
     ReadOnly,
+    /// One of several kinds (eg `wallpaper`: none, color, image, shader), each maybe with its own fields; those of
+    /// the current kind follow this field. Each kind's name, and the setting's value when switched to it
+    Variant(Vec<(String, Value)>),
 }
 
 /// The fields of `schema` (`settings::schema()`): every color in "Colors" first, then a section per object setting
 /// and "General" for the rest, in the schema's order. `keybinds` has its own section, not here.
+/// `value` gives a setting's current value, which picks a variant's fields.
 #[must_use]
-pub fn sections(schema: &Value) -> Vec<Section> {
+pub fn sections(schema: &Value, value: &dyn Fn(&[String]) -> Value) -> Vec<Section> {
     let defs = &schema["$defs"];
     let mut colors = Vec::new();
     let mut sections: Vec<Section> = Vec::new();
@@ -78,6 +84,13 @@ pub fn sections(schema: &Value) -> Vec<Section> {
             .into_iter()
             .partition(|field| field.kind == FieldKind::Color);
         colors.extend(color_fields);
+        let fields: Vec<Field> = fields
+            .into_iter()
+            .flat_map(|field| {
+                let current = with_variant_fields(&field, property, defs, value);
+                std::iter::once(field).chain(current)
+            })
+            .collect();
         if fields.is_empty() {
             continue;
         }
@@ -98,6 +111,101 @@ pub fn sections(schema: &Value) -> Vec<Section> {
     sections
 }
 
+/// A variant field's current kind's fields (none for other fields)
+fn with_variant_fields(
+    field: &Field,
+    property: &Value,
+    defs: &Value,
+    value: &dyn Fn(&[String]) -> Value,
+) -> Vec<Field> {
+    if !matches!(field.kind, FieldKind::Variant(_)) {
+        return Vec::new();
+    }
+    let current = value(&field.path);
+    let name = current.as_str().map(str::to_owned).or_else(|| {
+        current
+            .as_object()
+            .and_then(|map| map.keys().next().cloned())
+    });
+    let Some((name, Some(schema))) = name.and_then(|name| {
+        variants(resolve(property, defs))?
+            .into_iter()
+            .find(|(variant, _)| *variant == name)
+    }) else {
+        return Vec::new();
+    };
+    let path: Vec<String> = field.path.iter().cloned().chain([name.clone()]).collect();
+    if let Some(inner) = resolve(schema, defs)["properties"].as_object() {
+        return inner
+            .iter()
+            .map(|(key, inner_property)| {
+                let mut inner_path = path.clone();
+                inner_path.push(key.clone());
+                self::field(inner_path, inner_property, defs)
+            })
+            .collect();
+    }
+    let mut only = self::field(path, schema, defs);
+    only.label = label(&name);
+    vec![only]
+}
+
+/// A variant schema's kinds: a `oneOf` of `const` strings and objects with one property (named by it, with its
+/// schema)
+fn variants(schema: &Value) -> Option<Vec<(String, Option<&Value>)>> {
+    schema["oneOf"]
+        .as_array()?
+        .iter()
+        .map(
+            |option| match (option["const"].as_str(), option["properties"].as_object()) {
+                (Some(name), _) => Some((name.to_owned(), None)),
+                (None, Some(properties)) if properties.len() == 1 => {
+                    let (name, schema) = properties.iter().next()?;
+                    Some((name.clone(), Some(schema)))
+                }
+                _ => None,
+            },
+        )
+        .collect()
+}
+
+/// The value a variant setting takes when switched to kind `name`: its required fields at their simplest
+#[must_use]
+pub fn variant_value(schema: &Value, defs: &Value, name: &str) -> Value {
+    match variants(resolve(schema, defs))
+        .and_then(|variants| variants.into_iter().find(|(variant, _)| variant == name))
+    {
+        Some((_, Some(inner))) => Value::Object(serde_json::Map::from_iter([(
+            name.to_owned(),
+            simplest(inner, defs),
+        )])),
+        _ => Value::from(name),
+    }
+}
+
+/// The simplest valid value of `schema`: required fields only, empty strings, black, minimums
+fn simplest(schema: &Value, defs: &Value) -> Value {
+    let schema = resolve(schema, defs);
+    if kind(schema, defs) == FieldKind::Color {
+        return Value::from("#000000");
+    }
+    match schema["type"].as_str() {
+        Some("object") => {
+            let required = schema["required"].as_array().cloned().unwrap_or_default();
+            Value::Object(
+                required
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|key| (key.to_owned(), simplest(&schema["properties"][key], defs)))
+                    .collect(),
+            )
+        }
+        Some("number" | "integer") => schema["minimum"].clone(),
+        Some("boolean") => Value::Bool(false),
+        _ => Value::from(""),
+    }
+}
+
 fn field(path: Vec<String>, property: &Value, defs: &Value) -> Field {
     let resolved = resolve(property, defs);
     let help = property["description"]
@@ -111,10 +219,15 @@ fn field(path: Vec<String>, property: &Value, defs: &Value) -> Field {
     } else {
         label(path.last().map_or("", String::as_str))
     };
+    let default = property
+        .get("default")
+        .or_else(|| resolved.get("default"))
+        .cloned();
     Field {
         path,
         label,
         help,
+        default,
         kind,
     }
 }
@@ -128,6 +241,17 @@ fn kind(schema: &Value, defs: &Value) -> FieldKind {
     }
     if let Some(options) = choices(schema) {
         return FieldKind::Choice(options);
+    }
+    if let Some(variants) = variants(schema) {
+        return FieldKind::Variant(
+            variants
+                .into_iter()
+                .map(|(name, _)| {
+                    let value = variant_value(schema, defs, &name);
+                    (name, value)
+                })
+                .collect(),
+        );
     }
     match &schema["type"] {
         Value::String(kind) => match kind.as_str() {
@@ -194,8 +318,92 @@ mod tests {
     use super::*;
     use sonamu_common::{settings, settings_file};
 
+    /// The defaults' value at a path
+    fn defaults(path: &[String]) -> Value {
+        let keys: Vec<&str> = path.iter().map(String::as_str).collect();
+        settings_file::value_at(&settings_file::defaults(), &keys)
+    }
+
+    fn fields_with(wallpaper: Value) -> Vec<Field> {
+        let value = move |path: &[String]| {
+            if path.first().is_some_and(|key| key == "wallpaper") {
+                let keys: Vec<&str> = path[1..].iter().map(String::as_str).collect();
+                keys.iter()
+                    .try_fold(&wallpaper, |at, key| at.get(key))
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            } else {
+                defaults(path)
+            }
+        };
+        sections(&settings::schema(), &value)
+            .into_iter()
+            .flat_map(|section| section.fields)
+            .collect()
+    }
+
+    #[test]
+    fn variants_choose_then_show_their_fields() {
+        let paths = |fields: &[Field]| -> Vec<String> {
+            fields
+                .iter()
+                .map(|field| field.path.join("."))
+                .filter(|path| path.starts_with("wallpaper"))
+                .collect()
+        };
+        let none = fields_with(serde_json::json!("none"));
+        assert_eq!(paths(&none), ["wallpaper"]);
+        let kind = none
+            .iter()
+            .find(|field| field.path == ["wallpaper"])
+            .unwrap();
+        let FieldKind::Variant(variants) = &kind.kind else {
+            panic!("not a variant: {:?}", kind.kind);
+        };
+        let names: Vec<&str> = variants.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["none", "color", "image", "shader"]);
+        let shader = fields_with(serde_json::json!({"shader": {"path": "x"}}));
+        assert_eq!(
+            paths(&shader),
+            [
+                "wallpaper",
+                "wallpaper.shader.path",
+                "wallpaper.shader.scale",
+                "wallpaper.shader.fps"
+            ]
+        );
+        let color = fields_with(serde_json::json!({"color": "#102030"}));
+        let field = color
+            .iter()
+            .find(|field| field.path.join(".") == "wallpaper.color")
+            .unwrap();
+        assert_eq!(
+            (field.kind.clone(), field.label.as_str()),
+            (FieldKind::Color, "Color")
+        );
+    }
+
+    #[test]
+    fn variant_defaults() {
+        let schema = settings::schema();
+        let wallpaper = &schema["$defs"]["Wallpaper"];
+        let defs = &schema["$defs"];
+        assert_eq!(
+            variant_value(wallpaper, defs, "none"),
+            serde_json::json!("none")
+        );
+        assert_eq!(
+            variant_value(wallpaper, defs, "color"),
+            serde_json::json!({"color": "#000000"})
+        );
+        assert_eq!(
+            variant_value(wallpaper, defs, "shader"),
+            serde_json::json!({"shader": {"path": ""}})
+        );
+    }
+
     fn field(path: &str) -> Field {
-        sections(&settings::schema())
+        sections(&settings::schema(), &defaults)
             .into_iter()
             .flat_map(|section| section.fields)
             .find(|field| field.path.join(".") == path)
@@ -223,7 +431,7 @@ mod tests {
     fn every_setting_has_a_field() {
         let mut paths = Vec::new();
         leaves(&settings_file::defaults(), "", &mut paths);
-        let fields: Vec<String> = sections(&settings::schema())
+        let fields: Vec<String> = sections(&settings::schema(), &defaults)
             .into_iter()
             .flat_map(|section| section.fields)
             .map(|field| field.path.join("."))
@@ -280,7 +488,7 @@ mod tests {
 
     #[test]
     fn colors_first() {
-        let sections = sections(&settings::schema());
+        let sections = sections(&settings::schema(), &defaults);
         assert_eq!(sections[0].title, "Colors");
         assert_eq!(sections[0].fields.len(), 7);
         assert!(sections.iter().all(|section| !section.fields.is_empty()));

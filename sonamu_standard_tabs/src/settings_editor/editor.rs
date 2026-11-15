@@ -33,9 +33,10 @@ impl Editor {
             user: Value::Object(serde_json::Map::new()),
             baseline,
             source,
-            sections: sections(&settings::schema()),
+            sections: Vec::new(),
         };
         editor.reload();
+        editor.refresh();
         editor
     }
 
@@ -52,7 +53,38 @@ impl Editor {
     pub fn reload(&mut self) {
         if let Ok(user) = self.read() {
             self.user = user;
+            self.refresh();
         }
+    }
+
+    /// The fields again, for the current values (a variant's fields follow its kind)
+    fn refresh(&mut self) {
+        let sections = sections(&settings::schema(), &|path| self.value(path));
+        self.sections = sections;
+    }
+
+    /// A field's value: the setting's, else the schema's default for it
+    #[must_use]
+    pub fn field_value(&self, field: &Field) -> Value {
+        match self.value(&field.path) {
+            Value::Null => field.default.clone().unwrap_or(Value::Null),
+            value => value,
+        }
+    }
+
+    /// Switches a variant field to its kind `name`
+    pub fn commit_variant(&mut self, field: &Field, name: &str) -> Result<(), String> {
+        let FieldKind::Variant(variants) = &field.kind else {
+            return Err(format!("{} has no kinds", field.label));
+        };
+        let (_, value) = variants
+            .iter()
+            .find(|(variant, _)| variant == name)
+            .ok_or_else(|| format!("{} has no kind {name}", field.label))?;
+        self.commit(
+            std::slice::from_ref(&field.path),
+            std::slice::from_ref(value),
+        )
     }
 
     /// The setting at `path`: the user's, else the default
@@ -72,6 +104,7 @@ impl Editor {
         settings_file::check(&user).map_err(|err| err.to_string())?;
         settings_file::write(&path, Some(&user)).map_err(|err| err.to_string())?;
         self.user = user;
+        self.refresh();
         Ok(())
     }
 
@@ -111,6 +144,7 @@ impl Editor {
         let baseline = self.baseline.clone()?;
         settings_file::write(&path, baseline.as_ref()).map_err(|err| err.to_string())?;
         self.user = baseline.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+        self.refresh();
         Ok(())
     }
 
@@ -307,6 +341,45 @@ mod tests {
         assert_eq!(
             file(&dir),
             json!({"keybinds": {"Keybinds": [{"key": "x", "shell": "true"}]}, "gap": 3.0})
+        );
+    }
+
+    #[test]
+    fn switching_kind_writes_it_and_shows_its_fields() {
+        let dir = temp_dir("variant");
+        let mut editor = Editor::open(&dir);
+        let wallpaper = field(&editor, "wallpaper");
+        editor.commit_variant(&wallpaper, "color").unwrap();
+        assert_eq!(file(&dir), json!({"wallpaper": {"color": "#000000"}}));
+        editor
+            .commit_text(&field(&editor, "wallpaper.color"), "#102030")
+            .unwrap();
+        assert_eq!(file(&dir), json!({"wallpaper": {"color": "#102030"}}));
+        editor.commit_variant(&wallpaper, "none").unwrap();
+        assert_eq!(file(&dir), json!({}));
+    }
+
+    /// A field left out of a variant's value shows the schema's default (eg a shader's fps)
+    #[test]
+    fn field_values_fall_back_to_schema_defaults() {
+        let dir = temp_dir("defaults");
+        fs::write(
+            dir.join("settings.json"),
+            r#"{"wallpaper": {"shader": {"path": "x.glsl"}}}"#,
+        )
+        .unwrap();
+        let editor = Editor::open(&dir);
+        assert_eq!(
+            editor.field_value(&field(&editor, "wallpaper.shader.fps")),
+            json!(30)
+        );
+        assert_eq!(
+            editor.field_value(&field(&editor, "wallpaper.shader.scale")),
+            json!(1.0)
+        );
+        assert_eq!(
+            editor.field_value(&field(&editor, "wallpaper.shader.path")),
+            json!("x.glsl")
         );
     }
 

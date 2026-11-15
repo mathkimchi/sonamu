@@ -35,6 +35,10 @@
       "minimum": 0,
       "maximum": 1
     },
+    "wallpaper": {
+      "description": "Drawn behind everything, even wallpaper programs' layers (#104)",
+      "$ref": "#/$defs/Wallpaper"
+    },
     "font_size": {
       "description": "Text height in px (Sonamu's own UI isn't scaled)",
       "type": "number",
@@ -166,6 +170,82 @@
           "$ref": "#/$defs/Color"
         }
       }
+    },
+    "Wallpaper": {
+      "description": "What's drawn behind everything",
+      "oneOf": [
+        {
+          "description": "Nothing: what's under shows (eg a wallpaper program's layer, else black)",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/Color"
+            }
+          },
+          "required": [
+            "color"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "An image file (`~` or relative to the config dir), covering each screen",
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "image"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "A Shadertoy-style GLSL fragment shader: `void mainImage(out vec4 fragColor, in vec2 fragCoord)` with `iTime`,\n`iResolution`, `iFrame`, `iMouse`. Reloads when the file changes",
+          "type": "object",
+          "properties": {
+            "shader": {
+              "$ref": "#/$defs/ShaderWallpaper"
+            }
+          },
+          "required": [
+            "shader"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ShaderWallpaper": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The shader file (`~` or relative to the config dir)",
+          "type": "string"
+        },
+        "scale": {
+          "description": "Drawn at this fraction of the screen's resolution and stretched: lower is cheaper",
+          "type": "number",
+          "format": "float",
+          "minimum": 0.05,
+          "maximum": 1,
+          "default": 1.0
+        },
+        "fps": {
+          "description": "Frames per second it's drawn at",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 240,
+          "default": 30
+        }
+      },
+      "required": [
+        "path"
+      ]
     },
     "TreeviewSettings": {
       "description": "Whether the treeview is pinned is part of the session, toggled by its pin button",

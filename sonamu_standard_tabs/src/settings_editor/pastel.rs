@@ -95,7 +95,10 @@ mod tests {
             .iter()
             .map(|(path, _)| path.join("."))
             .collect();
-        let mut fields: Vec<String> = sections(&settings::schema())[0]
+        let mut fields: Vec<String> = sections(&settings::schema(), &|path| {
+            let keys: Vec<&str> = path.iter().map(String::as_str).collect();
+            sonamu_common::settings_file::value_at(&sonamu_common::settings_file::defaults(), &keys)
+        })[0]
             .fields
             .iter()
             .map(|field| field.path.join("."))

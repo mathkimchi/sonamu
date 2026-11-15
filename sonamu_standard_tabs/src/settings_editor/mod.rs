@@ -282,14 +282,14 @@ impl SettingsEditorApplet {
             }
             Row::Field(section, field) => {
                 let field = self.field(section, field).clone();
-                let value = self.editor.value(&field.path);
+                let value = self.editor.field_value(&field);
                 match &field.kind {
                     FieldKind::Toggle => {
                         let on = !value.as_bool().unwrap_or_default();
                         let result = self.editor.commit(&[field.path], &[Value::from(on)]);
                         self.report(result);
                     }
-                    FieldKind::Choice(_) => self.cycle(&field, true),
+                    FieldKind::Choice(_) | FieldKind::Variant(_) => self.cycle(&field, true),
                     FieldKind::Color => {
                         self.toggle_picker((section_index_of(row), field_index_of(row)), &value)
                     }
@@ -430,7 +430,7 @@ impl SettingsEditorApplet {
         let FieldKind::Number { min, max, integer } = field.kind else {
             return;
         };
-        let current = self.editor.value(&field.path).as_f64().unwrap_or_default();
+        let current = self.editor.field_value(field).as_f64().unwrap_or_default();
         let next = fields::stepped(
             current,
             fields::step_size(min, max, integer),
@@ -463,6 +463,17 @@ impl SettingsEditorApplet {
 
     /// Moves a choice to its next (`forward`) or previous option
     fn cycle(&mut self, field: &Field, forward: bool) {
+        if let FieldKind::Variant(variants) = &field.kind {
+            let current = variant_name(&self.editor.value(&field.path));
+            let at = variants
+                .iter()
+                .position(|(name, _)| *name == current)
+                .unwrap_or(0);
+            let (next, _) = &variants[fields::cycle(variants.len(), at, forward)];
+            let result = self.editor.commit_variant(field, next);
+            self.report(result);
+            return;
+        }
         let FieldKind::Choice(options) = &field.kind else {
             return;
         };
@@ -943,7 +954,7 @@ impl SettingsEditorApplet {
         let label = |text: &str, color| rows.text(ui::text(text, color), ui::PAD, value_left);
         let value = |element| rows.text(element, value_left, width - ui::PAD);
         let field = self.field(section, field_index);
-        let current = self.editor.value(&field.path);
+        let current = self.editor.field_value(field);
         let mut parts = vec![label(&field.label, palette.fg)];
         match (&field.kind, editing) {
             (_, Some(input)) => parts.push(value(input.element(true, palette))),
@@ -958,6 +969,9 @@ impl SettingsEditorApplet {
                     current.as_str().unwrap_or_default(),
                     palette,
                 )));
+            }
+            (FieldKind::Variant(_), None) => {
+                parts.push(value(fields::choice(&variant_name(&current), palette)));
             }
             (FieldKind::Number { min, max, .. }, None) => {
                 let shown = self
@@ -1205,6 +1219,15 @@ fn items(editor: &Editor, field: &Field) -> Vec<String> {
                 .map(|item| item.as_str().unwrap_or_default().to_owned())
                 .collect()
         })
+        .unwrap_or_default()
+}
+
+/// A variant setting's kind: its name, or its object's key
+fn variant_name(value: &Value) -> String {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .or_else(|| value.as_object().and_then(|map| map.keys().next().cloned()))
         .unwrap_or_default()
 }
 

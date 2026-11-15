@@ -67,6 +67,8 @@ pub struct Settings {
     /// 1 is opaque. Menus and popups are always opaque
     #[schemars(range(min = 0, max = 1))]
     pub opacity: f32,
+    /// Drawn behind everything, even wallpaper programs' layers (#104)
+    pub wallpaper: Wallpaper,
     /// Text height in px (Sonamu's own UI isn't scaled)
     #[schemars(range(min = 8, max = 64))]
     pub font_size: f32,
@@ -121,6 +123,63 @@ impl Settings {
     /// Every keybind: groups in order, then binds in order
     pub fn all_keybinds(&self) -> impl Iterator<Item = &Keybind> {
         self.keybinds.values().flatten()
+    }
+}
+
+/// What's drawn behind everything
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Wallpaper {
+    /// Nothing: what's under shows (eg a wallpaper program's layer, else black)
+    None,
+    Color(#[schemars(with = "ColorSchema")] Color),
+    /// An image file (`~` or relative to the config dir), covering each screen
+    Image(PathBuf),
+    /// A Shadertoy-style GLSL fragment shader: `void mainImage(out vec4 fragColor, in vec2 fragCoord)` with `iTime`,
+    /// `iResolution`, `iFrame`, `iMouse`. Reloads when the file changes
+    Shader(ShaderWallpaper),
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+pub struct ShaderWallpaper {
+    /// The shader file (`~` or relative to the config dir)
+    pub path: PathBuf,
+    /// Drawn at this fraction of the screen's resolution and stretched: lower is cheaper
+    #[serde(default = "full_scale", deserialize_with = "scale_fraction")]
+    #[schemars(range(min = 0.05, max = 1))]
+    pub scale: f32,
+    /// Frames per second it's drawn at
+    #[serde(default = "default_fps")]
+    #[schemars(range(min = 1, max = 240))]
+    pub fps: u32,
+}
+
+const fn full_scale() -> f32 {
+    1.0
+}
+
+const fn default_fps() -> u32 {
+    30
+}
+
+/// A scale in `(0, 1]`
+fn scale_fraction<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    let scale = f32::deserialize(deserializer)?;
+    if scale > 0.0 && scale <= 1.0 {
+        Ok(scale)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "scale {scale} isn't in (0, 1]"
+        )))
+    }
+}
+
+/// A path from the settings: `~/` is the home dir, relative ones are in the config dir `dir`
+#[must_use]
+pub fn config_path(path: &Path, dir: &Path) -> PathBuf {
+    match (path.strip_prefix("~"), std::env::var_os("HOME")) {
+        (Ok(rest), Some(home)) => PathBuf::from(home).join(rest),
+        _ => dir.join(path),
     }
 }
 
@@ -966,6 +1025,52 @@ mod tests {
         assert_eq!(with(1.0).alpha(), 0xFF);
         assert_eq!(with(0.0).alpha(), 0);
         assert_eq!(with(2.0).alpha(), 0xFF);
+    }
+
+    #[test]
+    fn wallpaper_kinds() {
+        let wallpaper = |json: &str| {
+            parse(&format!(r#"{{"wallpaper": {json}}}"#))
+                .unwrap()
+                .settings
+                .wallpaper
+        };
+        assert_eq!(Settings::default().wallpaper, Wallpaper::None);
+        assert_eq!(
+            wallpaper(r##"{"color": "#102030"}"##),
+            Wallpaper::Color(Color([0x10, 0x20, 0x30, 0xff]))
+        );
+        assert_eq!(
+            wallpaper(r#"{"image": "~/a.png"}"#),
+            Wallpaper::Image(PathBuf::from("~/a.png"))
+        );
+        assert_eq!(
+            wallpaper(r#"{"shader": {"path": "sine.glsl"}}"#),
+            Wallpaper::Shader(ShaderWallpaper {
+                path: PathBuf::from("sine.glsl"),
+                scale: 1.0,
+                fps: 30,
+            })
+        );
+        assert!(parse(r#"{"wallpaper": {"shader": {"path": "x", "scale": 0}}}"#).is_err());
+    }
+
+    #[test]
+    fn config_paths() {
+        let dir = Path::new("/config");
+        assert_eq!(
+            config_path(Path::new("w/sine.glsl"), dir),
+            PathBuf::from("/config/w/sine.glsl")
+        );
+        assert_eq!(
+            config_path(Path::new("/abs.png"), dir),
+            PathBuf::from("/abs.png")
+        );
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(
+            config_path(Path::new("~/a.png"), dir),
+            Path::new(&home).join("a.png")
+        );
     }
 
     #[test]

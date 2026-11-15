@@ -19,7 +19,8 @@ calloop = { workspace = true }
 
 pollster.workspace = true
 
-wgpu.workspace = true
+image = { workspace = true }
+wgpu = { workspace = true, features = ["glsl"] } # glsl: Shadertoy-style wallpaper shaders
 # same as wgpu-hal's, to import dmabufs
 ash = "0.38"
 libc.workspace = true

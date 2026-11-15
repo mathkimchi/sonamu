@@ -8,6 +8,7 @@
 - Non-obvious behavior:
   - `palette.bg` is only for hub/buffer line/help backgrounds (an opaque root background hid wallpaper layers). Other backgrounds: `Palette::raised`/`tinted`, translucent via `with_opacity` (0.8).
   - `always_frame`: a lone pane still gets border/gap/radius.
+  - `wallpaper` (#104): `"none"` (what's under shows, eg swaybg), `{"color"}`, `{"image": path}` (covers each screen), `{"shader": {path, scale = 1, fps = 30}}`; paths `~/` or relative to the config dir (`config_path`). Drawn by the runner (`sonamu_sar/CLAUDE.md`).
   - `opacity` (#160): alpha of `ui::with_opacity` (translucent backgrounds, treeview text); mirrored into an atomic on reload (`settings::alpha()`), since drawing asks often. Menus/popups stay opaque.
   - `frames_itself` panes (projects showing panes) aren't framed and grow by `gap`.
   - `keybinds` (#114, #147, #107): named groups (`{"Windows": [binds]}`, help sections) of `{mods, key, shell}` or `{mods, key, command, args}`; key = char, name (`left`, `tab`, `enter`, ...) or evdev code; exact mods; first match wins, groups in order (`all_keybinds`; serde_json `preserve_order`). Defaults are in `default_settings.json`; a user `keybinds` replaces them whole (`parse` drops the default's before merging), so it lists the groups it keeps. One bad entry fails the whole parse; so does a flat list.

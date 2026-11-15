@@ -17,6 +17,12 @@ Runner-only unless noted; the tree doesn't know about these.
 - No Xwayland: sets `XDG_SESSION_TYPE=wayland`, `ELECTRON_OZONE_PLATFORM_HINT=auto`, `NIXOS_OZONE_WL=1` at start (exported to D-Bus on tty). `WAYLAND_DISPLAY` can't be set that way (`AppletRunner::run`): each launch sets it from `SONAMU_WAYLAND_DISPLAY`.
 - Gotcha: a client whose buffer fills (eg resize flood) is dropped with only `ConnectionClosed` in the log.
 
+## Wallpaper (#104, `wallpaper.rs`)
+
+- Setting `wallpaper`, drawn first in `redraw_ui` (under background layers). The runner subscribes to settings; a timer redraws at a shader's `fps` (not under fullscreen) and checks its file for changes (1 s otherwise).
+- Shaders: Shadertoy-style GLSL (wgpu `glsl` feature) between `PREAMBLE` (uniforms as `iTime`, `iResolution`, `iFrame`, `iMouse` = 0) and `EPILOGUE` (`main` flips to Shadertoy's bottom-left origin). Checked with naga first (errors are a notification, at the user's lines; the last wallpaper stays). Rendered into an `Rgba8Unorm` texture at `scale`, sampled through an sRGB view (Shadertoy colors are display values).
+- A file is loaded once per change (`Watched`), so a broken one isn't retried every frame.
+
 ## Socket (`$SONAMU_SOCKET`, `sonamu_common::msg`, `msg_socket.rs`)
 
 - `$XDG_RUNTIME_DIR/sonamu-<wl socket>.sock`. `sonamu-msg open <applet> [args]` → `StandardEvent::Open` to the root, placed like a new wl surface: into the focused applet (`take_open`) or as the focused node's child (`NodeHolder::open`). Relative path args are made absolute. Exit 1 if unreachable (xdg-open falls back).
