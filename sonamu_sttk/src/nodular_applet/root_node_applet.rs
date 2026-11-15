@@ -205,10 +205,12 @@ impl RootNodeApplet {
                     .lines(columns, 0, &settings::get().palette)
                     .len()
                     .saturating_sub(BUFFER_OUTPUT_ROWS);
-                self.buffer_scroll = (self.buffer_scroll + BUFFER_OUTPUT_ROWS - 1).min(max);
+                self.buffer_scroll = (self.buffer_scroll + ui::page(BUFFER_OUTPUT_ROWS)).min(max);
             }
             KeySymbol::PageDown => {
-                self.buffer_scroll = self.buffer_scroll.saturating_sub(BUFFER_OUTPUT_ROWS - 1);
+                self.buffer_scroll = self
+                    .buffer_scroll
+                    .saturating_sub(ui::page(BUFFER_OUTPUT_ROWS));
             }
             _ => {
                 if matches!(key, KeySymbol::Enter) {

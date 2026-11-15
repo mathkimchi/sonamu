@@ -273,6 +273,11 @@ pub fn grid_scrollbar(
     )
 }
 
+/// How far PageUp/PageDown scroll with `shown` rows: all but one, which stays in view
+pub const fn page(shown: usize) -> usize {
+    if shown > 1 { shown - 1 } else { 1 }
+}
+
 /// The furthest `count` rows can scroll with `shown` rows: until the last one is at the bottom
 pub const fn max_scroll(count: usize, shown: usize) -> usize {
     count.saturating_sub(shown)

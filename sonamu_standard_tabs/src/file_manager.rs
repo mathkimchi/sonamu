@@ -289,7 +289,9 @@ impl FileManagerApplet {
     }
 
     fn clamp_scroll(&mut self) {
-        self.scroll = ui::scroll_to(self.scroll, self.selected, self.visible_rows());
+        let shown = self.visible_rows();
+        self.scroll = ui::scroll_to(self.scroll, self.selected, shown)
+            .min(ui::max_scroll(self.entries.len(), shown));
     }
 
     fn resize_documents(&self) {
@@ -883,7 +885,7 @@ impl FileManagerApplet {
             &self.palette,
             ui::scrollbar_x(width),
             [row_height(), shown as f32 * row_height()],
-            self.scroll.min(ui::max_scroll(self.entries.len(), shown)),
+            self.scroll,
             shown,
             self.entries.len(),
         ));

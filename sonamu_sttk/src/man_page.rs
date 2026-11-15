@@ -219,7 +219,7 @@ impl StandardApplet for ManPageApplet {
             return;
         }
         let (_, height) = CharGrid::largest_fittable_size(self.size);
-        let page = height.saturating_sub(2).max(1) as isize;
+        let page = ui::page(height.saturating_sub(1)) as isize;
         match ui_event {
             UIEvent::Key {
                 symbol: Some(key),

@@ -174,8 +174,8 @@ impl CommandHubApplet {
 
     fn handle_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) {
         match key {
-            KeySymbol::PageUp => self.scroll_by(self.body_rows().saturating_sub(1) as isize),
-            KeySymbol::PageDown => self.scroll_by(-(self.body_rows().saturating_sub(1) as isize)),
+            KeySymbol::PageUp => self.scroll_by(ui::page(self.body_rows()) as isize),
+            KeySymbol::PageDown => self.scroll_by(-(ui::page(self.body_rows()) as isize)),
             KeySymbol::Enter => {
                 self.scroll = 0;
                 self.repl.handle_key(key, modifiers);
@@ -209,7 +209,10 @@ impl StandardApplet for CommandHubApplet {
                         let steps = self.scrolled.add(delta, v120) as isize;
                         self.scroll_by(-steps);
                     }
-                    UIEvent::WindowResized(size) => self.size = size,
+                    UIEvent::WindowResized(size) => {
+                        self.size = size;
+                        self.scroll_by(0);
+                    }
                     UIEvent::Key { .. } | UIEvent::Swipe { .. } | UIEvent::Pinch(_) => return,
                 }
 

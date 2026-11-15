@@ -13,5 +13,6 @@ Every native applet looks and behaves alike: same shades, metrics, input handlin
 - Input: `BTN_LEFT`/`BTN_RIGHT`/`BTN_MIDDLE` (from `sonamu_ui::ui_event`, also the runner's), `dragged(from, at)`; `ScrollSteps` turns mouse scrolls into steps, one item or line each (use for every mouse scroll).
 - Every scrolled list shows a scrollbar: `scrollbar` (`scrollbar_x` for the right pad), `grid_scrollbar` for char grids; bar popups via `ScrollList::bar`.
 - Text: `text`, `spans`; place with `Rows::text`, `Rows::style` or `inset`. `rect`, `frame` (`Bordered`).
+- Scroll state stays clamped (`max_scroll`), also on resize and content changes; PageUp/PageDown move `page(shown)`.
 - `Rows { top, height, scroll }`: same indices for drawing (`row`, `style`, `top_of`, `text`) and clicking (`row_at`: may be past the last row, filter by count; `within`). Scrolling: `fitting`, `scroll_to`, `max_scroll`. Header: `Rows::with_height(0.0, h).row(0, ..)`.
 - Char-grid UIs (hub, man page) use `command_hub::{fill_row, put}`; status bar popups use `status_bar/widgets.rs`.

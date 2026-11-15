@@ -215,6 +215,11 @@ impl CodeEditorApplet {
         }
     }
 
+    /// How far PageUp/PageDown scroll
+    fn page(&self) -> isize {
+        ui::page(self.view_offset.most_recent_num_rows.unwrap_or(0)) as isize
+    }
+
     fn clamp_view_to_cursor(&mut self) {
         self.view_offset
             .clamp_to_cursor(self.buffer.char_to_line(self.cursor));
@@ -305,9 +310,8 @@ impl CodeEditorApplet {
                 self.cursor = self.cursor_at(new_line, column);
                 self.clamp_view_to_cursor();
             }
-            // these are mostly here for debug purposes
-            (KeySymbol::PageDown, KeyModifiers::NONE) => self.scroll_by(1),
-            (KeySymbol::PageUp, KeyModifiers::NONE) => self.scroll_by(-1),
+            (KeySymbol::PageDown, KeyModifiers::NONE) => self.scroll_by(self.page()),
+            (KeySymbol::PageUp, KeyModifiers::NONE) => self.scroll_by(-self.page()),
             _ => match self.mode {
                 EditorMode::Normal => self.handle_keypress_normal(key, key_modifiers),
                 EditorMode::Insert => self.handle_keypress_insert(key, key_modifiers),
@@ -355,6 +359,9 @@ impl StandardApplet for CodeEditorApplet {
                             CharGrid::largest_fittable_size(display_container_size);
 
                         self.view_offset.most_recent_num_rows = Some(height);
+                        let max = ui::max_scroll(self.buffer.len_lines(), height);
+                        self.view_offset.scroll = self.view_offset.scroll.min(max);
+                        self.clamp_view_to_cursor();
                     }
                     sonamu_ui::ui_event::UIEvent::Mouse(MouseEvent {
                         kind: MouseEventKind::Scroll { delta, v120, .. },
