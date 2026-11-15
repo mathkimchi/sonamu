@@ -157,7 +157,7 @@ enum Popup {
     /// Sorted by, and its process list
     Resources(resources::Sort, ScrollList),
     /// With this section's list shown
-    Hub(Option<hub::Section>),
+    Hub(Option<hub::Section>, ScrollList),
     /// A tray item's menu (`Tray::menu`, read meanwhile)
     TrayMenu,
     /// The bell's list
@@ -170,7 +170,7 @@ impl Popup {
         match self {
             Self::Calendar(_) => Segment::Time,
             Self::Resources(..) => Segment::Resources,
-            Self::Hub(_) => Segment::Hub,
+            Self::Hub(..) => Segment::Hub,
             Self::TrayMenu => Segment::Tray,
             Self::Notifications(_) => Segment::Bell,
             Self::Launcher => Segment::Launcher,
@@ -531,7 +531,7 @@ impl StatusBar {
             drop(store);
             // not over the hub, which shows the same
             let osd = hub::osd(&self.controls.state.lock().unwrap(), &settings.palette)
-                .filter(|_| !matches!(self.popup, Some(Popup::Hub(_))));
+                .filter(|_| !matches!(self.popup, Some(Popup::Hub(..))));
             if let Some(spans) = osd {
                 // in the middle, under the bar
                 let [w, h] = Lines::size(1, columns_of(&spans));
@@ -620,9 +620,13 @@ impl StatusBar {
                 .as_ref()
                 .map(|launcher| launcher.draw(settings, &self.icons, hover))
                 .unwrap_or_default(),
-            Popup::Hub(open) => {
-                hub::draw(settings, &self.controls.state.lock().unwrap(), open, hover)
-            }
+            Popup::Hub(open, list) => hub::draw(
+                settings,
+                &self.controls.state.lock().unwrap(),
+                open,
+                list,
+                hover,
+            ),
             Popup::TrayMenu => {
                 tray::draw_menu(settings, self.tray.menu.lock().unwrap().as_ref(), hover)
             }
@@ -638,7 +642,7 @@ impl StatusBar {
                 notification_list::size(&self.notifications.store.lock().unwrap())
             }
             Popup::Launcher => Launcher::size(),
-            Popup::Hub(open) => hub::size(&self.controls.state.lock().unwrap(), open),
+            Popup::Hub(open, _) => hub::size(&self.controls.state.lock().unwrap(), open),
             Popup::TrayMenu => tray::menu_size(self.tray.menu.lock().unwrap().as_ref()),
         }
     }
@@ -675,7 +679,7 @@ impl StatusBar {
         self.system
             .set_want_processes(matches!(popup, Some(Popup::Resources(..))));
         self.controls
-            .set_want_lists(matches!(popup, Some(Popup::Hub(_))));
+            .set_want_lists(matches!(popup, Some(Popup::Hub(..))));
         if popup != Some(Popup::TrayMenu) {
             self.tray.close_menu();
         }
@@ -798,7 +802,7 @@ impl StatusBar {
                 )));
             }
             Segment::Bell => self.set_popup(open(Popup::Notifications(ScrollList::default()))),
-            Segment::Hub => self.set_popup(open(Popup::Hub(None))),
+            Segment::Hub => self.set_popup(open(Popup::Hub(None, ScrollList::default()))),
             Segment::Launcher => self.set_popup(open(Popup::Launcher)),
             // handled above
             Segment::Tray => {}
@@ -881,6 +885,13 @@ impl StatusBar {
                     steps,
                 );
                 self.popup = Some(Popup::Notifications(list));
+                moved
+            }
+            Some(Popup::Hub(open, mut list)) => {
+                let state = self.controls.state.lock().unwrap();
+                let moved = hub::scroll(&state, open, &mut list, steps);
+                drop(state);
+                self.popup = Some(Popup::Hub(open, list));
                 moved
             }
             Some(Popup::Launcher) => self
@@ -990,9 +1001,9 @@ impl StatusBar {
                 self.set_popup(None);
                 return true;
             }
-            Popup::Hub(open) => {
+            Popup::Hub(open, list) => {
                 // not matched on directly: the lock would be held through the actions'
-                let click = hub::click(&self.controls.state.lock().unwrap(), open, cell);
+                let click = hub::click(&self.controls.state.lock().unwrap(), open, list, cell);
                 let Some(click) = click else {
                     return false;
                 };
@@ -1019,7 +1030,9 @@ impl StatusBar {
     fn apply_hub_click(&mut self, click: hub::Click) {
         let controls = &self.controls;
         match click {
-            hub::Click::Open(section) => self.set_popup(Some(Popup::Hub(section))),
+            hub::Click::Open(section) => {
+                self.set_popup(Some(Popup::Hub(section, ScrollList::default())));
+            }
             hub::Click::ToggleWifi => controls.toggle_wifi(),
             hub::Click::ConnectWifi(ssid) => controls.connect_wifi(ssid),
             hub::Click::ToggleBluetooth => controls.toggle_bluetooth(),

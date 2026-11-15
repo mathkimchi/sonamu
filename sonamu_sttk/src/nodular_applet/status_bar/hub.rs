@@ -5,7 +5,7 @@ use super::{
     Lines, Spans,
     controls::{Osd, State, Volume},
     notification_list::cut,
-    widgets::{Button, Cell, label_color},
+    widgets::{Button, Cell, ScrollList, label_color},
 };
 use sonamu_common::settings::{Palette, Settings};
 use sonamu_ui::ui_element::UITree;
@@ -116,29 +116,40 @@ pub fn segment(state: &State, palette: &Palette) -> Spans {
     vec![(icons.join(" "), palette.fg)]
 }
 
-/// The popup's lines, top down, with `open`'s list
-fn lines(state: &State, open: Option<Section>) -> Vec<Line> {
+/// How many rows `section`'s list has
+const fn listed(state: &State, section: Section) -> usize {
+    match section {
+        Section::Wifi => state.networks.len(),
+        Section::Bluetooth => state.devices.len(),
+        Section::Outputs => state.sinks.len(),
+    }
+}
+
+/// Scrolls the open section's list `steps` (positive down); whether it moved
+pub fn scroll(state: &State, open: Option<Section>, list: &mut ScrollList, steps: i32) -> bool {
+    open.is_some_and(|section| list.scroll(steps, listed(state, section), LISTED))
+}
+
+/// The popup's lines, top down, with `open`'s list from where `list` is scrolled
+fn lines(state: &State, open: Option<Section>, list: ScrollList) -> Vec<Line> {
+    let shown = |section| list.visible(listed(state, section), LISTED);
     let mut lines = vec![Line::Wifi];
     if open == Some(Section::Wifi) {
         lines.extend(
-            state
-                .networks
+            state.networks[shown(Section::Wifi)]
                 .iter()
-                .take(LISTED)
                 .map(|network| Line::Network(network.ssid.clone())),
         );
     }
     lines.push(Line::Bluetooth);
     if open == Some(Section::Bluetooth) {
-        lines.extend((0..state.devices.len().min(LISTED)).map(Line::Device));
+        lines.extend(shown(Section::Bluetooth).map(Line::Device));
     }
     lines.push(Line::Volume);
     if open == Some(Section::Outputs) {
         lines.extend(
-            state
-                .sinks
+            state.sinks[shown(Section::Outputs)]
                 .iter()
-                .take(LISTED)
                 .map(|sink| Line::Output(sink.id.clone())),
         );
     }
@@ -150,7 +161,7 @@ fn lines(state: &State, open: Option<Section>) -> Vec<Line> {
 }
 
 pub fn size(state: &State, open: Option<Section>) -> [f32; 2] {
-    Lines::size(lines(state, open).len(), COLUMNS)
+    Lines::size(lines(state, open, ScrollList::default()).len(), COLUMNS)
 }
 
 /// `left` and then `right` at the end of the width
@@ -315,12 +326,13 @@ pub fn draw(
     settings: &Settings,
     state: &State,
     open: Option<Section>,
+    list: ScrollList,
     hover: Option<Cell>,
 ) -> Vec<UITree> {
     let palette = &settings.palette;
     let text = Lines::new();
     let mut items = Vec::new();
-    for (index, line) in lines(state, open).into_iter().enumerate() {
+    for (index, line) in lines(state, open, list).into_iter().enumerate() {
         let (spans, buttons) = line_parts(line, state, open, palette);
         if !spans.is_empty() {
             items.push(text.text(index, 0, spans));
@@ -330,11 +342,26 @@ pub fn draw(
             items.extend(button.draw(&text, palette, spans, on, hover));
         }
     }
+    if let Some(section) = open {
+        // under its header: wifi's is the first line, bluetooth's the second, the outputs' (volume) the third
+        let first = match section {
+            Section::Wifi => 1,
+            Section::Bluetooth => 2,
+            Section::Outputs => 3,
+        };
+        let count = listed(state, section);
+        items.extend(list.bar(&text, [first, COLUMNS, 1], count, LISTED, palette));
+    }
     items
 }
 
-pub fn click(state: &State, open: Option<Section>, (line, column): Cell) -> Option<Click> {
-    let shown = lines(state, open).into_iter().nth(line)?;
+pub fn click(
+    state: &State,
+    open: Option<Section>,
+    list: ScrollList,
+    (line, column): Cell,
+) -> Option<Click> {
+    let shown = lines(state, open, list).into_iter().nth(line)?;
     let (_, buttons) = line_parts(shown.clone(), state, open, &Palette::default());
     let button = buttons
         .into_iter()
@@ -382,30 +409,54 @@ mod tests {
     fn clicks_hit_the_drawn_buttons() {
         let state = State::default();
         assert!(matches!(
-            click(&state, None, (0, 1)),
+            click(&state, None, ScrollList::default(), (0, 1)),
             Some(Click::Open(Some(Section::Wifi)))
         ));
         assert!(matches!(
-            click(&state, None, (0, COLUMNS - 1)),
+            click(&state, None, ScrollList::default(), (0, COLUMNS - 1)),
             Some(Click::ToggleWifi)
         ));
         assert!(matches!(
-            click(&state, None, (1, COLUMNS - 2)),
+            click(&state, None, ScrollList::default(), (1, COLUMNS - 2)),
             Some(Click::ToggleBluetooth)
         ));
         // volume: icon mutes, slider sets, the end opens the outputs
         assert!(matches!(
-            click(&state, None, (2, 0)),
+            click(&state, None, ScrollList::default(), (2, 0)),
             Some(Click::ToggleMute)
         ));
         assert!(matches!(
-            click(&state, None, (2, SLIDER_COLUMN)),
+            click(&state, None, ScrollList::default(), (2, SLIDER_COLUMN)),
             Some(Click::Volume(0.0))
         ));
         assert!(matches!(
-            click(&state, None, (2, COLUMNS - 1)),
+            click(&state, None, ScrollList::default(), (2, COLUMNS - 1)),
             Some(Click::Open(Some(Section::Outputs)))
         ));
-        assert!(click(&state, None, (3, 0)).is_none());
+        assert!(click(&state, None, ScrollList::default(), (3, 0)).is_none());
+    }
+
+    #[test]
+    fn open_lists_scroll() {
+        let state = State {
+            networks: (0..10)
+                .map(|index| super::super::controls::Network {
+                    ssid: format!("net{index}"),
+                    signal: 50,
+                    active: false,
+                })
+                .collect(),
+            ..State::default()
+        };
+        let open = Some(Section::Wifi);
+        let mut list = ScrollList::default();
+        assert!(!scroll(&state, None, &mut list, 1));
+        assert!(scroll(&state, open, &mut list, 100));
+        // the last `LISTED` show, under the header
+        assert!(matches!(
+            click(&state, open, list, (1, 5)),
+            Some(Click::ConnectWifi(ssid)) if ssid == "net4"
+        ));
+        assert_eq!(lines(&state, open, list).len(), 1 + LISTED + 3);
     }
 }
