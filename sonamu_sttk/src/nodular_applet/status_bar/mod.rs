@@ -15,8 +15,7 @@ mod system;
 mod tray;
 mod widgets;
 
-use super::treeview::{BTN_LEFT, BTN_RIGHT, guide};
-use crate::{command_hub::bar_bg, ui};
+use crate::ui::{self, BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
 use chrono::{Local, NaiveDate};
 use controls::Controls;
 use icons::Icons;
@@ -33,9 +32,6 @@ use std::sync::Arc;
 use system::System;
 use tray::Tray;
 use widgets::{Cell, ScrollList};
-
-/// The middle mouse button (evdev)
-const BTN_MIDDLE: u32 = 0x112;
 
 /// Room between segments and at the bar's ends
 const GAP: f32 = 12.0;
@@ -473,7 +469,7 @@ impl StatusBar {
     ) -> Vec<UITree> {
         let height = height() as f32;
         let mut children = vec![ui::rect(
-            bar_bg(&settings.palette),
+            ui::raised_bg(&settings.palette),
             [0.0, 0.0],
             [width, height],
         )];
@@ -1166,9 +1162,15 @@ fn popup_frame(
 ) -> UITree {
     let frame = |position, size| {
         UITree::new_styled(
-            UIElement::Backgrounded(popup_bg(settings)),
+            UIElement::Backgrounded(ui::popup_bg(&settings.palette)),
             Style::absolute(position, size),
-            vec![ui::frame(guide(), 0.0, 1.0, Style::full_size(), items)],
+            vec![ui::frame(
+                ui::guide(&settings.palette),
+                0.0,
+                1.0,
+                Style::full_size(),
+                items,
+            )],
         )
     };
     if scale >= 1.0 {
@@ -1179,10 +1181,4 @@ fn popup_frame(
         Style::absolute([x, y], [w, h]),
         vec![frame([0.0, 0.0], [w / scale, h / scale])],
     )
-}
-
-/// Opaque: over the panes, even a little translucency lets their text show through (blending is linear)
-fn popup_bg(settings: &Settings) -> Color {
-    let Color([r, g, b, _]) = settings.palette.raised(10);
-    Color([r, g, b, 0xFF])
 }

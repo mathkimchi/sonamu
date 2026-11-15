@@ -1,6 +1,6 @@
 use crate::{
     command_hub::{
-        bar_bg, fill_row, put,
+        fill_row, put,
         repl::{self, Repl},
     },
     man_page::ManPageApplet,
@@ -11,9 +11,7 @@ use crate::{
         project_applet::ProjectApplet,
         swipe::{Settle, Strip, Swipe},
         traversal::{self, Traversal},
-        treeview::{
-            TreeviewAction, TreeviewPointer, TreeviewRow, focused_row, treeview_rows, with_opacity,
-        },
+        treeview::{TreeviewAction, TreeviewPointer, TreeviewRow, focused_row, treeview_rows},
     },
     session,
     standard_keybinds::standard_keybind_request,
@@ -1458,7 +1456,7 @@ fn notice(settings: &Settings, text: &str, size: DisplayContainerSize) -> UITree
         settings.border.width,
         Style::absolute([left, top], [width, height]),
         vec![UITree::new_styled(
-            UIElement::Backgrounded(with_opacity(settings.palette.bg)),
+            UIElement::Backgrounded(ui::bg(&settings.palette)),
             Style::full_size(),
             vec![UITree::leaf_styled(
                 ui::text(text, settings.palette.fg),
@@ -1662,11 +1660,11 @@ fn buffer_line(
     let prompt_row = shown.len();
     match bar {
         Bar::Prompt(_) => {
-            fill_row(&mut grid, prompt_row, bar_bg(palette));
+            fill_row(&mut grid, prompt_row, ui::raised_bg(palette));
             repl.draw_prompt(&mut grid, prompt_row, palette);
         }
         Bar::Insert => {
-            fill_row(&mut grid, prompt_row, bar_bg(palette));
+            fill_row(&mut grid, prompt_row, ui::raised_bg(palette));
             put(&mut grid, prompt_row, 1, "-- INSERT --", palette.accent);
         }
         Bar::None => {}
@@ -1677,7 +1675,11 @@ fn buffer_line(
         Style::absolute([0.0, top], [size.width as f32, height]),
         vec![
             // the grid is whole cells; the bar spans the screen
-            ui::rect(bar_bg(palette), [0.0, 0.0], [size.width as f32, height]),
+            ui::rect(
+                ui::raised_bg(palette),
+                [0.0, 0.0],
+                [size.width as f32, height],
+            ),
             grid.element().into(),
         ],
     )

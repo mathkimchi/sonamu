@@ -8,7 +8,6 @@ use sonamu_sttk::{
     creatable_applet::CreatableNodularApplet,
     nodular_applet::{
         AppletContext, AppletSpawner, AppletSpawnerTrait, NodularAppletInitializer, StandardApplet,
-        with_opacity,
     },
     standard_keybinds::handle_standard_keybinds,
 };
@@ -430,7 +429,7 @@ impl StandardApplet for CodeEditorApplet {
             content.contained_element()
         };
         UITree::new_styled(
-            UIElement::Backgrounded(with_opacity(self.palette.bg)),
+            UIElement::Backgrounded(sonamu_sttk::ui::bg(&self.palette)),
             Style::full_size(),
             vec![content],
         )

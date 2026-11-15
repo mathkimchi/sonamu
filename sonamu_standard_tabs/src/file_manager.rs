@@ -25,7 +25,7 @@ use sonamu_sttk::{
     creatable_applet::CreatableNodularApplet,
     nodular_applet::{
         Answer, AppletContext, AppletSpawner, AppletSpawnerTrait, EmbeddedId, NodeRequest,
-        NodularAppletInitializer, StandardApplet, swipe, with_opacity,
+        NodularAppletInitializer, StandardApplet, swipe,
     },
     session,
     standard_keybinds::{handle_standard_keybinds, pdf_viewer, standard_keybind_request},
@@ -49,22 +49,6 @@ const INDENT: f32 = 28.0;
 const LEFT_PAD: f32 = 12.0;
 /// Of the width, for the file list
 const LIST_SPLIT: f32 = 0.3;
-const BTN_LEFT: u32 = 0x110;
-
-// Translucent shades of the palette's `bg`, like the treeview's; text is from the palette
-fn list_bg() -> Color {
-    with_opacity(settings::get().palette.raised(5))
-}
-fn selected_bg() -> Color {
-    with_opacity(settings::get().palette.tinted(25))
-}
-fn selected_unfocused_bg() -> Color {
-    with_opacity(settings::get().palette.raised(15))
-}
-/// Also behind the documents when none is shown (an editor's background)
-fn header_bg() -> Color {
-    with_opacity(settings::get().palette.bg)
-}
 /// Directory names: the focused border's color, so they differ from files (`fg`) and the open one (`accent`)
 fn dir_text() -> Color {
     settings::get().border.focused
@@ -799,7 +783,7 @@ impl FileManagerApplet {
 
         match mouse_event.kind {
             MouseEventKind::Button {
-                button: BTN_LEFT,
+                button: ui::BTN_LEFT,
                 pressed: true,
             } => {
                 if in_header && x < f64::from(LEFT_PAD + INDENT) {
@@ -842,7 +826,12 @@ impl FileManagerApplet {
             LEFT_PAD + INDENT,
             width,
         );
-        let header = header_row.row(0, width, Some(header_bg()), vec![toggle, title]);
+        let header = header_row.row(
+            0,
+            width,
+            Some(ui::bg(&settings::get().palette)),
+            vec![toggle, title],
+        );
         if self.list_collapsed {
             return UITree::new_styled(UIElement::Nothing, Style::full_size(), vec![header]);
         }
@@ -858,9 +847,9 @@ impl FileManagerApplet {
             let background = if index != self.selected {
                 None
             } else if self.pane == Pane::Files {
-                Some(selected_bg())
+                Some(ui::selected_bg(&settings::get().palette))
             } else {
-                Some(selected_unfocused_bg())
+                Some(ui::raised_bg(&settings::get().palette))
             };
             let name = entry
                 .path
@@ -895,7 +884,11 @@ impl FileManagerApplet {
             );
             rows.push(list_rows.row(index, width, background, vec![label]));
         }
-        UITree::new_styled(UIElement::Backgrounded(list_bg()), Style::full_size(), rows)
+        UITree::new_styled(
+            UIElement::Backgrounded(ui::panel_bg(&settings::get().palette)),
+            Style::full_size(),
+            rows,
+        )
     }
 
     /// The open documents' names (right of `header_left`), then the active document
@@ -923,7 +916,7 @@ impl FileManagerApplet {
         };
         let header_row = Rows::with_height(0.0, row_height());
         let header = UITree::new_styled(
-            UIElement::Backgrounded(header_bg()),
+            UIElement::Backgrounded(ui::bg(&settings::get().palette)),
             header_row.style(0, header_left, width - header_left),
             vec![header_row.text(ui::spans(header), LEFT_PAD, width - header_left)],
         );
@@ -942,7 +935,7 @@ impl FileManagerApplet {
             match self.shown_document() {
                 Ok(document) => document.handle.get_surface(),
                 Err(note) => UITree::new_styled(
-                    UIElement::Backgrounded(header_bg()),
+                    UIElement::Backgrounded(ui::bg(&settings::get().palette)),
                     Style::full_size(),
                     vec![header_row.text(
                         ui::text(note, self.palette.inactive),

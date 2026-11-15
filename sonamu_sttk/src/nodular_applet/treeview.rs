@@ -3,7 +3,7 @@
 //! Rows are placed at a fixed height, so the root can hit-test them itself.
 
 use super::node_tree::INACTIVE_MARK;
-use crate::ui::{self, Rows, rect, row_height};
+use crate::ui::{self, BTN_LEFT, BTN_RIGHT, Rows, rect, row_height, with_opacity};
 use sonamu_common::{
     sap::packets::{NewApplet, NodeAction, SpawnPosition},
     settings::{self, Settings},
@@ -32,40 +32,9 @@ fn triangle_width() -> f32 {
 pub fn close_width() -> f32 {
     row_height()
 }
-/// How far the pointer moves while pressed before it's a drag
-const DRAG_THRESHOLD: f64 = 12.0;
-pub const BTN_LEFT: u32 = 0x110;
-pub const BTN_RIGHT: u32 = 0x111;
-
-/// The alpha of everything in the treeview (about 80%), so what is behind it shows through
-const OPACITY: u8 = 0xCC;
-
-/// Also for the command hub's and project's backgrounds
-pub const fn with_opacity(Color([r, g, b, _]): Color) -> Color {
-    Color([r, g, b, OPACITY])
-}
-
-// Text and markers are the settings' palette; backgrounds are shades of its `bg`
-fn panel_bg() -> Color {
-    with_opacity(settings::get().palette.raised(5))
-}
-fn hover_bg() -> Color {
-    with_opacity(settings::get().palette.raised(15))
-}
-fn focus_bg() -> Color {
-    with_opacity(settings::get().palette.tinted(25))
-}
-pub(super) fn guide() -> Color {
-    with_opacity(settings::get().palette.raised(25))
-}
 /// The share of a row's height at its top and at its bottom that drops between siblings
 const EDGE_ZONE: f32 = 0.25;
 const INSERT_LINE_HEIGHT: f32 = 3.0;
-/// Nearly opaque, over the treeview
-fn menu_bg() -> Color {
-    let Color([r, g, b, _]) = settings::get().palette.raised(10);
-    Color([r, g, b, 0xF0])
-}
 const MENU_PAD: f32 = 12.0;
 /// Two clicks on a row within this are a double click (sets the view root)
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -292,16 +261,23 @@ impl<T> Menu<T> {
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                let background = (self.hovered == Some(index)).then_some(hover_bg());
+                let background = (self.hovered == Some(index))
+                    .then_some(ui::raised_bg(&settings::get().palette));
                 let label = rows.text(ui::text(item.label(), text), MENU_PAD, width);
                 rows.row(index, width, background, vec![label])
                     .with_pointer()
             })
             .collect();
         UITree::new_styled(
-            UIElement::Backgrounded(menu_bg()),
+            UIElement::Backgrounded(ui::popup_bg(&settings::get().palette)),
             Style::absolute([x, y], [width, height]),
-            vec![ui::frame(guide(), 0.0, 1.0, Style::full_size(), items)],
+            vec![ui::frame(
+                ui::guide(&settings::get().palette),
+                0.0,
+                1.0,
+                Style::full_size(),
+                items,
+            )],
         )
     }
 }
@@ -525,7 +501,7 @@ impl TreeviewPointer {
             MouseEventKind::Motion => {
                 if let Some(press) = &mut self.press
                     && !press.dragging
-                    && distance(press.position, event.position) > DRAG_THRESHOLD
+                    && ui::dragged(press.position, event.position)
                 {
                     press.dragging = true;
                     action = Some(TreeviewAction::StartDrag(press.path.clone()));
@@ -644,7 +620,7 @@ impl TreeviewPointer {
         let mut parts = Vec::new();
         for level in 0..row.depth {
             parts.push(rect(
-                guide(),
+                ui::guide(&settings::get().palette),
                 [LEFT_PAD + level as f32 * INDENT + INDENT / 2.0 - 1.0, 0.0],
                 [2.0, row_height()],
             ));
@@ -702,9 +678,9 @@ impl TreeviewPointer {
         }
 
         let background = if is_focused {
-            Some(focus_bg())
+            Some(ui::selected_bg(&settings::get().palette))
         } else if is_hovered && dragging.is_none() {
-            Some(hover_bg())
+            Some(ui::raised_bg(&settings::get().palette))
         } else {
             None
         };
@@ -748,7 +724,7 @@ impl TreeviewPointer {
             children.push(menu.render([width, height]));
         }
         UITree::new_styled(
-            UIElement::Backgrounded(panel_bg()),
+            UIElement::Backgrounded(ui::panel_bg(&settings::get().palette)),
             Style::full_size(),
             children,
         )
@@ -775,8 +751,4 @@ fn shown_rows(height: f32) -> usize {
 /// The furthest the rows can scroll: until the last one is at the bottom
 fn max_scroll(row_count: usize, height: f32) -> usize {
     ui::max_scroll(row_count, shown_rows(height))
-}
-
-fn distance([x1, y1]: [f64; 2], [x2, y2]: [f64; 2]) -> f64 {
-    (x2 - x1).hypot(y2 - y1)
 }

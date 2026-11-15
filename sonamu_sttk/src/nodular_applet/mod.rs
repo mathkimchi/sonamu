@@ -36,8 +36,6 @@ pub mod swipe;
 mod traversal;
 pub(crate) mod treeview;
 
-pub use treeview::with_opacity;
-
 // pub struct RootApplet<Applet: BasicApplet> {
 //     inner: Applet,
 //     children: NodeApplet<Box<dyn BasicApplet>>,

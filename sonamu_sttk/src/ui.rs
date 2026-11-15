@@ -2,11 +2,59 @@
 //!
 //! Everything is placed absolutely (`Style::absolute`); `Rows` draws a list and hit-tests it with the same numbers.
 
+use sonamu_common::settings::Palette;
 use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
     ui_element::{Length, Style, UIElement, UITree, font_size},
 };
+
+// Mouse buttons (evdev)
+pub const BTN_LEFT: u32 = 0x110;
+pub const BTN_RIGHT: u32 = 0x111;
+pub const BTN_MIDDLE: u32 = 0x112;
+
+/// How far the pointer moves while pressed before it's a drag
+const DRAG_THRESHOLD: f64 = 12.0;
+
+/// Whether the pointer moved far enough from `from` to `at` for a drag
+pub fn dragged([x1, y1]: [f64; 2], [x2, y2]: [f64; 2]) -> bool {
+    (x2 - x1).hypot(y2 - y1) > DRAG_THRESHOLD
+}
+
+/// The alpha of applets' backgrounds (about 80%), so what is behind them shows through
+const OPACITY: u8 = 0xCC;
+
+pub const fn with_opacity(Color([r, g, b, _]): Color) -> Color {
+    Color([r, g, b, OPACITY])
+}
+
+// Backgrounds: translucent shades of the palette's `bg`, the same in every applet; text is the palette's
+/// Behind an applet (hub, man page, editor, project overview, file manager header)
+pub const fn bg(palette: &Palette) -> Color {
+    with_opacity(palette.bg)
+}
+/// Behind a panel or list (treeview, file list)
+pub fn panel_bg(palette: &Palette) -> Color {
+    with_opacity(palette.raised(5))
+}
+/// Bars (prompts, headers), hovered rows, the selected row of an unfocused list
+pub fn raised_bg(palette: &Palette) -> Color {
+    with_opacity(palette.raised(15))
+}
+/// The focused or selected row
+pub fn selected_bg(palette: &Palette) -> Color {
+    with_opacity(palette.tinted(25))
+}
+/// Behind menus and popups: opaque, as text behind showed through translucent ones (linear blending)
+pub fn popup_bg(palette: &Palette) -> Color {
+    let Color([r, g, b, _]) = palette.raised(10);
+    Color([r, g, b, 0xFF])
+}
+/// Lines and frames
+pub fn guide(palette: &Palette) -> Color {
+    with_opacity(palette.raised(25))
+}
 
 /// Rows of the treeview, its menus and the project overview
 pub fn row_height() -> f32 {

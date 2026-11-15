@@ -5,7 +5,7 @@ pub(crate) mod repl;
 use crate::{
     nodular_applet::{
         AppletContext, AppletSpawner, AppletSpawnerTrait, NodeRequest, NodularAppletInitializer,
-        StandardApplet, treeview::with_opacity,
+        StandardApplet,
     },
     standard_keybinds::handle_standard_keybinds,
     ui,
@@ -52,16 +52,6 @@ const COMMANDS: [Signature; 3] = [
 /// Lines per scroll step
 const SCROLL_STEP: isize = 3;
 pub(crate) const PROMPT: &str = "> ";
-
-/// The hub's, buffer line's and help's background: the palette's, translucent like the treeview
-pub(crate) const fn bg(palette: &Palette) -> Color {
-    with_opacity(palette.bg)
-}
-
-/// Their bars' (prompt, header, commands): the background a bit toward the text
-pub(crate) fn bar_bg(palette: &Palette) -> Color {
-    with_opacity(palette.raised(15))
-}
 
 /// Technically, this is a standard app, but it is so essential
 /// that I am considering it a tool for sttk.
@@ -305,7 +295,7 @@ impl StandardApplet for CommandHubApplet {
             return grid.element().into();
         }
         for row in 0..height {
-            fill_row(&mut grid, row, bg(&self.palette));
+            fill_row(&mut grid, row, ui::bg(&self.palette));
         }
 
         self.repl.draw_prompt(&mut grid, height - 1, &self.palette);
@@ -318,7 +308,7 @@ impl StandardApplet for CommandHubApplet {
         let scroll = self.scroll.min(lines.len().saturating_sub(body_rows));
 
         // header: title, and a hint or how far it's scrolled
-        fill_row(&mut grid, 0, bar_bg(&self.palette));
+        fill_row(&mut grid, 0, ui::raised_bg(&self.palette));
         put(&mut grid, 0, 1, &self.title, self.palette.fg);
         let note = if scroll > 0 {
             format!("{scroll} lines below (PageDown) ")

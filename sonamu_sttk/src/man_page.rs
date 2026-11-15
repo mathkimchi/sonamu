@@ -1,7 +1,7 @@
 //! The basic usage manual (`docs/usage.md`). Super+? opens it where a new wl surface would go (the root does that); Esc or q closes it.
 
 use crate::{
-    command_hub::{bar_bg, bg, fill_row, put},
+    command_hub::{fill_row, put},
     nodular_applet::{
         AppletContext, AppletSpawner, AppletSpawnerTrait, NodularAppletInitializer, StandardApplet,
     },
@@ -256,10 +256,10 @@ impl StandardApplet for ManPageApplet {
             return grid.element().into();
         }
         for row in 0..height {
-            fill_row(&mut grid, row, bg(&self.palette));
+            fill_row(&mut grid, row, ui::bg(&self.palette));
         }
 
-        fill_row(&mut grid, 0, bar_bg(&self.palette));
+        fill_row(&mut grid, 0, ui::raised_bg(&self.palette));
         let title_end = put(&mut grid, 0, 1, "Basic Usage", self.palette.fg);
         let note = "Esc closes, Up/Down scroll ";
         if let Some(column) = width

@@ -7,7 +7,6 @@ use crate::{
         NodularAppletInitializer, StandardApplet, WrapInitializer,
         node_holder::NodeHolder,
         node_tree::{AttachClient, NodeId, NodeTree, PROJECT_ICON, SpawnClient, root_label_mut},
-        with_opacity,
     },
     session,
     standard_keybinds::{browser, terminal},
@@ -138,7 +137,6 @@ const NEW_ROWS: [(&str, char, New); 3] = [
 fn hint() -> Color {
     settings::get().palette.inactive
 }
-const BTN_LEFT: u32 = 0x110;
 
 /// The home directory, which paths show as `~`
 /// The overview's rows, each a line of text at its top (above the zoom-out view)
@@ -656,7 +654,7 @@ impl ProjectApplet {
                 position,
                 kind:
                     MouseEventKind::Button {
-                        button: BTN_LEFT,
+                        button: ui::BTN_LEFT,
                         pressed,
                     },
                 ..
@@ -953,7 +951,7 @@ impl ProjectApplet {
             .chain(self.zoom_view(size))
             .collect();
         UITree::new_styled(
-            UIElement::Backgrounded(with_opacity(settings::get().palette.bg)),
+            UIElement::Backgrounded(ui::bg(&settings::get().palette)),
             Style::full_size(),
             rows,
         )
@@ -974,7 +972,7 @@ impl ProjectApplet {
                 [(width - PAD).max(0.0), count as f32 * row_height() + PAD],
             ),
             vec![UITree::leaf_styled(
-                UIElement::Backgrounded(with_opacity(settings.palette.sunken(30))),
+                UIElement::Backgrounded(ui::with_opacity(settings.palette.sunken(30))),
                 Style::full_size(),
             )],
         );

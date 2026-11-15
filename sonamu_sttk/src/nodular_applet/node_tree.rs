@@ -3,7 +3,7 @@ use crate::{
     nodular_applet::{
         NodeRequest, NodularAppletInitializer, swipe,
         traversal::Traversal,
-        treeview::{BTN_LEFT, BTN_RIGHT, Menu, MenuEvent, MenuItem, node_items},
+        treeview::{Menu, MenuEvent, MenuItem, node_items},
     },
     session,
     standard_keybinds::standard_keybind_request,
@@ -1772,7 +1772,7 @@ impl NodeTree {
                     }
                 }
                 MouseEventKind::Button {
-                    button: BTN_LEFT,
+                    button: ui::BTN_LEFT,
                     pressed,
                 } => {
                     if let Some(size) = self.latest_size {
@@ -2290,7 +2290,7 @@ impl NodeTree {
         const SPEED: f64 = 600.0;
         let press = self
             .zoom_press
-            .filter(|press| Self::zoom_dragged(press.from, press.at))?;
+            .filter(|press| ui::dragged(press.from, press.at))?;
         let size = [press.size.width, press.size.height].map(f64::from);
         let depth = |distance: f64| (1.0 - distance / MARGIN).clamp(0.0, 1.0);
         let depths = [0, 1].map(|axis| depth(press.at[axis]) - depth(size[axis] - press.at[axis]));
@@ -3053,7 +3053,7 @@ impl NodeTree {
         let dragged = self
             .zoom_press
             .filter(|press| {
-                self.nodes.contains_key(press.node) && Self::zoom_dragged(press.from, press.at)
+                self.nodes.contains_key(press.node) && ui::dragged(press.from, press.at)
             })
             .into_iter()
             .flat_map(|ZoomPress { node: id, .. }| {
@@ -3282,12 +3282,6 @@ impl NodeTree {
             .map(|pane| (pane, at))
     }
 
-    /// Whether the pointer moved far enough from `from` for a drag
-    fn zoom_dragged(from: [f64; 2], at: [f64; 2]) -> bool {
-        const DRAG_THRESHOLD: f64 = 12.0;
-        (at[0] - from[0]).hypot(at[1] - from[1]) > DRAG_THRESHOLD
-    }
-
     /// During a drag in the zoom-out view drawn at `size`: the dragged node, the node whose pane it is over, which
     /// edge (left, right or bottom; the rest drops nothing), and that pane's rect (before scaling). Both stay
     /// below the focused node.
@@ -3302,7 +3296,7 @@ impl NodeTree {
         } = self.zoom_press?;
         let focused = self.focused_node();
         if !self.nodes.contains_key(id)
-            || !Self::zoom_dragged(from, at)
+            || !ui::dragged(from, at)
             || id == focused
             || !self.contains(focused, id)
         {
@@ -3334,7 +3328,7 @@ impl NodeTree {
     /// press on a pane opens it (the treeview's node actions); what is chosen is left for the holder (`take_zoom_action`)
     pub fn zoom_menu_mouse(&mut self, size: DisplayContainerSize, event: &MouseEvent) -> bool {
         if let MouseEventKind::Button {
-            button: BTN_RIGHT,
+            button: ui::BTN_RIGHT,
             pressed: true,
         } = event.kind
             && self.zoom_press.is_none()
@@ -3427,7 +3421,7 @@ impl NodeTree {
             let offset = [0, 1].map(|axis| carried[axis] + scroll[axis]);
             self.zoom_pan = Some((Instant::now(), offset, carried_rows, false));
         }
-        if self.nodes.contains_key(id) && !Self::zoom_dragged(from, position) {
+        if self.nodes.contains_key(id) && !ui::dragged(from, position) {
             // a click
             if Some(id) == self.zoom_center() {
                 self.focus(id, false);
