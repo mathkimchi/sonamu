@@ -20,7 +20,7 @@ Runner-only unless noted; the tree doesn't know about these.
 ## Socket (`$SONAMU_SOCKET`, `sonamu_common::msg`, `msg_socket.rs`)
 
 - `$XDG_RUNTIME_DIR/sonamu-<wl socket>.sock`. `sonamu-msg open <applet> [args]` → `StandardEvent::Open` to the root, placed like a new wl surface: into the focused applet (`take_open`) or as the focused node's child (`NodeHolder::open`). Relative path args are made absolute. Exit 1 if unreachable (xdg-open falls back).
-- `eval`, `subscribe`: COMMANDS.md. `assets/sonamu-file-manager.desktop`: default folder handler.
+- `eval`, `subscribe`: `.claude/COMMANDS.md`. `assets/sonamu-file-manager.desktop`: default folder handler.
 
 ## Clipboard
 
@@ -29,11 +29,3 @@ Native applets use `sonamu_common::clipboard` (not `arboard`: wrong compositor).
 ## Notifications
 
 `sonamu_common::notification::Replacing` via `busctl`, served by the status bar. Used by settings reloads and battery (`sonamu_sar::battery`: 20%, critical 10%, polled 30 s). Keep tests from sending them.
-
-## Rendering
-
-- `TextCache` (`rendering.rs`): shaped buffers by (text, size); `Family::Monospace` resolved to a name once (scanning all fonts per word was the main CPU cost).
-- Elements are scissored to their clip (`draw_primitive_scene`); `Clip` keeps the pane's rounded rect apart from the cut `area`. `DisplayAreaPx` is signed. Text is only cut to rects.
-- Colors are sRGB everywhere (shaders decode).
-- Hidden tiles get no frame callbacks (`Suspended`). Surface textures cached per commit (`TextureCache`). linux-dmabuf imported as `VkImage` (`smithay/dmabuf.rs`, `sonamu_ui::dmabuf`).
-- `atlas.trim()` is never called (glyph atlas only grows).

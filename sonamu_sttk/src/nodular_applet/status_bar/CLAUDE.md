@@ -14,7 +14,7 @@ Replaces DMS (bar, notifications, tray, OSD). Code: `sonamu_sttk/src/nodular_app
 ## Gotchas
 
 - Don't `match` on `snapshot.lock()` when an arm locks again (deadlock).
-- Popups are opaque: translucent ones showed text through (linear blending). `treeview::menu_bg` (alpha 0xF0) likely does.
+- Popups and menus are opaque (`ui::popup_bg`): translucent ones showed text through (linear blending).
 - Headless audio: pass `PIPEWIRE_RUNTIME_DIR=/run/user/1000 PULSE_RUNTIME_PATH=/run/user/1000/pulse`.
 - Tests touch real volume/wifi/power profile: run in `dbus-run-session`.
 

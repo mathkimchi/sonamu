@@ -21,19 +21,19 @@ Rust Wayland compositor: native applets and wl clients in one recursive tree.
 
 # Docs
 
-- Runner (Wayland, socket, clipboard, notifications, rendering): `RUNNER.md`
-- World tree, ownership, pluck/place, projects, focus, traversal, zoom-out, treeview, screens: `WORLD_TREE.md`
-- Glossary: `CONTEXT.md`
-- Sessions: `SESSIONS.md`; settings: `SETTINGS.md`; status bar: `STATUS_BAR.md`
-- Commands, Luau: `COMMANDS.md`
-- Native applet UI kit: `UI_KIT.md`
-- Headless testing: `TESTING.md`
+Component docs are `CLAUDE.md` beside their code; keep each component's instructions there, cross-cutting ones in `.claude/`.
+
+- Runner (Wayland, socket, clipboard, notifications): `sonamu_sar/CLAUDE.md`; rendering: `sonamu_common/sonamu_ui/CLAUDE.md`
+- World tree, ownership, pluck/place, projects, focus, traversal, zoom-out, treeview, screens: `sonamu_sttk/src/nodular_applet/CLAUDE.md`
+- Status bar: `sonamu_sttk/src/nodular_applet/status_bar/CLAUDE.md`
+- Native applet UI kit, UI consistency: `sonamu_sttk/src/ui/CLAUDE.md`
+- `.claude/`: glossary `CONTEXT.md`, sessions `SESSIONS.md`, settings `SETTINGS.md`, commands and Luau `COMMANDS.md`, headless testing `TESTING.md`
 
 # Rules
 
 - Change only what's asked; keep it small, simple, idiomatic Rust, self-documenting.
 - Report issues we missed.
-- Terse everywhere, incl. .claude; keep .claude current.
+- Terse everywhere, incl. Claude docs; keep them current.
 - Never edit `docs/`, `README.md` or `DEVLOG.md`.
 - Commit frequently. Pre-commit hook (`.githooks/`, `core.hooksPath`) runs `cargo fmt` and clippy `-D warnings`.
 - A Claude `PostToolUse` hook (`.claude/settings.json`) rustfmts each edited `.rs` file.

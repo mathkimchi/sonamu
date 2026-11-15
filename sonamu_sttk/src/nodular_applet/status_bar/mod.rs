@@ -1,5 +1,5 @@
 //! The status bar (#150): a row at the top of every screen, drawn by the root, with popups under its segments.
-//! See `.claude/STATUS_BAR.md`.
+//! See `CLAUDE.md` here.
 
 pub mod applet;
 mod calendar;
