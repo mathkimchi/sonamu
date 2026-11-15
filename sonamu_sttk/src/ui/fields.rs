@@ -110,6 +110,71 @@ pub const fn cycle(count: usize, current: usize, forward: bool) -> usize {
     }
 }
 
+/// How far a number field's +/- and slider steps: 1 for whole numbers and wide or unbounded ranges, finer for
+/// narrow ones
+#[must_use]
+pub fn step_size(min: Option<f64>, max: Option<f64>, integer: bool) -> f64 {
+    match (min, max) {
+        _ if integer => 1.0,
+        (Some(min), Some(max)) if max - min <= 2.0 => 0.05,
+        (Some(min), Some(max)) if max - min <= 20.0 => 0.5,
+        _ => 1.0,
+    }
+}
+
+/// `value` one `step` up (`up`) or down, on the step grid, within `[min, max]`
+#[must_use]
+pub fn stepped(value: f64, step: f64, up: bool, (min, max): (Option<f64>, Option<f64>)) -> f64 {
+    let next = snap(value + if up { step } else { -step }, step);
+    next.clamp(min.unwrap_or(f64::MIN), max.unwrap_or(f64::MAX))
+}
+
+/// Where `value` is along a slider from `min` to `max` (0..=1)
+#[must_use]
+#[expect(clippy::cast_possible_truncation, reason = "a fraction")]
+pub fn slider_fraction(value: f64, min: f64, max: f64) -> f32 {
+    ((value - min) / (max - min)).clamp(0.0, 1.0) as f32
+}
+
+/// The value at `fraction` along a slider from `min` to `max`, on the step grid
+#[must_use]
+pub fn slider_value(fraction: f64, min: f64, max: f64, step: f64) -> f64 {
+    snap(min + fraction.clamp(0.0, 1.0) * (max - min), step).clamp(min, max)
+}
+
+/// `value` rounded to a multiple of `step`, without float noise (eg 0.15, not 0.15000000000000002)
+fn snap(value: f64, step: f64) -> f64 {
+    ((value / step).round() * step * 1e6).round() / 1e6
+}
+
+/// A slider in a row of `rows`, from `left`, `width` wide, filled to `fraction` (place it in the row)
+#[must_use]
+pub fn slider(rows: &Rows, left: f32, width: f32, fraction: f32, palette: &Palette) -> UITree {
+    let track = 4.0;
+    let knob = 14.0;
+    let middle = rows.height / 2.0;
+    let at = left + fraction * width;
+    UITree::new_styled(
+        UIElement::Nothing,
+        Style::absolute([0.0, 0.0], [left + width + knob, rows.height]),
+        vec![
+            super::rect(guide(palette), [left, middle - track / 2.0], [width, track]),
+            super::rect(
+                palette.accent,
+                [left, middle - track / 2.0],
+                [at - left, track],
+            ),
+            super::frame(
+                palette.accent,
+                knob / 2.0,
+                knob / 2.0,
+                Style::absolute([at - knob / 2.0, middle - knob / 2.0], [knob, knob]),
+                Vec::new(),
+            ),
+        ],
+    )
+}
+
 /// A square of `color` with a `guide` edge, at `left` in a row of `rows` (place it in the row, like `Rows::text`)
 #[must_use]
 pub fn swatch(rows: &Rows, left: f32, color: Color, palette: &Palette) -> UITree {
@@ -156,6 +221,33 @@ mod tests {
         let mut input = TextInput::new(String::new());
         assert_eq!(key(&mut input, KeySymbol::Enter), Edit::Commit);
         assert_eq!(key(&mut input, KeySymbol::Escape), Edit::Cancel);
+    }
+
+    #[test]
+    fn steps_fit_the_range() {
+        assert_eq!(step_size(Some(8.0), Some(64.0), false), 1.0);
+        assert_eq!(step_size(Some(0.0), Some(1.0), false), 0.05);
+        assert_eq!(step_size(Some(0.1), Some(2.0), false), 0.05);
+        assert_eq!(step_size(Some(0.0), Some(16.0), false), 0.5);
+        assert_eq!(step_size(Some(10.0), Some(60.0), true), 1.0);
+        assert_eq!(step_size(None, None, false), 1.0);
+    }
+
+    #[test]
+    fn stepping_snaps_and_clamps() {
+        let range = (Some(0.0), Some(1.0));
+        assert_eq!(stepped(0.1, 0.05, true, range), 0.15);
+        assert_eq!(stepped(0.98, 0.05, true, range), 1.0);
+        assert_eq!(stepped(0.02, 0.05, false, range), 0.0);
+        assert_eq!(stepped(2.3, 1.0, true, (None, None)), 3.0);
+    }
+
+    #[test]
+    fn slider_maps_both_ways() {
+        assert_eq!(slider_fraction(24.0, 8.0, 64.0), 16.0 / 56.0);
+        assert_eq!(slider_value(0.5, 8.0, 64.0, 1.0), 36.0);
+        assert_eq!(slider_value(-1.0, 8.0, 64.0, 1.0), 8.0);
+        assert_eq!(slider_value(0.333, 0.0, 1.0, 0.05), 0.35);
     }
 
     #[test]

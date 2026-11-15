@@ -9,6 +9,7 @@ use sonamu_ui::{
     ui_element::{CharGrid, Length, Style, UIElement, UITree, cell_height, cell_width, font_size},
 };
 
+pub mod color_picker;
 pub mod fields;
 
 pub use sonamu_ui::ui_event::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
