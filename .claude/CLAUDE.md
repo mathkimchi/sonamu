@@ -36,3 +36,4 @@ Rust Wayland compositor: native applets and wl clients in one recursive tree.
 - Terse everywhere, incl. .claude; keep .claude current.
 - Never edit `docs/`, `README.md` or `DEVLOG.md`.
 - Commit frequently. Pre-commit hook (`.githooks/`, `core.hooksPath`) runs `cargo fmt` and clippy `-D warnings`.
+- A Claude `PostToolUse` hook (`.claude/settings.json`) rustfmts each edited `.rs` file.
