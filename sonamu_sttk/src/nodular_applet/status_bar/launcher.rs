@@ -64,7 +64,7 @@ impl Launcher {
         let palette = &settings.palette;
         let lines = Lines::new();
         let mut items = vec![
-            lines.highlight(0, [0, COLUMNS], palette.raised(20)),
+            lines.highlight(0, [0, COLUMNS], ui::raised_bg(palette)),
             lines.text(
                 0,
                 0,
