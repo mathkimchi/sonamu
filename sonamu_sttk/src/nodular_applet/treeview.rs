@@ -33,7 +33,6 @@ pub fn close_width() -> f32 {
 /// The share of a row's height at its top and at its bottom that drops between siblings
 const EDGE_ZONE: f32 = 0.25;
 const INSERT_LINE_HEIGHT: f32 = 3.0;
-const MENU_PAD: f32 = 12.0;
 /// Two clicks on a row within this are a double click (sets the view root)
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// What the menu's `New` items list, and their labels
@@ -261,7 +260,7 @@ impl<T> Menu<T> {
             .map(|(index, item)| {
                 let background = (self.hovered == Some(index))
                     .then_some(ui::raised_bg(&settings::get().palette));
-                let label = rows.text(ui::text(item.label(), text), MENU_PAD, width);
+                let label = rows.text(ui::text(item.label(), text), ui::POPUP_PAD, width);
                 rows.row(index, width, background, vec![label])
                     .with_pointer()
             })

@@ -8,7 +8,7 @@ Every native applet looks and behaves alike: same shades, metrics, input handlin
 
 ## Parts
 
-- Metrics: `row_height()` (font + 14; every list), `compact_row_height()` (font + 10; bar popup lines), `PAD` (also lists' left inset), `INDENT` (per tree level).
+- Metrics: `row_height()` (font + 14; every list), `compact_row_height()` (font + 10; bar popup lines), `PAD` (also lists' left inset), `INDENT` (per tree level), `POPUP_PAD` (inside menus and popups).
 - Backgrounds (from `&Palette`, translucent `with_opacity`): `bg` (applet), `panel_bg` (panel, list), `raised_bg` (bars, hover, unfocused selection), `selected_bg`, `guide` (lines, frames), `popup_bg` (menus, popups; opaque). Text is the palette's.
 - Clickable rows and cells light up under the pointer (`raised_bg`).
 - Keys: `step` (Up/Down in a list: stops at the ends), `page`.

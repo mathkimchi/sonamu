@@ -63,6 +63,8 @@ pub fn compact_row_height() -> f32 {
 }
 /// Space around content (eg the project overview's margin, the treeview's text inset)
 pub const PAD: f32 = 16.0;
+/// Room inside menus and popups (the treeview's, the bar's)
+pub const POPUP_PAD: f32 = 12.0;
 /// How far a tree's rows (treeview, file list) step in per level
 pub const INDENT: f32 = 32.0;
 

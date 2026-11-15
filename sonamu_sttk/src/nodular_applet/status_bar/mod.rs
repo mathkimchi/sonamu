@@ -15,7 +15,7 @@ mod system;
 mod tray;
 mod widgets;
 
-use crate::ui::{self, BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
+use crate::ui::{self, BTN_LEFT, BTN_MIDDLE, BTN_RIGHT, POPUP_PAD};
 use chrono::{Local, NaiveDate};
 use controls::Controls;
 use icons::Icons;
@@ -35,8 +35,6 @@ use widgets::{Cell, ScrollList};
 
 /// Room between segments and at the bar's ends
 const GAP: f32 = 12.0;
-/// Room inside a popup
-const POPUP_PAD: f32 = 12.0;
 
 /// The bar's height (px), taken from the top of every screen
 pub fn height() -> u32 {
