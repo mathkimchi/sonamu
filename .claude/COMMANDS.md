@@ -30,7 +30,7 @@ Emacs-like: every action is a named command; keybinds, hub, buffer line and sock
 ## Prompts
 
 - `command_hub/repl.rs`: `Repl` shared by the hub and the buffer line (Up/Down recall shared, `RECALL`).
-- `KEY_CAPTURE` (held by a `Capture`, eg the settings editor recording a keybind): the runner skips settings and Luau bindings, `is_keybind` is true and the root skips its own, so every key reaches the focused applet.
+- `KEY_CAPTURE` (count of `Capture`s, eg the settings editor recording a keybind): the runner skips settings, Luau and `pluck_place` bindings, `is_keybind` is true and the root skips its own, so every key reaches the focused applet. Ended (`end_capture`) when a wl client has the keyboard (runner) or focus leaves where it started (`RootNodeApplet::check_capture`): applets don't get `FocusChanged`.
 - Buffer line (`RootNodeApplet::{buffer_mode, repl}`): keybind `buffer_mode` (default Super+Esc); `BUFFER_MODE` sends every key to the root and shadows symbol bindings unless Super. Active screen's bottom. Setting `buffer_line`.
 - Socket eval: `Message::Eval { code, max }`, JSON lines (`msg::EvalReply`), keepalives every 100 ms cancel it when the client leaves. Node JSON `{"type", "node"}`.
 

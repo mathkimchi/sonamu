@@ -65,6 +65,7 @@ impl Editor {
     pub fn commit(&mut self, paths: &[Vec<String>], values: &[Value]) -> Result<(), String> {
         let path = self.json_path()?.to_owned();
         let mut user = self.read()?;
+        settings_file::migrate(&mut user);
         for (at, value) in paths.iter().zip(values) {
             settings_file::set(&mut user, &keys(at), value.clone());
         }
@@ -82,7 +83,9 @@ impl Editor {
             FieldKind::Number { min, max, integer } => {
                 let mut number: f64 = text
                     .parse()
-                    .map_err(|_| format!("{text:?} isn't a number"))?;
+                    .ok()
+                    .filter(|number: &f64| number.is_finite())
+                    .ok_or_else(|| format!("{text:?} isn't a number"))?;
                 number = number.clamp(min.unwrap_or(f64::MIN), max.unwrap_or(f64::MAX));
                 if *integer {
                     Value::from(number.round() as i64)
@@ -260,6 +263,9 @@ mod tests {
         assert_eq!(file(&dir), json!({"font_size": 64.0}));
         assert!(editor.commit_text(&font, "big").is_err());
         let width = field(&editor, "treeview.width");
+        assert!(editor.commit_text(&width, "nan").is_err());
+        assert!(editor.commit_text(&width, "inf").is_err());
+        let width = field(&editor, "treeview.width");
         editor.commit_text(&width, "33.6").unwrap();
         assert_eq!(file(&dir)["treeview"]["width"], json!(34));
     }
@@ -283,6 +289,25 @@ mod tests {
             .commit_text(&field(&editor, "palette.bg"), "#102030")
             .unwrap();
         assert_eq!(file(&dir)["palette"]["bg"], json!("#102030"));
+    }
+
+    /// A file from before keybind groups still takes edits: its flat list becomes one group
+    #[test]
+    fn flat_keybinds_migrate_on_commit() {
+        let dir = temp_dir("flat");
+        fs::write(
+            dir.join("settings.json"),
+            r#"{"keybinds": [{"key": "x", "shell": "true"}]}"#,
+        )
+        .unwrap();
+        let mut editor = Editor::open(&dir);
+        editor
+            .commit(&[vec!["gap".to_owned()]], &[json!(3.0)])
+            .unwrap();
+        assert_eq!(
+            file(&dir),
+            json!({"keybinds": {"Keybinds": [{"key": "x", "shell": "true"}]}, "gap": 3.0})
+        );
     }
 
     #[test]

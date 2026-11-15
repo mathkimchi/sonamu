@@ -90,6 +90,8 @@ pub struct SettingsEditorApplet {
     /// The last write's error
     error: Option<String>,
     keybinds: Keybinds,
+    /// The file's keybinds when `keybinds` last matched it, to see changes made elsewhere
+    keybinds_seen: Value,
     /// The bind whose keys are being recorded; every key comes here meanwhile
     recording: Option<((usize, usize), Capture)>,
     hook: AppletContext,
@@ -99,6 +101,7 @@ impl SettingsEditorApplet {
         let editor = Editor::open(dir);
         Self {
             keybinds: Keybinds::from_json(&editor.value(&[KEYBINDS.to_owned()])),
+            keybinds_seen: editor.value(&[KEYBINDS.to_owned()]),
             recording: None,
             editor,
             palette: settings::get().palette,
@@ -172,16 +175,31 @@ impl SettingsEditorApplet {
         let json = self.keybinds.to_json();
         let result = self.editor.commit(&[vec![KEYBINDS.to_owned()]], &[json]);
         self.report(result);
+        self.keybinds_seen = self.editor.value(&[KEYBINDS.to_owned()]);
     }
 
     /// Takes the keybinds from the file again if they changed there (eg Revert, a hand edit)
     fn sync_keybinds(&mut self) {
         let current = self.editor.value(&[KEYBINDS.to_owned()]);
-        if self.keybinds.to_json() != current {
-            self.keybinds = Keybinds::from_json(&current);
-            self.recording = None;
-            self.selected = None;
-            self.editing = None;
+        if keybinds_changed(&self.keybinds_seen, &current) {
+            self.rebuild_keybinds();
+        }
+    }
+
+    /// The keybinds as the file has them now
+    fn rebuild_keybinds(&mut self) {
+        let current = self.editor.value(&[KEYBINDS.to_owned()]);
+        self.keybinds = Keybinds::from_json(&current);
+        self.keybinds_seen = current;
+        self.recording = None;
+        self.selected = None;
+        self.editing = None;
+    }
+
+    /// Records the keys of a bind the editor can edit
+    fn start_recording(&mut self, at: (usize, usize)) {
+        if self.keybinds.groups[at.0].1[at.1].editable() {
+            self.recording = Some((at, Capture::start()));
         }
     }
 
@@ -289,11 +307,11 @@ impl SettingsEditorApplet {
             Row::Group(group) => {
                 self.editing = Some(TextInput::new(self.keybinds.groups[group].0.clone()));
             }
-            Row::Bind(group, bind) => self.recording = Some(((group, bind), Capture::start())),
+            Row::Bind(group, bind) => self.start_recording((group, bind)),
             Row::AddBind(group) => {
                 let bind = self.keybinds.add_bind(group);
                 self.select_row(Row::Bind(group, bind));
-                self.recording = Some(((group, bind), Capture::start()));
+                self.start_recording((group, bind));
             }
             Row::AddGroup => {
                 let group = self.keybinds.add_group();
@@ -512,7 +530,7 @@ impl SettingsEditorApplet {
                     self.commit_editing();
                     let result = self.editor.revert();
                     self.report(result);
-                    self.sync_keybinds();
+                    self.rebuild_keybinds();
                 } else if let Some(index) = row_at {
                     self.select(Some(index));
                     if self.editing.is_none() {
@@ -765,6 +783,12 @@ impl Drop for SettingsEditorApplet {
     }
 }
 
+/// Whether the file's keybinds changed from `last`
+fn keybinds_changed(last: &Value, now: &Value) -> bool {
+    // as text: maps compare without their order, which is the groups' order
+    serde_json::to_vec(last).ok() != serde_json::to_vec(now).ok()
+}
+
 /// A setting as text to edit: strings without quotes
 fn plain(value: &Value) -> String {
     match value {
@@ -794,6 +818,10 @@ impl StandardApplet for SettingsEditorApplet {
         }
         match standard_event {
             StandardEvent::UIEvent(ui_event) => {
+                // the root ends a capture when focus leaves
+                if self.recording.is_some() && !sonamu_common::capturing() {
+                    self.recording = None;
+                }
                 if self.recording.is_some() && matches!(ui_event, UIEvent::Key { .. }) {
                     self.record(ui_event);
                     self.hook.damage_window();
@@ -860,6 +888,14 @@ impl StandardApplet for SettingsEditorApplet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keybinds_changed_sees_order() {
+        let a = serde_json::json!({"A": [], "B": []});
+        let b = serde_json::json!({"B": [], "A": []});
+        assert!(keybinds_changed(&a, &b));
+        assert!(!keybinds_changed(&a, &a.clone()));
+    }
 
     /// Opening Settings while one is open focuses it instead of making another
     #[test]

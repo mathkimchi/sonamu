@@ -19,22 +19,36 @@ pub const WAYLAND_DISPLAY_ENV: &str = "SONAMU_WAYLAND_DISPLAY";
 /// bindings that would take typing (keys with a symbol, without Super)
 pub static BUFFER_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// An applet is recording a keybind: every key goes to the focused applet; settings, `keymap.set` and the root's
-/// bindings are skipped. Set by holding a `Capture`
-pub static KEY_CAPTURE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Applets recording a keybind (`Capture`s held): every key goes to the focused applet; settings, `keymap.set` and
+/// the root's bindings are skipped. A count, so a new capture can start before the old one drops
+pub static KEY_CAPTURE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Whether keys are being captured
+pub fn capturing() -> bool {
+    KEY_CAPTURE.load(std::sync::atomic::Ordering::Relaxed) > 0
+}
+
+/// Ends every capture, eg when focus leaves the applet capturing (its `Capture`s then do nothing)
+pub fn end_capture() {
+    KEY_CAPTURE.store(0, std::sync::atomic::Ordering::Relaxed);
+}
 
 /// Holds `KEY_CAPTURE` on; dropping it (eg its applet closing) ends the capture
 #[must_use = "the capture ends when it's dropped"]
 pub struct Capture(());
 impl Capture {
     pub fn start() -> Self {
-        KEY_CAPTURE.store(true, std::sync::atomic::Ordering::Relaxed);
+        KEY_CAPTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self(())
     }
 }
 impl Drop for Capture {
     fn drop(&mut self) {
-        KEY_CAPTURE.store(false, std::sync::atomic::Ordering::Relaxed);
+        let _ = KEY_CAPTURE.try_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |count| Some(count.saturating_sub(1)),
+        );
     }
 }
 
@@ -61,11 +75,21 @@ pub enum Todo {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::Ordering;
+
+    /// A new capture before the old one's dropped (eg recording another bind) keeps capturing
+    #[test]
+    fn overlapping_captures() {
+        let first = Capture::start();
+        let second = Capture::start();
+        drop(first);
+        assert!(capturing());
+        drop(second);
+        assert!(!capturing());
+    }
 
     #[test]
     fn capture_ends_on_drop() {
         drop(Capture::start());
-        assert!(!KEY_CAPTURE.load(Ordering::Relaxed));
+        assert!(!capturing());
     }
 }

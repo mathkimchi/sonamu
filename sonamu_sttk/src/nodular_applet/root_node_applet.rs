@@ -73,6 +73,8 @@ pub struct RootNodeApplet {
     treeview_shown: bool,
     /// An Alt+traversal key moved the selector and Alt is still held
     alt_traversal: bool,
+    /// Focus when a key capture started (`check_capture`)
+    capture_focus: Option<WorldTreePath>,
     /// Always shown, beside the panes; toggled by its pin button and saved in the session
     treeview_pinned: bool,
     /// The view root when it is a row inside an applet (double click, right click › Set as view root, Alt+R);
@@ -592,6 +594,7 @@ impl RootNodeApplet {
             // the root node starts focused
             treeview_shown: true,
             alt_traversal: false,
+            capture_focus: None,
             // a clean session starts pinned
             treeview_pinned: saved_session
                 .as_ref()
@@ -745,8 +748,9 @@ impl RootNodeApplet {
 
     /// From the runner
     fn handle_event(&mut self, event: StandardEvent) {
+        self.check_capture();
         // an applet recording a keybind gets the key, whatever it is
-        let capturing = sonamu_common::KEY_CAPTURE.load(Ordering::Relaxed)
+        let capturing = sonamu_common::capturing()
             && matches!(event, StandardEvent::UIEvent(UIEvent::Key { .. }));
         if let StandardEvent::UIEvent(ui_event) = &event
             && !capturing
@@ -859,6 +863,24 @@ impl RootNodeApplet {
         }
 
         self.damage_if_tree_changed();
+    }
+
+    /// Ends a key capture once focus leaves where it was when it started (eg a click on another tile), so keys
+    /// reach the new focus
+    fn check_capture(&mut self) {
+        if !sonamu_common::capturing() {
+            self.capture_focus = None;
+            return;
+        }
+        let focus = self.holder.tree.get_focus_path();
+        match &self.capture_focus {
+            None => self.capture_focus = Some(focus),
+            Some(at) if *at != focus => {
+                sonamu_common::end_capture();
+                self.capture_focus = None;
+            }
+            Some(_) => {}
+        }
     }
 
     /// Where a new wl surface would go, focused
@@ -1596,7 +1618,7 @@ fn is_buffer_mode_key(ui_event: &UIEvent) -> bool {
 /// Whether the root or a node acts on this key, rather than a focused wl client.
 /// The runner sends other keys straight to the client (#56).
 pub fn is_keybind(ui_event: &UIEvent) -> bool {
-    sonamu_common::KEY_CAPTURE.load(Ordering::Relaxed)
+    sonamu_common::capturing()
         || sonamu_common::BUFFER_MODE.load(Ordering::Relaxed)
         || is_buffer_mode_key(ui_event)
         || RootKeybind::of(ui_event).is_some()
@@ -1708,6 +1730,43 @@ mod tests {
         assert!(!is_keybind(&key));
         let capture = sonamu_common::Capture::start();
         assert!(is_keybind(&key));
+        drop(capture);
+
+        // focus moving away (eg a click on a terminal) ends it, so keys reach the new focus
+        let mut event_loop = EventLoop::<RootNodeApplet>::try_new().unwrap();
+        let (world, _calls) = calloop::channel::channel();
+        let (request_sender, _requests) = calloop::channel::channel();
+        let surface = SharedState::new(StateKind::Surface, UITree::leaf(UIElement::Nothing));
+        let mut root = RootNodeApplet::new(
+            ProjectApplet::restorer(container(
+                Some("p"),
+                vec![tab("0", Vec::new()), tab("1", Vec::new())],
+            )),
+            BTreeMap::from([("tab".to_string(), Box::new(TabSpawner) as AppletSpawner)]),
+            None,
+            surface,
+            request_sender,
+            &event_loop.handle(),
+            world,
+        );
+        pump(&mut event_loop, &mut root, 100);
+        let rows = view_tree_rows(&root.holder.tree, None, 0, false);
+        let paths: Vec<_> = rows.iter().map(|row| row.path.clone()).collect();
+        send(
+            &mut event_loop,
+            &mut root,
+            StandardEvent::Focus(paths[1].clone()),
+        );
+        let capture = sonamu_common::Capture::start();
+        send(&mut event_loop, &mut root, StandardEvent::UIEvent(key));
+        assert!(sonamu_common::capturing(), "same focus keeps it");
+        send(
+            &mut event_loop,
+            &mut root,
+            StandardEvent::Focus(paths[2].clone()),
+        );
+        send(&mut event_loop, &mut root, StandardEvent::UIEvent(key));
+        assert!(!sonamu_common::capturing(), "focus moved");
         drop(capture);
     }
 

@@ -17,6 +17,8 @@ pub struct Draft {
     /// `None` until recorded
     pub key: Option<Key>,
     pub action: DraftAction,
+    /// A bind the editor can't edit (unknown command, args written otherwise, extra keys): written back as it was
+    raw: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,25 +28,40 @@ pub enum DraftAction {
 }
 
 impl Draft {
-    fn from_json(value: &Value) -> Option<Self> {
-        let keybind: Keybind = serde_json::from_value(value.clone()).ok()?;
-        Some(Self {
-            mods: keybind.mods,
-            key: Some(keybind.key),
-            action: match keybind.action {
-                Action::Command { command, args } => DraftAction::Command {
-                    name: command,
-                    args,
+    /// A bind of the setting; kept `raw` unless it would be written back the same
+    fn from_json(value: &Value) -> Self {
+        let parsed = serde_json::from_value::<Keybind>(value.clone())
+            .ok()
+            .map(|keybind| Self {
+                mods: keybind.mods,
+                key: Some(keybind.key),
+                action: match keybind.action {
+                    Action::Command { command, args } => DraftAction::Command {
+                        name: command,
+                        args,
+                    },
+                    Action::Shell { shell } => DraftAction::Shell(shell),
                 },
-                Action::Shell { shell } => DraftAction::Shell(shell),
+                raw: None,
+            });
+        match parsed {
+            Some(draft) if draft.to_json().as_ref() == Some(value) => draft,
+            _ => Self {
+                mods: Vec::new(),
+                key: None,
+                action: DraftAction::Shell(String::new()),
+                raw: Some(value.clone()),
             },
-        })
+        }
     }
 
     /// The bind as settings JSON, if it's complete: keys recorded, a known command with args it accepts, or a shell
     /// command
     #[must_use]
     pub fn to_json(&self) -> Option<Value> {
+        if let Some(raw) = &self.raw {
+            return Some(raw.clone());
+        }
         let mut bind = Map::new();
         if !self.mods.is_empty() {
             bind.insert("mods".to_owned(), json!(self.mods));
@@ -71,9 +88,18 @@ impl Draft {
         Some(Value::Object(bind))
     }
 
+    /// Whether the editor can change it
+    #[must_use]
+    pub fn editable(&self) -> bool {
+        self.raw.is_none()
+    }
+
     /// Its keys like the help page shows them, eg `Super+Shift+T`
     #[must_use]
     pub fn keys_label(&self) -> String {
+        if let Some(raw) = &self.raw {
+            return raw.to_string();
+        }
         match &self.key {
             Some(key) => man_page::keys_label(&Keybind {
                 mods: self.mods.clone(),
@@ -89,6 +115,9 @@ impl Draft {
     /// The command's name, or `shell`
     #[must_use]
     pub fn action_name(&self) -> &str {
+        if self.raw.is_some() {
+            return "edit in settings.json";
+        }
         match &self.action {
             DraftAction::Command { name, .. } => name,
             DraftAction::Shell(_) => SHELL,
@@ -98,6 +127,9 @@ impl Draft {
     /// Its args (or shell command) as text to edit
     #[must_use]
     pub fn args_text(&self) -> String {
+        if self.raw.is_some() {
+            return String::new();
+        }
         match &self.action {
             DraftAction::Command { name, args } => {
                 arg_kind(name).map_or_else(|| json!(args).to_string(), |kind| args_text(kind, args))
@@ -109,6 +141,9 @@ impl Draft {
     /// Whether its action takes typed args (or a shell command)
     #[must_use]
     pub fn takes_args(&self) -> bool {
+        if self.raw.is_some() {
+            return false;
+        }
         match &self.action {
             DraftAction::Command { name, .. } => {
                 arg_kind(name).is_some_and(|kind| kind != ArgKind::None)
@@ -138,6 +173,9 @@ impl Draft {
 
     /// Switches to the next (`forward`) or previous command, `shell` last; args reset to the command's simplest
     pub fn cycle_action(&mut self, forward: bool) {
+        if self.raw.is_some() {
+            return;
+        }
         let names: Vec<&str> = KEYBIND_COMMANDS
             .iter()
             .map(|spec| spec.name)
@@ -157,6 +195,9 @@ impl Draft {
         };
     }
 }
+
+/// The setting's key, for `settings_file::migrate`
+const KEYBINDS: &str = "keybinds";
 
 /// `cycle_action`'s name for a shell command
 const SHELL: &str = "shell";
@@ -222,7 +263,9 @@ impl Keybinds {
     /// From the setting's JSON (binds that don't parse are dropped)
     #[must_use]
     pub fn from_json(value: &Value) -> Self {
-        let groups = value
+        let mut value = Value::Object(Map::from_iter([(KEYBINDS.to_owned(), value.clone())]));
+        settings_file::migrate(&mut value);
+        let groups = value[KEYBINDS]
             .as_object()
             .into_iter()
             .flatten()
@@ -231,7 +274,7 @@ impl Keybinds {
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .filter_map(Draft::from_json)
+                    .map(Draft::from_json)
                     .collect();
                 (name.clone(), binds)
             })
@@ -301,6 +344,7 @@ impl Keybinds {
             mods: Vec::new(),
             key: None,
             action: DraftAction::Shell(String::new()),
+            raw: None,
         });
         binds.len() - 1
     }
@@ -454,6 +498,33 @@ mod tests {
             Some(vec![json!("foot -e hx")])
         );
         assert_eq!(parse_args(ArgKind::None, ""), Some(vec![]));
+    }
+
+    /// Binds it can't edit (unknown command, other args, extra keys) are written back as they were
+    #[test]
+    fn unknown_binds_kept() {
+        let json = json!({"G": [
+            {"key": "x", "command": "future_command"},
+            {"key": "y", "command": "swap_sibling", "args": [1.0]},
+            {"key": "z", "shell": "true", "comment": "mine"},
+            {"key": "w", "shell": "true"}
+        ]});
+        let mut keybinds = Keybinds::from_json(&json);
+        assert_eq!(keybinds.to_json(), json);
+        assert!(!keybinds.groups[0].1[0].editable());
+        assert!(keybinds.groups[0].1[3].editable());
+        keybinds.add_group();
+        assert_eq!(keybinds.to_json()["G"], json["G"]);
+    }
+
+    /// An old flat list (before groups) becomes one group
+    #[test]
+    fn flat_list_becomes_a_group() {
+        let keybinds = Keybinds::from_json(&json!([{"key": "x", "shell": "true"}]));
+        assert_eq!(
+            keybinds.to_json(),
+            json!({"Keybinds": [{"key": "x", "shell": "true"}]})
+        );
     }
 
     #[test]

@@ -503,6 +503,12 @@ impl From<serde_json::Error> for LoadError {
     }
 }
 
+/// Whether `a` and `b` differ, keybind groups' order too (maps compare without it)
+#[must_use]
+pub fn differs(a: &Settings, b: &Settings) -> bool {
+    a != b || !a.keybinds.keys().eq(b.keybinds.keys())
+}
+
 /// The settings' JSON schema (`assets/settings.schema.json`)
 #[must_use]
 pub fn schema() -> serde_json::Value {
@@ -640,7 +646,8 @@ fn reload_from(dir: &Path, reloading: bool) -> Option<Vec<PathBuf>> {
             sonamu_ui::mipmaps::set_enabled(settings.mipmaps);
             let changed = {
                 let mut current = CURRENT.write().unwrap_or_else(PoisonError::into_inner);
-                std::mem::replace(&mut *current, settings) != *current
+                let old = std::mem::replace(&mut *current, settings);
+                differs(&old, &current)
             };
             if reloading {
                 NOTIFICATION.send("Settings reloaded".to_string(), String::new(), false);
@@ -910,6 +917,17 @@ mod tests {
         let schema = schema();
         let defaults: serde_json::Value = serde_json::from_str(DEFAULTS).unwrap();
         check(&schema, &schema["$defs"], &defaults, "");
+    }
+
+    /// Reordered keybind groups are a change (maps compare without order)
+    #[test]
+    fn settings_differ_on_group_order() {
+        let settings = Settings::default();
+        let mut reordered = settings.clone();
+        reordered.keybinds.reverse();
+        assert_eq!(settings, reordered);
+        assert!(differs(&settings, &reordered));
+        assert!(!differs(&settings, &settings.clone()));
     }
 
     #[test]

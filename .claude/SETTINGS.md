@@ -1,7 +1,7 @@
 # Settings (#63)
 
 - Config dir `$SONAMU_CONFIG`, else `$XDG_CONFIG_HOME/sonamu`. Executable `settings` → its stdout as JSON (timeout), else `settings.json`. Reference: `examples/config` (the dev machine symlinks it).
-- Defaults only in `assets/default_settings.json` (`include_str!`); user JSON deep-merged over. Numbers' sane ranges are `#[schemars(range)]` (schema only: loading doesn't enforce them; the settings editor clamps). `settings_file`: edits the user's JSON (diff from defaults, atomic write) for the settings editor. A field missing there panics in `Settings::default()` (tests catch it). Schema `assets/settings.schema.json` is rewritten by test `schema_is_current` (fails once, commit it).
+- Defaults only in `assets/default_settings.json` (`include_str!`); user JSON deep-merged over. Numbers' sane ranges are `#[schemars(range)]` (schema only: loading doesn't enforce them; the settings editor clamps). `settings_file`: edits the user's JSON (diff from defaults; atomic write through symlinks, mode kept) for the settings editor. Reloads compare with `differs` (keybind group order counts). A field missing there panics in `Settings::default()` (tests catch it). Schema `assets/settings.schema.json` is rewritten by test `schema_is_current` (fails once, commit it).
 - `"watch": [paths]`: extra files to watch. Watching is via parent dirs, debounced 100 ms. Loop detection is off (`Watcher::run`): a program changing its own watch files reloads forever.
 - `sonamu_common::settings`: `get()`/`reload()`/`subscribe()`; applets get `StandardApplet::settings_changed`. `font_size` and `mipmaps` are mirrored into `sonamu_ui` (it can't depend on `sonamu_common`).
 - Reloads notify (#143), retried 10 s; on failure previous settings are kept.

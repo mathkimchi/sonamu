@@ -71,6 +71,16 @@ pub fn set(user: &mut Value, path: &[&str], value: Value) {
     *at = value;
 }
 
+/// Brings older settings up to date: a flat `keybinds` list (before #107's groups) becomes the group `Keybinds`
+pub fn migrate(user: &mut Value) {
+    if let Some(keybinds) = user.get_mut("keybinds")
+        && keybinds.is_array()
+    {
+        let list = keybinds.take();
+        *keybinds = Value::Object(Map::from_iter([("Keybinds".to_owned(), list)]));
+    }
+}
+
 /// Whether `user` parses as settings
 pub fn check(user: &Value) -> Result<(), LoadError> {
     parse(&user.to_string()).map(|_| ())
@@ -84,11 +94,21 @@ pub fn write(path: &Path, user: Option<&Value>) -> io::Result<()> {
             _ => Ok(()),
         };
     };
+    // a symlink (eg from a dotfiles repo) stays one: its target is written
+    let is_link = fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
+    let path = if is_link {
+        fs::canonicalize(path)?
+    } else {
+        path.to_owned()
+    };
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let temporary = path.with_extension("json.tmp");
     fs::write(&temporary, format(user))?;
+    if let Ok(meta) = fs::metadata(&path) {
+        fs::set_permissions(&temporary, meta.permissions())?;
+    }
     fs::rename(temporary, path)
 }
 
@@ -285,6 +305,24 @@ mod tests {
         write(&path, None).unwrap();
         assert!(!path.exists());
         assert_eq!(read(&path).unwrap(), None);
+    }
+
+    /// A symlinked file (eg dotfiles) stays a link to the written file
+    #[test]
+    fn write_keeps_symlink() {
+        let dir = temp_dir("symlink");
+        let target = dir.join("real.json");
+        fs::write(&target, "{}").unwrap();
+        let link = dir.join("settings.json");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        write(&link, Some(&json!({"gap": 4.0}))).unwrap();
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(read(&target).unwrap(), Some(json!({"gap": 4.0})));
     }
 
     #[test]

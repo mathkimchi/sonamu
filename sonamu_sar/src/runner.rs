@@ -520,8 +520,13 @@ impl AppletRunner {
             return;
         }
 
+        // a wl client has the keyboard, so the applet capturing isn't focused
+        if sonamu_common::capturing() && self.smithay_state.wl_target.is_some() {
+            sonamu_common::end_capture();
+        }
         // global keybinds
         if let UIEvent::Key { modifiers, .. } = event
+            && !sonamu_common::capturing()
             && sonamu_common::settings::keybind_command(&event, modifiers)
                 .is_some_and(|(command, _)| command == "pluck_place")
         {
@@ -720,7 +725,7 @@ fn run_binding(event: &UIEvent) -> bool {
         return false;
     };
     // an applet recording a keybind gets every key
-    if sonamu_common::KEY_CAPTURE.load(std::sync::atomic::Ordering::Relaxed) {
+    if sonamu_common::capturing() {
         return false;
     }
     // the buffer line's keys shadow them, like a minibuffer's keymap
