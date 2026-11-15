@@ -209,7 +209,6 @@ fn load(path: &Path) -> Option<Image> {
         let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
         let mut pixmap = resvg::tiny_skia::Pixmap::new(SIZE, SIZE)?;
         let size = tree.size();
-        #[expect(clippy::cast_precision_loss, reason = "a small size")]
         let scale = SIZE as f32 / size.width().max(size.height());
         resvg::render(
             &tree,

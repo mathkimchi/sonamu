@@ -25,6 +25,7 @@ use notifications::{CloseReason, Notifications};
 use sonamu_common::settings::{Palette, Settings};
 use sonamu_ui::{
     color::Color,
+    display_units::ToPx,
     ui_element::{Image, Style, UIElement, UITree, font_size},
     ui_event::{KeySymbol, MouseEvent, MouseEventKind},
 };
@@ -44,13 +45,8 @@ const POPUP_PAD: f32 = 12.0;
 const SCROLL_STEP: f64 = 30.0;
 
 /// The bar's height (px), taken from the top of every screen
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "a row's height"
-)]
 pub fn height() -> u32 {
-    ui::row_height().ceil() as u32
+    ui::row_height().ceil().to_px()
 }
 
 /// A character's advance in the monospace font (0.6 em, eg Noto Sans Mono's)
@@ -69,7 +65,6 @@ fn columns(text: &str) -> usize {
 }
 
 /// The width of `text` in the monospace font (at least)
-#[expect(clippy::cast_precision_loss, reason = "short text")]
 fn text_width(text: &str) -> f32 {
     columns(text) as f32 * char_width()
 }
@@ -217,7 +212,6 @@ impl Lines {
     }
 
     /// `spans` on line `index` from `column`
-    #[expect(clippy::cast_precision_loss, reason = "columns")]
     fn text(&self, index: usize, column: usize, spans: Spans) -> UITree {
         let left = POPUP_PAD + column as f32 * char_width();
         let width = spans_width(&spans);
@@ -230,7 +224,6 @@ impl Lines {
     }
 
     /// A background behind line `index`'s `columns`
-    #[expect(clippy::cast_precision_loss, reason = "columns")]
     fn highlight(&self, index: usize, [from, to]: [usize; 2], color: Color) -> UITree {
         let left = POPUP_PAD + from as f32 * char_width();
         let width = (to - from) as f32 * char_width();
@@ -241,7 +234,6 @@ impl Lines {
     }
 
     /// `image` as a square icon at line `index`'s `column` (2 columns wide)
-    #[expect(clippy::cast_precision_loss, reason = "columns")]
     fn icon(&self, index: usize, column: usize, image: Image) -> UITree {
         let size = font_size() * 1.1;
         let left = POPUP_PAD + column as f32 * char_width();
@@ -253,7 +245,6 @@ impl Lines {
     }
 
     /// The popup's size for `lines` lines `columns` wide
-    #[expect(clippy::cast_precision_loss, reason = "columns")]
     fn size(lines: usize, columns: usize) -> [f32; 2] {
         [
             columns as f32 * char_width() + 2.0 * POPUP_PAD,
@@ -262,11 +253,7 @@ impl Lines {
     }
 
     /// The line and column at `[x, y]` in the popup
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "checked non-negative"
-    )]
+    #[expect(clippy::cast_sign_loss, reason = "checked non-negative")]
     fn at(&self, [x, y]: [f64; 2]) -> Option<(usize, usize)> {
         let x = x - f64::from(POPUP_PAD);
         let line = self.rows.row_at(y)?;
@@ -434,7 +421,6 @@ impl StatusBar {
     }
 
     /// The tray's icons from `left`: its pixmap, else its icon by name
-    #[expect(clippy::cast_precision_loss, reason = "a few icons")]
     fn tray_icons(&self, left: f32) -> Vec<UITree> {
         let size = font_size() * 1.1;
         let top = (height() as f32 - size) / 2.0;
@@ -848,7 +834,6 @@ impl StatusBar {
         }
         // a step per wheel notch (hi-res ones' parts add up), or per `SCROLL_STEP` px of a touchpad
         self.scrolled += v120.map_or(delta[1], |[_, v120]| f64::from(v120) / 120.0 * SCROLL_STEP);
-        #[expect(clippy::cast_possible_truncation, reason = "a few steps")]
         let steps = (self.scrolled / SCROLL_STEP).trunc() as i32;
         self.scrolled -= f64::from(steps) * SCROLL_STEP;
         let mut damaged = false;
@@ -864,7 +849,6 @@ impl StatusBar {
                 let volume = self.controls.state.lock().unwrap().volume;
                 if let Some(volume) = volume {
                     // up is louder
-                    #[expect(clippy::cast_precision_loss, reason = "a few steps")]
                     let level = (volume.level - steps as f32 * 0.05).clamp(0.0, 1.0);
                     self.controls.set_volume(level);
                     damaged = true;
@@ -944,11 +928,7 @@ impl StatusBar {
     }
 
     /// A click `x` px into the tray: left activates, middle secondary-activates, right opens the menu
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "an icon's index"
-    )]
+    #[expect(clippy::cast_sign_loss, reason = "an icon's index")]
     fn click_tray(&mut self, button: u32, x: f64) {
         let index = (x.max(0.0) / f64::from(3.0 * char_width())) as usize;
         let Some(item) = self.tray_items().into_iter().nth(index) else {

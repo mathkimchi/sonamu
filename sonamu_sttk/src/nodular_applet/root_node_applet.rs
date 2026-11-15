@@ -374,7 +374,6 @@ impl RootNodeApplet {
         self.activate_screen(active);
         self.holder.tree.set_screen_count(rects.len());
         if self.screens.len() != rects.len() {
-            #[expect(clippy::cast_precision_loss, reason = "a few screens")]
             sonamu_script::emit("screens", vec![Value::Number(rects.len() as f64)]);
         }
         self.screens.resize_with(rects.len(), Screen::default);
@@ -1842,14 +1841,12 @@ mod tests {
             self.next() % n
         }
 
-        #[expect(clippy::cast_precision_loss, reason = "small")]
         fn px(&mut self) -> f64 {
             self.below(240) as f64 - 120.0
         }
     }
 
     /// Two screens of different sizes, side by side
-    #[expect(clippy::cast_possible_truncation, reason = "small")]
     fn screens(rng: &mut Rng) -> Vec<[u32; 4]> {
         let mut size = || [800 + rng.below(1760) as u32, 600 + rng.below(1000) as u32];
         let [[width, height], [width2, height2]] = [size(), size()];

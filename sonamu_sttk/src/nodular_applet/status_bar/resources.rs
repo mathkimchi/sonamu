@@ -112,7 +112,6 @@ fn duration(duration: Duration) -> String {
 }
 
 /// eg `1.9G`, `410M`
-#[expect(clippy::cast_precision_loss, reason = "for show")]
 fn bytes(bytes: u64) -> String {
     let mb = bytes as f64 / (1024.0 * 1024.0);
     if mb >= 1024.0 {

@@ -636,11 +636,7 @@ fn keymap_key(
 ) -> mlua::Result<(Keybind, Option<String>)> {
     let key = match key {
         &LuaValue::Integer(code) => Key::Code(u32::try_from(code).map_err(mlua::Error::runtime)?),
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "a key code"
-        )]
+        #[expect(clippy::cast_sign_loss, reason = "a key code")]
         &LuaValue::Number(code) => Key::Code(code as u32),
         LuaValue::String(text) => {
             let text = text.to_str()?;
@@ -1145,7 +1141,6 @@ fn from_lua(value: &LuaValue) -> mlua::Result<Value> {
     Ok(match value {
         LuaValue::Nil => Value::Nil,
         LuaValue::Boolean(value) => Value::Bool(*value),
-        #[expect(clippy::cast_precision_loss, reason = "Luau numbers are f64 anyway")]
         LuaValue::Integer(value) => Value::Number(*value as f64),
         LuaValue::Number(value) => Value::Number(*value),
         LuaValue::String(value) => Value::String(value.to_str()?.to_string()),

@@ -160,12 +160,8 @@ mod tests {
         treeview_rows(&tree, &WorldTreePath::root(), None)
     }
 
-    #[expect(
-        clippy::unnecessary_wraps,
-        reason = "compared with `target`'s `Option`"
-    )]
-    fn path(steps: &[sonamu_common::utils::tree::world_tree::Step]) -> Option<WorldTreePath> {
-        Some(WorldTreePath(steps.to_vec()))
+    fn path(steps: &[sonamu_common::utils::tree::world_tree::Step]) -> WorldTreePath {
+        WorldTreePath(steps.to_vec())
     }
 
     #[test]
@@ -191,28 +187,28 @@ mod tests {
         let c1 = Some(4);
         assert_eq!(
             target(&rows, i2, Traversal::Sibling(1), &HashMap::new()),
-            path(&[Child(0), Child(0)])
+            Some(path(&[Child(0), Child(0)]))
         );
         assert_eq!(
             target(&rows, c1, Traversal::Sibling(-1), &HashMap::new()),
-            path(&[Child(0), Inner(1)])
+            Some(path(&[Child(0), Inner(1)]))
         );
         assert_eq!(
             target(&rows, i2, Traversal::Next, &HashMap::new()),
-            path(&[Child(0), Child(0)])
+            Some(path(&[Child(0), Child(0)]))
         );
         assert_eq!(
             target(&rows, c1, Traversal::Parent, &HashMap::new()),
-            path(&[Child(0)])
+            Some(path(&[Child(0)]))
         );
         assert_eq!(
             target(&rows, Some(1), Traversal::Child(0), &HashMap::new()),
-            path(&[Child(0), Inner(0)])
+            Some(path(&[Child(0), Inner(0)]))
         );
         // the remembered child, else the first
         assert_eq!(
             target(&rows, Some(1), Traversal::RecentChild, &HashMap::new()),
-            path(&[Child(0), Inner(0)])
+            Some(path(&[Child(0), Inner(0)]))
         );
         let remembered = HashMap::from([(
             WorldTreePath(vec![Child(0)]),
@@ -220,15 +216,15 @@ mod tests {
         )]);
         assert_eq!(
             target(&rows, Some(1), Traversal::RecentChild, &remembered),
-            path(&[Child(0), Child(1)])
+            Some(path(&[Child(0), Child(1)]))
         );
         assert_eq!(
             target(&rows, Some(1), Traversal::LastChild, &HashMap::new()),
-            path(&[Child(0), Child(1)])
+            Some(path(&[Child(0), Child(1)]))
         );
         assert_eq!(
             target(&rows, Some(5), Traversal::Next, &HashMap::new()),
-            path(&[])
+            Some(path(&[]))
         );
         // the last sibling stays
         assert_eq!(

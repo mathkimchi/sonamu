@@ -244,7 +244,6 @@ fn backlight() -> Option<[PathBuf; 2]> {
     Some([dir.join("brightness"), dir.join("max_brightness")])
 }
 
-#[expect(clippy::cast_precision_loss, reason = "brightness steps")]
 fn read_brightness([now, max]: &[PathBuf; 2]) -> Option<f32> {
     let read = |path: &PathBuf| fs::read_to_string(path).ok()?.trim().parse::<u64>().ok();
     let (now, max) = (read(now)?, read(max)?);

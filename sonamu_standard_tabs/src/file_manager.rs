@@ -34,7 +34,7 @@ use sonamu_sttk::{
 };
 use sonamu_ui::{
     color::Color,
-    display_units::DisplayContainerSize,
+    display_units::{DisplayContainerSize, ToPx},
     ui_element::{Style, UIElement, UITree},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
@@ -273,9 +273,8 @@ impl FileManagerApplet {
         self.clamp_scroll();
     }
 
-    #[expect(clippy::cast_sign_loss, reason = "sizes are non-negative")]
     fn list_width(&self) -> u32 {
-        (self.size.width as f32 * LIST_SPLIT) as u32
+        (self.size.width as f32 * LIST_SPLIT).to_px()
     }
 
     /// Left of the document body: under the list's header when it is collapsed
@@ -287,11 +286,10 @@ impl FileManagerApplet {
         }
     }
 
-    #[expect(clippy::cast_sign_loss, reason = "sizes are non-negative")]
     fn document_size(&self) -> DisplayContainerSize {
         DisplayContainerSize::new(
             self.size.width.saturating_sub(self.body_left()),
-            self.size.height.saturating_sub(row_height() as u32),
+            self.size.height.saturating_sub(row_height().to_px()),
         )
     }
 

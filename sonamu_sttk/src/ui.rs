@@ -133,11 +133,7 @@ impl Rows {
     }
 
     /// The index of the row at `y` (it may be past the last row); `None` above the rows
-    #[expect(
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation,
-        reason = "non-negative, since `y >= top`"
-    )]
+    #[expect(clippy::cast_sign_loss, reason = "non-negative, since `y >= top`")]
     pub fn row_at(&self, y: f64) -> Option<usize> {
         let offset = (y - f64::from(self.top)) / f64::from(self.height);
         (offset >= 0.0).then(|| self.scroll + offset as usize)
@@ -149,11 +145,7 @@ impl Rows {
     }
 
     /// How many rows fit in a container `height` tall (at least 1)
-    #[expect(
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation,
-        reason = "non-negative, since it's at least 0"
-    )]
+    #[expect(clippy::cast_sign_loss, reason = "non-negative, since it's at least 0")]
     pub fn fitting(&self, height: f32) -> usize {
         (((height - self.top) / self.height).floor().max(0.0) as usize).max(1)
     }
@@ -166,7 +158,6 @@ pub fn scroll_to(scroll: usize, index: usize, shown: usize) -> usize {
 
 /// Rows a mouse scroll of `delta` moves by `step` at a time (positive down); none without a vertical delta, eg a
 /// touchpad's stop or a sideways scroll (#151)
-#[expect(clippy::cast_possible_wrap, reason = "scroll steps are small")]
 pub fn scroll_rows([_, y]: [f64; 2], step: usize) -> isize {
     let step = step as isize;
     if y > 0.0 {

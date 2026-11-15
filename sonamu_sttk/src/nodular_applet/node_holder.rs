@@ -556,7 +556,6 @@ impl NodeHolder {
                     .ok_or("couldn't add the child")?;
                 Ok((Value::Node(self.tree.uid(child)), None))
             })(),
-            #[expect(clippy::cast_possible_truncation, reason = "a sibling offset")]
             "swap_sibling" => command::number_arg(args, 0)
                 .and_then(|offset| request(self, NodeRequest::SwapSibling(offset as isize))),
             "toggle_half" => request(self, NodeRequest::ToggleHalf),

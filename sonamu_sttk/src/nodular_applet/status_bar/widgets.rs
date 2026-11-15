@@ -117,7 +117,6 @@ impl ScrollList {
 
     /// A thin bar in the right pad of a popup `width` columns wide, beside the `shown` items from line `first`
     /// (`item_lines` lines each), while not all `count` fit
-    #[expect(clippy::cast_precision_loss, reason = "list lengths")]
     pub fn bar(
         self,
         lines: &Lines,

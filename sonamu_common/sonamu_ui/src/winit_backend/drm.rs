@@ -4,7 +4,7 @@
 //! through Vulkan, `crate::dmabuf`), which smithay's DRM backend flips onto the monitor (KMS), like niri does.
 
 use crate::{
-    display_units::{DisplayAreaPx, DisplayContainerSize},
+    display_units::{DisplayAreaPx, DisplayContainerSize, ToPx},
     dmabuf,
     ui_element::{Cursor, CursorIcon, PrimitiveScene, RoundRect, UIPrimitiveElement},
     ui_event::{
@@ -720,12 +720,7 @@ impl DrmDisplay {
             texture.size(),
         );
         // image px to screen px; the texture is stretched to the drawn size
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "rounded cursor sizes are small and non-negative"
-        )]
-        let to_screen = |px: [u32; 2]| px.map(|px| (px as f32 / scale).round() as u32);
+        let to_screen = |px: [u32; 2]| px.map(|px| (px as f32 / scale).round().to_px());
         Some(CursorImage {
             texture: texture.create_view(&wgpu::TextureViewDescriptor::default()),
             size: to_screen(size).map(|px| px.max(1)),

@@ -96,7 +96,6 @@ impl KeybindCommand {
             ("toggle_half", []) => NodeRequest::ToggleHalf,
             ("spawn", [Value::String(program)]) => NodeRequest::Run(program.clone()),
             ("spawn_sibling", [Value::String(program)]) => NodeRequest::RunSibling(program.clone()),
-            #[expect(clippy::cast_possible_truncation, reason = "a sibling offset")]
             ("swap_sibling", [Value::Number(offset)]) => NodeRequest::SwapSibling(*offset as isize),
             _ => return None,
         })

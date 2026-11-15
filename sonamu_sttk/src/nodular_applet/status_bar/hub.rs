@@ -161,12 +161,7 @@ fn justified(left: &str, right: &str) -> String {
 }
 
 /// `━━━━──── 60%`
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    reason = "slider cells"
-)]
+#[expect(clippy::cast_sign_loss, reason = "slider cells")]
 fn slider(level: f32) -> String {
     let filled = ((level.clamp(0.0, 1.0) * SLIDER as f32).round() as usize).min(SLIDER);
     format!(
@@ -178,7 +173,6 @@ fn slider(level: f32) -> String {
 }
 
 /// The level a click at `column` on a slider sets
-#[expect(clippy::cast_precision_loss, reason = "slider cells")]
 fn slider_level(column: usize) -> Option<f32> {
     let cell = column.checked_sub(SLIDER_COLUMN)?;
     (cell <= SLIDER).then(|| (cell as f32 / SLIDER as f32).clamp(0.0, 1.0))

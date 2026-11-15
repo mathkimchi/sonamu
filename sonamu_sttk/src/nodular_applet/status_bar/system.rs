@@ -170,7 +170,6 @@ impl Reader {
         }
     }
 
-    #[expect(clippy::cast_precision_loss, reason = "tick counts")]
     fn cpu(&mut self) -> f64 {
         let Some(line) = fs::read_to_string("/proc/stat")
             .ok()
@@ -199,7 +198,6 @@ impl Reader {
         usage
     }
 
-    #[expect(clippy::cast_precision_loss, reason = "tick counts")]
     fn processes(&mut self) -> Vec<Process> {
         let elapsed = self.processes_read.map(|read| read.elapsed().as_secs_f64());
         self.processes_read = Some(Instant::now());
@@ -255,7 +253,6 @@ fn page_size() -> u64 {
 }
 
 /// Percent of memory used (`MemTotal - MemAvailable`)
-#[expect(clippy::cast_precision_loss, reason = "kB counts")]
 fn mem() -> Option<f64> {
     let meminfo = fs::read_to_string("/proc/meminfo").ok()?;
     let field = |name: &str| -> Option<u64> {
@@ -283,7 +280,6 @@ impl Reader {
 }
 
 /// The first battery in `/sys/class/power_supply`
-#[expect(clippy::cast_precision_loss, reason = "µW and µWh")]
 fn battery() -> Option<Battery> {
     let path = fs::read_dir("/sys/class/power_supply")
         .ok()?
