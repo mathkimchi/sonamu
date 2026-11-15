@@ -17,7 +17,9 @@ use sonamu_common::{
     settings::{self, Settings},
     utils::tree::world_tree::{WorldTree, WorldTreePath},
 };
-use sonamu_ui::{color::Color, display_units::DisplayContainerSize, ui_element::UITree, ui_event::UIEvent};
+use sonamu_ui::{
+    color::Color, display_units::DisplayContainerSize, ui_element::UITree, ui_event::UIEvent,
+};
 use std::{
     cell::Cell,
     collections::BTreeMap,

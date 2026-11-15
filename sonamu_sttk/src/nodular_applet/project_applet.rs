@@ -559,7 +559,11 @@ impl ProjectApplet {
         parts.push(plain);
         if let Some(color) = self.color {
             let x = left + hue_of(color) * (right - left);
-            parts.push(ui::rect(settings.palette.fg, [x - 2.0, top - 2.0], [4.0, font + 4.0]));
+            parts.push(ui::rect(
+                settings.palette.fg,
+                [x - 2.0, top - 2.0],
+                [4.0, font + 4.0],
+            ));
         }
         parts
     }

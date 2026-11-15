@@ -363,7 +363,13 @@ pub struct Settle {
     spring: Spring,
 }
 impl Settle {
-    fn new(strip: Strip, from: f64, velocity: f64, target: usize, settings: &SwipeSettings) -> Self {
+    fn new(
+        strip: Strip,
+        from: f64,
+        velocity: f64,
+        target: usize,
+        settings: &SwipeSettings,
+    ) -> Self {
         Self {
             strip,
             from,
@@ -379,7 +385,12 @@ impl Settle {
 
     /// A key's swipe (Ctrl+Super+arrow): onto the row after (`forward`) or before focus, from `offset` (rows) away
     /// from it (eg where a settle it interrupts was); `None` at the strip's end
-    pub fn step(strip: Strip, offset: f64, forward: bool, settings: &SwipeSettings) -> Option<Self> {
+    pub fn step(
+        strip: Strip,
+        offset: f64,
+        forward: bool,
+        settings: &SwipeSettings,
+    ) -> Option<Self> {
         let target = if forward {
             strip.start + 1
         } else {
@@ -515,8 +526,18 @@ mod tests {
         let rows = rows();
         let settings = sonamu_common::settings::Settings::default().swipe;
         let strip = || Strip::siblings(&rows, index(&rows, &[Child(0), Child(0)]));
-        assert_eq!(super::Settle::step(strip(), 0.0, true, &settings).unwrap().target, 3);
-        assert_eq!(super::Settle::step(strip(), 0.0, false, &settings).unwrap().target, 1);
+        assert_eq!(
+            super::Settle::step(strip(), 0.0, true, &settings)
+                .unwrap()
+                .target,
+            3
+        );
+        assert_eq!(
+            super::Settle::step(strip(), 0.0, false, &settings)
+                .unwrap()
+                .target,
+            1
+        );
         // past the last: nothing
         let last = Strip::siblings(&rows, index(&rows, &[Child(0), Child(1)]));
         assert!(super::Settle::step(last, 0.0, true, &settings).is_none());

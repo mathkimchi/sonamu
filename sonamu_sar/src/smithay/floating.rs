@@ -170,7 +170,11 @@ impl AppletRunner {
     }
 
     /// Super+left drag moves a floating toplevel (raising it); returns whether the event was taken
-    pub(crate) fn floating_drag_mouse(&mut self, event: &MouseEvent, last_position: [f64; 2]) -> bool {
+    pub(crate) fn floating_drag_mouse(
+        &mut self,
+        event: &MouseEvent,
+        last_position: [f64; 2],
+    ) -> bool {
         let state = &mut self.smithay_state;
         if let Some(index) = state.floating_drag {
             match event.kind {

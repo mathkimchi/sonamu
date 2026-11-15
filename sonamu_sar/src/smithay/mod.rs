@@ -1,6 +1,6 @@
 mod capture;
-mod floating;
 pub(crate) mod dmabuf;
+mod floating;
 mod layer_shell;
 
 use crate::runner::AppletRunner;
@@ -1550,10 +1550,7 @@ impl AppletRunner {
             return;
         }
         let surface_id = state.unregistered.remove(index);
-        if let Some(toplevel) = state
-            .toplevel_of(surface)
-            .filter(floating::floats)
-        {
+        if let Some(toplevel) = state.toplevel_of(surface).filter(floating::floats) {
             state.surfaces.remove(surface_id);
             self.float(toplevel);
             return;

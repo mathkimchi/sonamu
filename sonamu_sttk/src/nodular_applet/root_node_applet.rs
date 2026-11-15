@@ -1144,10 +1144,13 @@ impl RootNodeApplet {
             Some((carried_vertical, offset)) if carried_vertical == vertical => offset,
             _ => 0.0,
         };
-        let Some(settle) =
-            swipe_strip(&self.holder.tree, self.view_path.as_ref(), &self.remembered, vertical)
-                .and_then(|strip| Settle::step(strip, offset, forward, &settings::get().swipe))
-        else {
+        let Some(settle) = swipe_strip(
+            &self.holder.tree,
+            self.view_path.as_ref(),
+            &self.remembered,
+            vertical,
+        )
+        .and_then(|strip| Settle::step(strip, offset, forward, &settings::get().swipe)) else {
             return;
         };
         self.start_settle(settle);
