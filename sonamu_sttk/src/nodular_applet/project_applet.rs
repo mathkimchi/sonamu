@@ -10,7 +10,11 @@ use crate::{
     },
     session,
     standard_keybinds::{browser, terminal},
-    ui::{self, PAD, Rows, row_height},
+    ui::{
+        self, PAD, Rows,
+        path_input::{PathInput, PathKey, tilde},
+        row_height,
+    },
 };
 use sonamu_common::{
     command::{self, CommandResult, NodeCall, Value, World},
@@ -31,12 +35,7 @@ use sonamu_ui::{
     ui_element::{Style, UIElement, UITree, font_size},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, UIEvent},
 };
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    path::{Path, PathBuf},
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
 
 /// Its name until it is renamed: its inner tree root's label
 const LABEL: &str = "Project";
@@ -151,132 +150,9 @@ fn new_cell_at(x: f64) -> Option<usize> {
     (index >= 0.0 && index < NEW_ROWS.len() as f64).then_some(index as usize)
 }
 
-/// The home directory, which paths show as `~`
 /// The overview's rows, each a line of text at its top (above the zoom-out view)
 fn overview_rows() -> Rows {
     Rows::new(PAD)
-}
-
-fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
-}
-
-/// The path, with the home directory as `~`
-fn tilde(path: &Path) -> String {
-    match home().and_then(|home| path.strip_prefix(home).ok().map(Path::to_path_buf)) {
-        Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
-        Some(rest) => format!("~/{}", rest.display()),
-        None => path.display().to_string(),
-    }
-}
-
-/// The typed path with `~` expanded; `None` if it is relative
-fn expand(path: &str) -> Option<PathBuf> {
-    if path == "~" {
-        home()
-    } else if let Some(rest) = path.strip_prefix("~/") {
-        home().map(|home| home.join(rest))
-    } else {
-        path.starts_with('/').then(|| PathBuf::from(path))
-    }
-}
-
-/// A directory path being typed (absolute or from `~`), with the directories it could complete to
-struct DirectoryInput {
-    path: String,
-    /// Paths, as typed, of the directories in `path`'s parent whose names start with its last part
-    options: Vec<String>,
-    /// The last Enter was on a path that isn't a directory
-    invalid: bool,
-    /// The option picked with the arrows, which Tab fills in
-    selected: Option<usize>,
-}
-impl DirectoryInput {
-    fn new(path: String) -> Self {
-        let mut input = Self {
-            path: String::new(),
-            options: Vec::new(),
-            invalid: false,
-            selected: None,
-        };
-        input.set(path);
-        input
-    }
-
-    fn set(&mut self, path: String) {
-        self.options = path
-            .rsplit_once('/')
-            .and_then(|(parent, prefix)| {
-                // only the root's parent is empty
-                let parent = if parent.is_empty() { "/" } else { parent };
-                let join = if parent == "/" { "" } else { "/" };
-                let entries = std::fs::read_dir(expand(parent)?).ok()?;
-                let mut options: Vec<String> = entries
-                    .flatten()
-                    .filter(|entry| entry.path().is_dir())
-                    .filter_map(|entry| entry.file_name().into_string().ok())
-                    // hidden ones only once a `.` is typed
-                    .filter(|name| {
-                        name.starts_with(prefix)
-                            && (prefix.starts_with('.') || !name.starts_with('.'))
-                    })
-                    .map(|name| format!("{parent}{join}{name}"))
-                    .collect();
-                options.sort();
-                Some(options)
-            })
-            .unwrap_or_default();
-        self.path = path;
-        self.invalid = false;
-        self.selected = None;
-    }
-
-    /// Moves the arrow selection through the shown options, down if `down`
-    fn select(&mut self, down: bool) {
-        let shown = self.options.len().min(MAX_OPTIONS);
-        self.selected = ui::step(self.selected, down, shown).or(self.selected);
-    }
-
-    /// Fills in the selected option, else completes to the options' longest common prefix,
-    /// or into the only option once it is reached
-    fn complete(&mut self) {
-        if let Some(option) = self.selected.and_then(|index| self.options.get(index)) {
-            self.set(option.clone());
-            return;
-        }
-        let Some((first, rest)) = self.options.split_first() else {
-            return;
-        };
-        if rest.is_empty() && *first == self.path {
-            self.set(format!("{first}/"));
-            return;
-        }
-        let common = rest.iter().fold(first.as_str(), |common, option| {
-            let len = common
-                .char_indices()
-                .zip(option.chars())
-                .take_while(|((_, a), b)| a == b)
-                .last()
-                .map_or(0, |((index, a), _)| index + a.len_utf8());
-            &common[..len]
-        });
-        if common.len() > self.path.len() {
-            self.set(common.to_string());
-        }
-    }
-
-    /// The directory to save (`Ok(None)` clears it), or `Err` if the path isn't an absolute directory
-    fn parse(&self) -> Result<Option<PathBuf>, ()> {
-        let path = self.path.trim();
-        if path.is_empty() {
-            return Ok(None);
-        }
-        expand(path)
-            .and_then(|path| std::fs::canonicalize(path).ok())
-            .filter(|path| path.is_dir())
-            .map(Some)
-            .ok_or(())
-    }
 }
 
 /// Shows its contents' panes; the root's treeview shows its contents as its node's inner tree.
@@ -298,7 +174,7 @@ pub struct ProjectApplet {
     /// The new name being typed (empty keeps the old one)
     renaming: Option<String>,
     /// The new directory being typed (empty clears it)
-    setting_directory: Option<DirectoryInput>,
+    setting_directory: Option<PathInput>,
     /// Its treeview icon (`None`: `PROJECT_ICON`)
     icon: Option<String>,
     /// Picking an icon: the index in `ICONS` selected with the arrows
@@ -482,7 +358,7 @@ impl ProjectApplet {
             .unwrap_or_default();
         self.renaming = None;
         self.picking_icon = None;
-        self.setting_directory = Some(DirectoryInput::new(directory));
+        self.setting_directory = Some(PathInput::directory(directory));
         self.options_scroll = 0;
     }
 
@@ -655,31 +531,24 @@ impl ProjectApplet {
         let Some(input) = &mut self.setting_directory else {
             return false;
         };
-        match key {
-            KeySymbol::Enter => match input.parse() {
+        let shown = input.options.len().min(MAX_OPTIONS);
+        match (key, input.handle_key(key, modifiers)) {
+            (_, PathKey::Enter) => match input.parse_directory() {
                 Ok(directory) => {
                     self.holder.set_directory(directory);
                     self.setting_directory = None;
                     // republish, so the session saves it
                     self.hook.damage_treeview();
                 }
-                Err(()) => input.invalid = true,
+                Err(_) => input.invalid = true,
             },
-            KeySymbol::Escape => self.setting_directory = None,
-            KeySymbol::Backspace => {
-                let mut path = input.path.clone();
-                path.pop();
-                input.set(path);
+            (_, PathKey::Cancel) => self.setting_directory = None,
+            (_, PathKey::Changed) => {}
+            (KeySymbol::ArrowKeyDown | KeySymbol::ArrowKeyUp, PathKey::Ignored) => {
+                let down = matches!(key, KeySymbol::ArrowKeyDown);
+                input.selected = ui::step(input.selected, down, shown).or(input.selected);
             }
-            KeySymbol::Char('\t') if modifiers == KeyModifiers::NONE => input.complete(),
-            KeySymbol::ArrowKeyDown => input.select(true),
-            KeySymbol::ArrowKeyUp => input.select(false),
-            KeySymbol::Char(key_char) if !key_char.is_control() => {
-                let mut path = input.path.clone();
-                path.push(key_char);
-                input.set(path);
-            }
-            _ => return false,
+            (_, PathKey::Ignored) => return false,
         }
         true
     }
@@ -800,7 +669,7 @@ impl ProjectApplet {
                         .nth(row - OPTIONS_ROW + self.options_scroll)
                         .cloned()
                 {
-                    input.set(option);
+                    input.set(option.path);
                 }
             }
             Some(0) => {
@@ -899,7 +768,7 @@ impl ProjectApplet {
                 .options
                 .iter()
                 .take(MAX_OPTIONS)
-                .map(|option| (option.clone(), text))
+                .map(|option| (option.path.clone(), text))
                 .collect(),
             (None, None) => Vec::new(),
         };

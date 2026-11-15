@@ -30,7 +30,7 @@ use sonamu_sttk::{
         self, Rows,
         color_picker::{ColorPicker, PickerKey},
         fields::{self, Edit, TextInput},
-        file_chooser::FileChooser,
+        file_chooser::{Chosen, FileChooser},
     },
 };
 use sonamu_ui::{
@@ -65,10 +65,6 @@ enum Row {
     AddItem(usize, usize),
     /// A line of the open color picker, below its field
     Picker(usize),
-    /// "type a path", first below a path field with its file chooser open
-    TypePath,
-    /// A line of the open file chooser
-    Chooser(usize),
     /// The Keybinds section's title
     KeybindsTitle,
     /// A keybind group's name
@@ -123,7 +119,7 @@ pub struct SettingsEditorApplet {
     sliding: Option<((usize, usize), f64)>,
     /// The bind whose keys are being recorded; every key comes here meanwhile
     recording: Option<((usize, usize), Capture)>,
-    /// The path field choosing a file, and its chooser
+    /// The path field choosing a file, and its chooser (a popup taking every key and click)
     chooser: Option<((usize, usize), FileChooser)>,
     /// The section shown alone (its inner child focused), else every section (its inner root)
     view: Option<usize>,
@@ -191,16 +187,8 @@ impl SettingsEditorApplet {
 
     /// The rows `view` shows; with what's open in it if `live` (the view, not one a swipe brings in)
     fn rows_of(&self, view: Option<usize>, live: bool) -> Vec<Row> {
-        let picker = self.picker.as_ref().map(|(at, _)| *at);
-        let chooser = self
-            .chooser
-            .as_ref()
-            .map(|(at, chooser)| (*at, chooser.lines()));
-        let open = Open {
-            picker: picker.filter(|_| live),
-            chooser: chooser.filter(|_| live),
-        };
-        form_rows(&self.editor, &self.keybinds, &self.collapsed, open, view)
+        let picker = self.picker.as_ref().map(|(at, _)| *at).filter(|_| live);
+        form_rows(&self.editor, &self.keybinds, &self.collapsed, picker, view)
     }
 
     /// Shows `view` (`None`: every section); the treeview's focus follows
@@ -337,10 +325,6 @@ impl SettingsEditorApplet {
             Row::Field(section, field)
             | Row::Item(section, field, _)
             | Row::AddItem(section, field) => Some(self.field(section, field)),
-            Row::TypePath | Row::Chooser(_) => {
-                let ((section, field), _) = self.chooser.as_ref()?;
-                Some(self.field(*section, *field))
-            }
             _ => None,
         }
     }
@@ -373,15 +357,6 @@ impl SettingsEditorApplet {
         }
         match row {
             Row::Title(_) | Row::KeybindsTitle | Row::Picker(_) => {}
-            Row::TypePath => {
-                let value = self
-                    .field_of(row)
-                    .map(|field| self.editor.field_value(field));
-                self.editing = Some(TextInput::new(
-                    value.as_ref().map(plain).unwrap_or_default(),
-                ));
-            }
-            Row::Chooser(line) => self.choose(line),
             Row::Generate => {
                 let result = self.editor.generate(pastel::random_hue());
                 self.report(result);
@@ -400,7 +375,7 @@ impl SettingsEditorApplet {
                         self.toggle_picker((section_index_of(row), field_index_of(row)), &value)
                     }
                     FieldKind::Path => {
-                        self.toggle_chooser((section_index_of(row), field_index_of(row)), &value)
+                        self.open_chooser((section_index_of(row), field_index_of(row)), &value)
                     }
                     FieldKind::Number { .. } | FieldKind::Text { .. } => {
                         self.editing = Some(TextInput::new(plain(&value)));
@@ -508,11 +483,8 @@ impl SettingsEditorApplet {
         }
     }
 
-    /// Opens the file chooser under a path field (in the current file's folder), or closes it if it's open there
-    fn toggle_chooser(&mut self, at: (usize, usize), value: &Value) {
-        if self.chooser.as_ref().is_some_and(|(open, _)| *open == at) {
-            return self.close_chooser();
-        }
+    /// Opens the file chooser for a path field, in the current file's folder (else the config dir)
+    fn open_chooser(&mut self, at: (usize, usize), value: &Value) {
         let current = plain(value);
         let start = if current.is_empty() {
             self.dir.clone()
@@ -520,31 +492,24 @@ impl SettingsEditorApplet {
             settings::config_path(Path::new(&current), &self.dir)
         };
         self.chooser = Some((at, FileChooser::new(&start)));
-        self.select_row(Row::TypePath);
     }
 
-    /// Closes the file chooser, selecting its field
-    fn close_chooser(&mut self) {
-        if let Some((at, _)) = self.chooser.take() {
-            self.selected = None;
-            self.select_row(Row::Field(at.0, at.1));
-        }
-    }
-
-    /// Enter on a chooser line: goes into a folder, or writes the file as the setting
-    fn choose(&mut self, line: usize) {
-        let Some(((section, field), chooser)) = &mut self.chooser else {
+    /// What the chooser did: a picked file is written as the setting
+    fn chosen(&mut self, chosen: Chosen) {
+        let Some(((section, field), _)) = &self.chooser else {
             return;
         };
-        let (section, field) = (*section, *field);
-        let Some(file) = chooser.choose(line) else {
-            return self.select_row(Row::Chooser(0));
-        };
-        let path = settings::config_relative(&file, &self.dir);
-        let field = self.field(section, field).clone();
-        let result = self.editor.commit_text(&field, &path.to_string_lossy());
-        self.report(result);
-        self.close_chooser();
+        let field = self.field(*section, *field).clone();
+        match chosen {
+            Chosen::Not => {}
+            Chosen::Closed => self.chooser = None,
+            Chosen::Picked(file) => {
+                let path = settings::config_relative(&file, &self.dir);
+                let result = self.editor.commit_text(&field, &path.to_string_lossy());
+                self.report(result);
+                self.chooser = None;
+            }
+        }
     }
 
     /// Writes the picker's color (`original` to undo it)
@@ -695,11 +660,6 @@ impl SettingsEditorApplet {
         self.report(result);
     }
 
-    fn selected_row(&self) -> Option<Row> {
-        self.selected
-            .and_then(|index| self.rows().get(index).copied())
-    }
-
     fn select(&mut self, index: Option<usize>) {
         if index != self.selected {
             self.commit_editing();
@@ -711,15 +671,13 @@ impl SettingsEditorApplet {
     }
 
     fn handle_key(&mut self, symbol: KeySymbol, modifiers: sonamu_ui::ui_event::KeyModifiers) {
+        if let Some((_, chooser)) = &mut self.chooser {
+            let chosen = chooser.handle_key(symbol, modifiers);
+            return self.chosen(chosen);
+        }
         if let Some(input) = &mut self.editing {
             match input.handle_key(symbol, modifiers) {
-                Edit::Commit => {
-                    let typed_path = self.selected_row() == Some(Row::TypePath);
-                    self.commit_editing();
-                    if typed_path && self.error.is_none() {
-                        self.close_chooser();
-                    }
-                }
+                Edit::Commit => self.commit_editing(),
                 Edit::Cancel => self.editing = None,
                 Edit::Changed | Edit::Ignored => {}
             }
@@ -743,7 +701,6 @@ impl SettingsEditorApplet {
         let rows = self.rows();
         let row = self.selected.and_then(|index| rows.get(index).copied());
         match (row, symbol) {
-            (_, KeySymbol::Escape) if self.chooser.is_some() => return self.close_chooser(),
             (_, KeySymbol::Escape) => return self.show(None),
             (Some(Row::Title(section)), KeySymbol::ArrowKeyRight) => {
                 return self.show(Some(section));
@@ -809,6 +766,17 @@ impl SettingsEditorApplet {
     /// The Revert button's left edge in the header
     fn revert_left(&self) -> f32 {
         self.size.get().width as f32 - ui::PAD - text_width(REVERT)
+    }
+
+    /// The file chooser's, while it's open
+    fn pointer(&mut self, position: [f64; 2], kind: MouseEventKind) {
+        match &mut self.chooser {
+            Some((_, chooser)) => {
+                let chosen = chooser.handle_mouse(position, kind);
+                self.chosen(chosen);
+            }
+            None => self.handle_mouse(position, kind),
+        }
     }
 
     fn handle_mouse(&mut self, position: [f64; 2], kind: MouseEventKind) {
@@ -964,9 +932,6 @@ impl SettingsEditorApplet {
             }
             Some(Row::Title(_)) => {
                 return "Enter or click: fold, Right or double click: show alone".to_owned();
-            }
-            Some(Row::TypePath | Row::Chooser(_)) => {
-                return "Enter or click: open a folder or pick a file, Esc: close".to_owned();
             }
             Some(Row::Field(section, field))
                 if self.field(section, field).kind == FieldKind::Path =>
@@ -1277,26 +1242,6 @@ impl SettingsEditorApplet {
             }
             Row::Generate => vec![label("Generate pastel", palette.fg)],
             Row::Picker(_) => Vec::new(),
-            Row::TypePath => {
-                let element = editing.map_or_else(
-                    || ui::text("✎ type a path", palette.inactive),
-                    |input| input.element(true, palette),
-                );
-                vec![value(element)]
-            }
-            Row::Chooser(line) => {
-                let label = self
-                    .chooser
-                    .as_ref()
-                    .map(|(_, chooser)| chooser.label(line))
-                    .unwrap_or_default();
-                let color = match line {
-                    0 => palette.inactive,
-                    _ if label.ends_with('/') => palette.accent,
-                    _ => palette.fg,
-                };
-                vec![value(ui::text(label, color))]
-            }
             Row::Field(section, field) => self.field_parts(rows, (section, field), editing, width),
             Row::Item(section, field, item) => {
                 let text = self.items(self.field(section, field)).swap_remove(item);
@@ -1419,20 +1364,13 @@ fn section_tree(editor: &Editor) -> WorldTree<String> {
     )))
 }
 
-/// What's open under a field: the color picker, the file chooser (with its line count)
-#[derive(Debug, Clone, Copy, Default)]
-struct Open {
-    picker: Option<(usize, usize)>,
-    chooser: Option<((usize, usize), usize)>,
-}
-
 /// The rows of `view` (a section alone, without its title; else every section's title, then its rows unless
-/// folded): fields (and list items, what's `open`), the keybinds last
+/// folded): fields (and list items, the open color picker), the keybinds last
 fn form_rows(
     editor: &Editor,
     keybinds: &Keybinds,
     collapsed: &HashSet<usize>,
-    open: Open,
+    picker: Option<(usize, usize)>,
     view: Option<usize>,
 ) -> Vec<Row> {
     let shows = |section| view.is_none_or(|view| view == section);
@@ -1459,14 +1397,8 @@ fn form_rows(
                 rows.extend((0..count).map(|item| Row::Item(section_index, field_index, item)));
                 rows.push(Row::AddItem(section_index, field_index));
             }
-            if open.picker == Some(at) {
+            if picker == Some(at) {
                 rows.extend((0..PICKER_LINES).map(Row::Picker));
-            }
-            if let Some((chooser, lines)) = open.chooser
-                && chooser == at
-            {
-                rows.push(Row::TypePath);
-                rows.extend((0..lines).map(Row::Chooser));
             }
         }
     }
@@ -1564,6 +1496,17 @@ impl SettingsEditorApplet {
         if live {
             parts.extend(self.picker_parts());
         }
+        if let Some((_, chooser)) = self.chooser.as_ref().filter(|_| live) {
+            // over the form, below the header
+            let top = HEADER_ROWS as f32 * ui::row_height();
+            let area = [
+                ui::PAD,
+                top,
+                (width - 2.0 * ui::PAD).max(0.0),
+                (height - top - ui::PAD).max(0.0),
+            ];
+            parts.push(chooser.draw(area, &self.palette));
+        }
         parts.extend(ui::scrollbar(
             &self.palette,
             ui::scrollbar_x(width),
@@ -1607,7 +1550,10 @@ impl StandardApplet for SettingsEditorApplet {
                     self.hook.damage_treeview();
                     return;
                 }
-                if self.editing.is_none() && handle_standard_keybinds(&ui_event, &self.hook) {
+                if self.editing.is_none()
+                    && self.chooser.is_none()
+                    && handle_standard_keybinds(&ui_event, &self.hook)
+                {
                     return;
                 }
                 match ui_event {
@@ -1617,7 +1563,7 @@ impl StandardApplet for SettingsEditorApplet {
                         pressed: true,
                         ..
                     } => self.handle_key(symbol, modifiers),
-                    UIEvent::Mouse(mouse) => self.handle_mouse(mouse.position, mouse.kind),
+                    UIEvent::Mouse(mouse) => self.pointer(mouse.position, mouse.kind),
                     UIEvent::WindowResized(size) => {
                         self.size.set(size);
                         let max = ui::max_scroll(self.rows().len(), self.shown());
@@ -1713,13 +1659,13 @@ mod tests {
     #[test]
     fn collapsed_sections_hide_their_rows() {
         let (editor, keybinds) = editor("collapse");
-        let open = form_rows(&editor, &keybinds, &HashSet::new(), Open::default(), None);
+        let open = form_rows(&editor, &keybinds, &HashSet::new(), None, None);
         let keybinds_section = editor.sections.len();
         let collapsed = form_rows(
             &editor,
             &keybinds,
             &HashSet::from([0, keybinds_section]),
-            Open::default(),
+            None,
             None,
         );
         assert_eq!(collapsed[0], Row::Title(0));
@@ -1732,11 +1678,7 @@ mod tests {
     #[test]
     fn picker_rows_follow_its_field() {
         let (editor, keybinds) = editor("picker");
-        let open = Open {
-            picker: Some((0, 0)),
-            chooser: None,
-        };
-        let rows = form_rows(&editor, &keybinds, &HashSet::new(), open, None);
+        let rows = form_rows(&editor, &keybinds, &HashSet::new(), Some((0, 0)), None);
         let at = rows
             .iter()
             .position(|row| *row == Row::Field(0, 0))
@@ -1745,31 +1687,13 @@ mod tests {
         assert_eq!(rows[at + 1..=at + PICKER_LINES], lines[..]);
     }
 
-    #[test]
-    fn chooser_rows_follow_its_field() {
-        let (editor, keybinds) = editor("chooser");
-        let open = Open {
-            picker: None,
-            chooser: Some(((1, 0), 2)),
-        };
-        let rows = form_rows(&editor, &keybinds, &HashSet::new(), open, None);
-        let at = rows
-            .iter()
-            .position(|row| *row == Row::Field(1, 0))
-            .unwrap();
-        assert_eq!(
-            rows[at + 1..=at + 3],
-            [Row::TypePath, Row::Chooser(0), Row::Chooser(1)]
-        );
-    }
-
     /// A section shown alone has its rows only, unfolded and without its title
     #[test]
     fn a_view_shows_its_section() {
         let (editor, keybinds) = editor("view");
         let keybinds_section = editor.sections.len();
         let collapsed = HashSet::from([1]);
-        let section = form_rows(&editor, &keybinds, &collapsed, Open::default(), Some(1));
+        let section = form_rows(&editor, &keybinds, &collapsed, None, Some(1));
         assert_ne!(section.len(), 0);
         assert!(section.iter().all(|row| matches!(
             row,
@@ -1779,7 +1703,7 @@ mod tests {
             &editor,
             &keybinds,
             &HashSet::new(),
-            Open::default(),
+            None,
             Some(keybinds_section),
         );
         assert_eq!(binds.first(), Some(&Row::Group(0)));

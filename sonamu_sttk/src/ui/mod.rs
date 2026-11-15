@@ -12,6 +12,7 @@ use sonamu_ui::{
 pub mod color_picker;
 pub mod fields;
 pub mod file_chooser;
+pub mod path_input;
 
 pub use sonamu_ui::ui_event::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
 
