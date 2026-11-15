@@ -73,6 +73,133 @@ fn installed(program: &str) -> bool {
         .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
 }
 
+/// What a keybind command's `args` are
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArgKind {
+    None,
+    /// A program to run
+    Program,
+    /// How many siblings to move by (eg -1)
+    Offset,
+    /// `left`, `right`, `up` or `down`
+    Direction,
+    /// A kind from `TRAVERSAL_KINDS`, with a number when it takes one
+    Traversal,
+}
+impl ArgKind {
+    #[must_use]
+    pub fn accepts(self, args: &[serde_json::Value]) -> bool {
+        match self {
+            Self::None => args.is_empty(),
+            Self::Program => matches!(args, [program] if program.is_string()),
+            Self::Offset => matches!(args, [offset] if offset.is_i64()),
+            Self::Direction => matches!(
+                args,
+                [direction] if matches!(direction.as_str(), Some("left" | "right" | "up" | "down"))
+            ),
+            Self::Traversal => {
+                crate::nodular_applet::traversal::Traversal::from_args(args).is_some()
+            }
+        }
+    }
+}
+
+/// `traverse`'s kinds, and whether each takes a number (`child` n, `sibling` offset)
+pub const TRAVERSAL_KINDS: &[(&str, bool)] = &[
+    ("next", false),
+    ("prev", false),
+    ("parent", false),
+    ("child", true),
+    ("recent_child", false),
+    ("last_child", false),
+    ("sibling", true),
+    ("select", false),
+    ("enter", false),
+];
+
+/// A command a keybind can run
+pub struct CommandSpec {
+    pub name: &'static str,
+    pub args: ArgKind,
+}
+
+/// Every command a keybind can run (see `.claude/SETTINGS.md`): the node's (`standard_keybind`), the root's
+/// (`RootKeybind`, `buffer_mode`, `traverse`) and the runner's (`pluck_place`)
+pub const KEYBIND_COMMANDS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "quit",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "help",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "buffer_mode",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "spawn_terminal",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "spawn_terminal_sibling",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "spawn_browser",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "spawn_browser_sibling",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "spawn",
+        args: ArgKind::Program,
+    },
+    CommandSpec {
+        name: "spawn_sibling",
+        args: ArgKind::Program,
+    },
+    CommandSpec {
+        name: "close",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "wrap_project",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "toggle_half",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "swap_sibling",
+        args: ArgKind::Offset,
+    },
+    CommandSpec {
+        name: "pluck_place",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "view_root",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "view_parent",
+        args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "swipe",
+        args: ArgKind::Direction,
+    },
+    CommandSpec {
+        name: "traverse",
+        args: ArgKind::Traversal,
+    },
+];
+
 /// A standard keybind's node command (see `.claude/COMMANDS.md`), with its args
 pub struct KeybindCommand {
     pub name: String,
@@ -167,41 +294,42 @@ fn json_value(value: serde_json::Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::nodular_applet::traversal::Traversal;
+    use super::*;
+    use serde_json::json;
     use sonamu_common::settings::{Action, Settings};
 
-    /// Every default keybind's command is one something handles
+    /// Every default keybind's command is in the catalog, with args it accepts
     #[test]
     fn default_keybinds_are_known() {
         for keybind in Settings::default().all_keybinds().cloned() {
             let Action::Command { command, args } = keybind.action else {
                 continue;
             };
-            let known = match command.as_str() {
-                "traverse" => Traversal::from_args(&args).is_some(),
-                "swipe" => matches!(
-                    args.first().and_then(|arg| arg.as_str()),
-                    Some("left" | "right" | "up" | "down")
-                ),
-                _ => [
-                    "quit",
-                    "wrap_project",
-                    "close",
-                    "toggle_half",
-                    "spawn_terminal",
-                    "spawn_terminal_sibling",
-                    "spawn_browser",
-                    "spawn_browser_sibling",
-                    "swap_sibling",
-                    "pluck_place",
-                    "buffer_mode",
-                    "help",
-                    "view_root",
-                    "view_parent",
-                ]
-                .contains(&command.as_str()),
-            };
-            assert!(known, "{command} {args:?}");
+            let spec = KEYBIND_COMMANDS.iter().find(|spec| spec.name == command);
+            assert!(
+                spec.is_some_and(|spec| spec.args.accepts(&args)),
+                "{command} {args:?}"
+            );
         }
+    }
+
+    /// Each traversal kind parses, with a number when it takes one
+    #[test]
+    fn traversal_kinds_parse() {
+        for &(kind, number) in TRAVERSAL_KINDS {
+            let args = if number {
+                json!([kind, 1])
+            } else {
+                json!([kind])
+            };
+            assert!(
+                ArgKind::Traversal.accepts(args.as_array().unwrap()),
+                "{kind}"
+            );
+        }
+        assert!(!ArgKind::Traversal.accepts(&[json!("child")]));
+        assert!(ArgKind::Direction.accepts(&[json!("up")]));
+        assert!(!ArgKind::Offset.accepts(&[json!("up")]));
+        assert!(ArgKind::None.accepts(&[]));
     }
 }
