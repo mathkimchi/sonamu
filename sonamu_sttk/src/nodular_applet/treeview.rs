@@ -36,8 +36,6 @@ pub fn close_width() -> f32 {
 const DRAG_THRESHOLD: f64 = 12.0;
 pub const BTN_LEFT: u32 = 0x110;
 pub const BTN_RIGHT: u32 = 0x111;
-/// Rows per scroll step
-const SCROLL_STEP: usize = 3;
 
 /// The alpha of everything in the treeview (about 80%), so what is behind it shows through
 const OPACITY: u8 = 0xCC;
@@ -175,6 +173,8 @@ pub struct TreeviewPointer {
     press: Option<Press>,
     /// The first row shown
     scroll: usize,
+    /// Mouse scrolling not yet a row
+    scrolled: ui::ScrollSteps,
     /// The focused row last scrolled to, so it is scrolled to again only when focus moves
     followed: Option<WorldTreePath>,
     /// Opened by a right click
@@ -565,10 +565,11 @@ impl TreeviewPointer {
                     damaged = true;
                 }
             }
-            MouseEventKind::Scroll { delta, .. } if in_treeview => {
+            MouseEventKind::Scroll { delta, v120, .. } if in_treeview => {
+                let steps = self.scrolled.add(delta, v120) as isize;
                 let scroll = self
                     .scroll
-                    .saturating_add_signed(ui::scroll_rows(delta, SCROLL_STEP))
+                    .saturating_add_signed(steps)
                     .min(max_scroll(rows.len(), height));
                 damaged |= std::mem::replace(&mut self.scroll, scroll) != scroll;
             }

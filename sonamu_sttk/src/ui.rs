@@ -169,6 +169,24 @@ pub fn scroll_rows([_, y]: [f64; 2], step: usize) -> isize {
     }
 }
 
+/// Touchpad scrolling (px) per step; a wheel notch is one
+const SCROLL_STEP_PX: f64 = 30.0;
+
+/// Mouse scrolling not yet a step: a step per wheel notch (hi-res ones' parts add up), or per `SCROLL_STEP_PX` of a
+/// touchpad
+#[derive(Default)]
+pub struct ScrollSteps(f64);
+
+impl ScrollSteps {
+    /// The whole steps (positive down) after a scroll of `delta`, `v120` for a wheel
+    pub fn add(&mut self, [_, y]: [f64; 2], v120: Option<[i32; 2]>) -> i32 {
+        self.0 += v120.map_or(y, |[_, v120]| f64::from(v120) / 120.0 * SCROLL_STEP_PX);
+        let steps = (self.0 / SCROLL_STEP_PX).trunc() as i32;
+        self.0 -= f64::from(steps) * SCROLL_STEP_PX;
+        steps
+    }
+}
+
 /// The furthest `count` rows can scroll with `shown` rows: until the last one is at the bottom
 pub const fn max_scroll(count: usize, shown: usize) -> usize {
     count.saturating_sub(shown)

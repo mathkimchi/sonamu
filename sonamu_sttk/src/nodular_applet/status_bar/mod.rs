@@ -41,8 +41,6 @@ const BTN_MIDDLE: u32 = 0x112;
 const GAP: f32 = 12.0;
 /// Room inside a popup
 const POPUP_PAD: f32 = 12.0;
-/// Touchpad scrolling (px) per step (eg 5% volume); a wheel notch is one
-const SCROLL_STEP: f64 = 30.0;
 
 /// The bar's height (px), taken from the top of every screen
 pub fn height() -> u32 {
@@ -275,8 +273,8 @@ pub struct StatusBar {
     tray: Tray,
     /// `[left, right]`, each left to right (`sonamu.bar_layout`)
     layout: [Vec<Segment>; 2],
-    /// Scrolling (touchpad px) not yet a step
-    scrolled: f64,
+    /// Scrolling not yet a step (eg 5% volume)
+    scrolled: ui::ScrollSteps,
     /// Under the pointer
     hovered: Option<Segment>,
     /// The open popup's line and column under the pointer, for its buttons
@@ -301,7 +299,7 @@ impl StatusBar {
             controls: Controls::start(Arc::clone(&changed)),
             tray: Tray::start(Arc::clone(&changed)),
             layout: DEFAULT_LAYOUT.map(<[Segment]>::to_vec),
-            scrolled: 0.0,
+            scrolled: ui::ScrollSteps::default(),
             hovered: None,
             hovered_cell: None,
             hovered_notification: None,
@@ -832,10 +830,7 @@ impl StatusBar {
         if !on_bar && !in_popup {
             return BarResponse::default();
         }
-        // a step per wheel notch (hi-res ones' parts add up), or per `SCROLL_STEP` px of a touchpad
-        self.scrolled += v120.map_or(delta[1], |[_, v120]| f64::from(v120) / 120.0 * SCROLL_STEP);
-        let steps = (self.scrolled / SCROLL_STEP).trunc() as i32;
-        self.scrolled -= f64::from(steps) * SCROLL_STEP;
+        let steps = self.scrolled.add(delta, v120);
         let mut damaged = false;
         if steps != 0 {
             if in_popup {
