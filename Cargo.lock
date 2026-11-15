@@ -3581,6 +3581,7 @@ dependencies = [
  "image",
  "log",
  "ropey",
+ "serde_json",
  "sonamu_common",
  "sonamu_sttk",
  "sonamu_ui",

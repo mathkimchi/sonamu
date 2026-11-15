@@ -14,7 +14,7 @@ sonamu_sttk = { path = "../sonamu_sttk" }
 log = { workspace = true }
 
 # serde = { workspace = true }
-# serde_json = { workspace = true }
+serde_json = { workspace = true }
 
 # below are sad failed attempts...
 # alacritty_terminal = "0.25"

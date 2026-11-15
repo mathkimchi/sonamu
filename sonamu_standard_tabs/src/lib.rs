@@ -3,3 +3,4 @@ pub mod code_editor;
 pub mod file_manager;
 pub mod image_viewer;
 pub mod pdf_preview;
+pub mod settings_editor;
