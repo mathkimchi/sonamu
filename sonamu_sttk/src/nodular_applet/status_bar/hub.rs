@@ -424,7 +424,11 @@ mod tests {
             click(&state, None, ScrollList::default(), (2, COLUMNS - 1)),
             Some(Click::Open(Some(Section::Outputs)))
         ));
-        assert!(click(&state, None, ScrollList::default(), (3, 0)).is_none());
+        // the Settings row opens the settings editor
+        assert!(matches!(
+            click(&state, None, ScrollList::default(), (3, 0)),
+            Some(Click::Settings)
+        ));
     }
 
     #[test]
