@@ -365,6 +365,15 @@ mod tests {
         };
         let names: Vec<&str> = variants.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(names, ["none", "color", "image", "shader"]);
+        let battery = none
+            .iter()
+            .find(|field| field.path == ["battery_wallpaper"])
+            .unwrap();
+        let FieldKind::Variant(variants) = &battery.kind else {
+            panic!("not a variant: {:?}", battery.kind);
+        };
+        let names: Vec<&str> = variants.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["same", "none", "color", "image", "shader"]);
         let shader = fields_with(serde_json::json!({"shader": {"path": "x"}}));
         assert_eq!(
             paths(&shader),

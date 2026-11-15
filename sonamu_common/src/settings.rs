@@ -67,8 +67,10 @@ pub struct Settings {
     /// 1 is opaque. Menus and popups are always opaque
     #[schemars(range(min = 0, max = 1))]
     pub opacity: f32,
-    /// Drawn behind everything, even wallpaper programs' layers (#104)
+    /// Drawn behind everything, even wallpaper programs' layers (#104); on battery, `battery_wallpaper` if set
     pub wallpaper: Wallpaper,
+    /// The wallpaper while on battery (eg a still image instead of a shader): `same` is `wallpaper`
+    pub battery_wallpaper: BatteryWallpaper,
     /// Text height in px (Sonamu's own UI isn't scaled)
     #[schemars(range(min = 8, max = 64))]
     pub font_size: f32,
@@ -103,6 +105,15 @@ impl Default for Settings {
     }
 }
 impl Settings {
+    /// The wallpaper to draw: `battery_wallpaper` on battery if it's set, else `wallpaper`
+    #[must_use]
+    pub fn wallpaper_now(&self, on_battery: bool) -> &Wallpaper {
+        match &self.battery_wallpaper.0 {
+            Some(battery) if on_battery => battery,
+            _ => &self.wallpaper,
+        }
+    }
+
     /// `gap` and `border.width`, rounded to whole px
     #[must_use]
     pub fn gap_and_border_px(&self) -> (u32, u32) {
@@ -138,6 +149,46 @@ pub enum Wallpaper {
     /// A Shadertoy-style GLSL fragment shader: `void mainImage(out vec4 fragColor, in vec2 fragCoord)` with `iTime`,
     /// `iResolution`, `iFrame`, `iMouse`. Reloads when the file changes
     Shader(ShaderWallpaper),
+}
+
+/// `battery_wallpaper`: a `Wallpaper`, or `"same"` (`None`) for `wallpaper`'s
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BatteryWallpaper(pub Option<Wallpaper>);
+impl<'de> Deserialize<'de> for BatteryWallpaper {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value == "same" {
+            return Ok(Self(None));
+        }
+        Wallpaper::deserialize(value)
+            .map(|wallpaper| Self(Some(wallpaper)))
+            .map_err(serde::de::Error::custom)
+    }
+}
+impl JsonSchema for BatteryWallpaper {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "BatteryWallpaper".into()
+    }
+
+    /// `Wallpaper`'s kinds, `same` first
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut schema = Wallpaper::json_schema(generator);
+        if let Some(serde_json::Value::Array(kinds)) = schema.get_mut("oneOf") {
+            kinds.insert(
+                0,
+                serde_json::json!({
+                    "description": "The same as `wallpaper`",
+                    "type": "string",
+                    "const": "same"
+                }),
+            );
+        }
+        schema.insert(
+            "description".to_owned(),
+            "A wallpaper, or `same` for `wallpaper`'s".into(),
+        );
+        schema
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
@@ -1068,6 +1119,31 @@ mod tests {
             })
         );
         assert!(parse(r#"{"wallpaper": {"shader": {"path": "x", "scale": 0}}}"#).is_err());
+    }
+
+    #[test]
+    fn battery_wallpaper() {
+        let same = parse(r##"{"wallpaper": {"color": "#102030"}}"##)
+            .unwrap()
+            .settings;
+        assert_eq!(same.battery_wallpaper, BatteryWallpaper(None));
+        assert_eq!(same.wallpaper_now(true), &same.wallpaper);
+        let own = parse(r#"{"wallpaper": {"shader": {"path": "s.glsl"}}, "battery_wallpaper": {"image": "i.png"}}"#)
+            .unwrap()
+            .settings;
+        assert_eq!(own.wallpaper_now(false), &own.wallpaper);
+        assert_eq!(
+            own.wallpaper_now(true),
+            &Wallpaper::Image(PathBuf::from("i.png"))
+        );
+        assert!(parse(r#"{"battery_wallpaper": "other"}"#).is_err());
+        let kinds: Vec<_> = schema()["$defs"]["BatteryWallpaper"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|kind| kind["const"].as_str().map(str::to_owned))
+            .collect();
+        assert_eq!(kinds, ["same", "none"]);
     }
 
     #[test]

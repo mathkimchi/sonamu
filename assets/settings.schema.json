@@ -36,8 +36,12 @@
       "maximum": 1
     },
     "wallpaper": {
-      "description": "Drawn behind everything, even wallpaper programs' layers (#104)",
+      "description": "Drawn behind everything, even wallpaper programs' layers (#104); on battery, `battery_wallpaper` if set",
       "$ref": "#/$defs/Wallpaper"
+    },
+    "battery_wallpaper": {
+      "description": "The wallpaper while on battery (eg a still image instead of a shader): `same` is `wallpaper`",
+      "$ref": "#/$defs/BatteryWallpaper"
     },
     "font_size": {
       "description": "Text height in px (Sonamu's own UI isn't scaled)",
@@ -247,6 +251,60 @@
       },
       "required": [
         "path"
+      ]
+    },
+    "BatteryWallpaper": {
+      "description": "A wallpaper, or `same` for `wallpaper`'s",
+      "oneOf": [
+        {
+          "description": "The same as `wallpaper`",
+          "type": "string",
+          "const": "same"
+        },
+        {
+          "description": "Nothing: what's under shows (eg a wallpaper program's layer, else black)",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/Color"
+            }
+          },
+          "required": [
+            "color"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "An image file (`~` or relative to the config dir), covering each screen",
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "string",
+              "format": "path"
+            }
+          },
+          "required": [
+            "image"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "A Shadertoy-style GLSL fragment shader: `void mainImage(out vec4 fragColor, in vec2 fragCoord)` with `iTime`,\n`iResolution`, `iFrame`, `iMouse`. Reloads when the file changes",
+          "type": "object",
+          "properties": {
+            "shader": {
+              "$ref": "#/$defs/ShaderWallpaper"
+            }
+          },
+          "required": [
+            "shader"
+          ],
+          "additionalProperties": false
+        }
       ]
     },
     "TreeviewSettings": {

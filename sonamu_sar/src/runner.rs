@@ -47,8 +47,10 @@ pub struct AppletRunner {
     pub(crate) display_screens: Option<Vec<[u32; 4]>>,
     /// Set by damage; the redraw happens once per event loop iteration
     pub(crate) needs_redraw: bool,
-    /// The setting `wallpaper`, drawn under everything
+    /// The setting `wallpaper` (`battery_wallpaper` on battery), drawn under everything
     wallpaper: Wallpaper,
+    /// As the wallpaper was last picked
+    on_battery: bool,
     /// What the display was last asked to do with the pointer
     pointer_grab: PointerGrab,
     /// Stops `run` once the display closes
@@ -108,6 +110,7 @@ impl AppletRunner {
             display_screens: None,
             needs_redraw: true,
             wallpaper: Wallpaper::new(),
+            on_battery: false,
             pointer_grab: PointerGrab::None,
             loop_signal,
             plucked: None,
@@ -234,23 +237,17 @@ impl AppletRunner {
     /// Keeps the wallpaper in sync with the setting, and redraws a shader one at its frame rate (not under a
     /// fullscreen toplevel, which covers it)
     fn follow_wallpaper(&mut self, handle: &LoopHandle<'static, Self>) {
-        self.wallpaper.update(
-            &sonamu_common::settings::get().wallpaper,
-            &self.ui_handle.device,
-        );
+        self.sync_wallpaper();
         let (settings_tx, settings_rx) = calloop::channel::channel();
         sonamu_common::settings::subscribe(settings_tx);
         handle
-            .insert_source(settings_rx, |_, (), runner| {
-                runner.wallpaper.update(
-                    &sonamu_common::settings::get().wallpaper,
-                    &runner.ui_handle.device,
-                );
-                runner.needs_redraw = true;
-            })
+            .insert_source(settings_rx, |_, (), runner| runner.sync_wallpaper())
             .unwrap();
         handle
             .insert_source(calloop::timer::Timer::immediate(), |_, (), runner| {
+                if crate::battery::on_battery() != runner.on_battery {
+                    runner.sync_wallpaper();
+                }
                 runner.wallpaper.reload_changed(&runner.ui_handle.device);
                 let interval = runner.wallpaper.frame_interval();
                 if interval.is_some() && runner.smithay_state.fullscreen().is_none() {
@@ -262,6 +259,17 @@ impl AppletRunner {
                 )
             })
             .unwrap();
+    }
+
+    /// Draws the wallpaper the settings give for now (plugged in or on battery)
+    fn sync_wallpaper(&mut self) {
+        self.on_battery = crate::battery::on_battery();
+        let settings = sonamu_common::settings::get();
+        self.wallpaper.update(
+            settings.wallpaper_now(self.on_battery),
+            &self.ui_handle.device,
+        );
+        self.needs_redraw = true;
     }
 
     /// For services D-Bus starts, eg xdg-desktop-portal-wlr (screen sharing) connects here

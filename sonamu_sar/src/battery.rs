@@ -1,11 +1,26 @@
 //! Low battery warnings (#135): a desktop notification at 20%, then a critical one at 10%, while discharging.
+//! Also whether it's on battery (`on_battery`), for `battery_wallpaper`.
 
 use sonamu_common::notification::Replacing;
-use std::{fs, path::Path, thread, time::Duration};
+use std::{
+    fs,
+    path::Path,
+    sync::atomic::{AtomicBool, Ordering},
+    thread,
+    time::Duration,
+};
 
 /// Warned at each, highest first; the last is critical
 const THRESHOLDS: [u8; 2] = [20, 10];
-const CHECK_INTERVAL: Duration = Duration::from_secs(30);
+/// Often enough that unplugging soon switches to `battery_wallpaper`
+const CHECK_INTERVAL: Duration = Duration::from_secs(5);
+
+static ON_BATTERY: AtomicBool = AtomicBool::new(false);
+
+/// Whether a battery was discharging at the last check
+pub fn on_battery() -> bool {
+    ON_BATTERY.load(Ordering::Relaxed)
+}
 
 static NOTIFICATION: Replacing = Replacing::new();
 
@@ -16,6 +31,7 @@ pub fn watch() {
         let mut warned = None;
         loop {
             if let Some((capacity, discharging)) = read() {
+                ON_BATTERY.store(discharging, Ordering::Relaxed);
                 let warning = warning(capacity, discharging, warned);
                 if let Some(threshold) = warning.filter(|&threshold| Some(threshold) != warned) {
                     notify(capacity, threshold);

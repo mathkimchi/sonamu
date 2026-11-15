@@ -17,6 +17,7 @@
   "always_frame": true,
   "opacity": 0.8,
   "wallpaper": "none",
+  "battery_wallpaper": "same",
   "font_size": 24.0,
   "mipmaps": true,
   "buffer_line": "buffer_mode",
