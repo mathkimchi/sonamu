@@ -45,6 +45,7 @@
     {"mods": ["alt", "shift"], "key": "s", "command": "swap_sibling", "args": [1]},
     {"mods": ["alt"], "key": "p", "command": "pluck_place"},
     {"mods": ["logo", "shift"], "key": "?", "command": "help"},
+    {"mods": ["logo"], "key": "escape", "command": "buffer_mode"},
     {"mods": ["logo"], "key": "v", "command": "view_root"},
     {"mods": ["alt"], "key": "r", "command": "view_parent"},
     {"mods": ["ctrl", "logo"], "key": "left", "command": "swipe", "args": ["left"]},

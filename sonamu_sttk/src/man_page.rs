@@ -49,18 +49,13 @@ const MAN_PAGE: &[ManSection] = &[
     },
 ];
 
-/// The setting `keybinds` as keys and descriptions, and Super+Esc (hardcoded)
+/// The setting `keybinds` as keys and descriptions
 fn keybind_rows(settings: &Settings) -> Vec<(String, String)> {
-    let mut rows: Vec<_> = settings
+    settings
         .keybinds
         .iter()
         .map(|keybind| (keys_label(keybind), describe(&keybind.action)))
-        .collect();
-    rows.push((
-        "Super+Esc".to_owned(),
-        "buffer line: Luau prompt (Esc leaves)".to_owned(),
-    ));
-    rows
+        .collect()
 }
 
 /// Eg `Ctrl+Super+Left`
@@ -129,6 +124,7 @@ fn describe(action: &Action) -> String {
         ("spawn_browser_sibling", _) => "spawn browser as sibling".to_owned(),
         ("swap_sibling", _) => format!("swap with the {} sibling", direction(number(0))),
         ("pluck_place", _) => "pluck/place the focused node".to_owned(),
+        ("buffer_mode", _) => "buffer line: Luau prompt (Esc leaves)".to_owned(),
         ("help", _) => "bring up this basic usage manual".to_owned(),
         ("view_root", _) => "toggle the focused node as view root".to_owned(),
         ("view_parent", _) => "view root to the focus's parent".to_owned(),

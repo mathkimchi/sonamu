@@ -156,15 +156,19 @@ impl RootNodeApplet {
         self.surface.damage();
     }
 
-    /// Super+Esc, and keys while the buffer line takes them; whether it took the key (releases too, so nothing else
-    /// sees half a key)
-    fn handle_grabbed_key(
-        &mut self,
-        symbol: Option<KeySymbol>,
-        modifiers: KeyModifiers,
-        pressed: bool,
-    ) -> bool {
-        if pressed && matches!(symbol, Some(KeySymbol::Escape)) && modifiers.logo {
+    /// The `buffer_mode` keybind, and keys while the buffer line takes them; whether it took the key (releases too,
+    /// so nothing else sees half a key)
+    fn handle_grabbed_key(&mut self, ui_event: &UIEvent) -> bool {
+        let &UIEvent::Key {
+            symbol,
+            modifiers,
+            pressed,
+            ..
+        } = ui_event
+        else {
+            return false;
+        };
+        if is_buffer_mode_key(ui_event) {
             self.set_buffer_mode(!self.buffer_mode);
             return true;
         }
@@ -741,13 +745,8 @@ impl RootNodeApplet {
 
     /// From the runner
     fn handle_event(&mut self, event: StandardEvent) {
-        if let StandardEvent::UIEvent(UIEvent::Key {
-            symbol,
-            modifiers,
-            pressed,
-            ..
-        }) = event
-            && self.handle_grabbed_key(symbol, modifiers, pressed)
+        if let StandardEvent::UIEvent(ui_event) = &event
+            && self.handle_grabbed_key(ui_event)
         {
             return;
         }
@@ -1579,18 +1578,20 @@ impl RootKeybind {
     }
 }
 
+/// Whether it's the `buffer_mode` keybind (setting `keybinds`), which toggles the buffer line
+fn is_buffer_mode_key(ui_event: &UIEvent) -> bool {
+    let &UIEvent::Key { modifiers, .. } = ui_event else {
+        return false;
+    };
+    settings::keybind_command(ui_event, modifiers)
+        .is_some_and(|(command, _)| command == "buffer_mode")
+}
+
 /// Whether the root or a node acts on this key, rather than a focused wl client.
 /// The runner sends other keys straight to the client (#56).
 pub fn is_keybind(ui_event: &UIEvent) -> bool {
     sonamu_common::BUFFER_MODE.load(Ordering::Relaxed)
-        || matches!(
-            ui_event,
-            UIEvent::Key {
-                symbol: Some(KeySymbol::Escape),
-                modifiers: KeyModifiers { logo: true, .. },
-                ..
-            }
-        )
+        || is_buffer_mode_key(ui_event)
         || RootKeybind::of(ui_event).is_some()
         || standard_keybind_request(ui_event).is_some()
         || Traversal::of(ui_event, false).is_some()

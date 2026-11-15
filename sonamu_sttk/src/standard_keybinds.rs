@@ -194,6 +194,7 @@ mod tests {
                     "spawn_browser_sibling",
                     "swap_sibling",
                     "pluck_place",
+                    "buffer_mode",
                     "help",
                     "view_root",
                     "view_parent",

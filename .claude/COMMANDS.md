@@ -30,7 +30,7 @@ Emacs-like: every action is a named command; keybinds, hub, buffer line and sock
 ## Prompts
 
 - `command_hub/repl.rs`: `Repl` shared by the hub and the buffer line (Up/Down recall shared, `RECALL`).
-- Buffer line (`RootNodeApplet::{buffer_mode, repl}`): Super+Esc; `BUFFER_MODE` sends every key to the root and shadows symbol bindings unless Super. Active screen's bottom. Setting `buffer_line`.
+- Buffer line (`RootNodeApplet::{buffer_mode, repl}`): keybind `buffer_mode` (default Super+Esc); `BUFFER_MODE` sends every key to the root and shadows symbol bindings unless Super. Active screen's bottom. Setting `buffer_line`.
 - Socket eval: `Message::Eval { code, max }`, JSON lines (`msg::EvalReply`), keepalives every 100 ms cancel it when the client leaves. Node JSON `{"type", "node"}`.
 
 ## Gaps
