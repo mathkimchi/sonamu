@@ -170,8 +170,10 @@ struct DrmDisplay {
 ///
 /// Needs a session (logind or seatd), GBM, and wgpu on Vulkan with dmabuf import (`crate::dmabuf`).
 /// If any is missing, it logs why and returns, which ends the runner.
-// same arguments as `UIDisplay::run_display`
-#[allow(clippy::needless_pass_by_value)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "same arguments as `UIDisplay::run_display`"
+)]
 pub fn run_drm_display(
     is_running: Arc<AtomicBool>,
     event_queue: Sender<UIEvent>,
@@ -232,7 +234,7 @@ pub fn run_drm_display(
 }
 
 impl DrmDisplay {
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines, reason = "sequential DRM setup")]
     fn new(
         is_running: Arc<AtomicBool>,
         event_queue: Sender<UIEvent>,
@@ -718,7 +720,11 @@ impl DrmDisplay {
             texture.size(),
         );
         // image px to screen px; the texture is stretched to the drawn size
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "rounded cursor sizes are small and non-negative"
+        )]
         let to_screen = |px: [u32; 2]| px.map(|px| (px as f32 / scale).round() as u32);
         Some(CursorImage {
             texture: texture.create_view(&wgpu::TextureViewDescriptor::default()),
@@ -1040,7 +1046,7 @@ fn connected_outputs(drm: &DrmDevice) -> Result<Vec<(connector::Info, Mode)>, St
     Ok(outputs)
 }
 
-#[allow(clippy::cast_sign_loss)]
+#[expect(clippy::cast_sign_loss, reason = "mode timings are non-negative")]
 fn refresh_millihertz(mode: &Mode) -> u32 {
     let (_, _, htotal) = mode.hsync();
     let (_, _, vtotal) = mode.vsync();

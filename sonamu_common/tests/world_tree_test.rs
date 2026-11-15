@@ -1,3 +1,8 @@
+#![expect(
+    unused_crate_dependencies,
+    reason = "integration tests link all of the package's dependencies"
+)]
+
 use sonamu_common::utils::tree::{
     recursive_tree::RecursiveTreeNode,
     tree_node_path::TreeNodePath,

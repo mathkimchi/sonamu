@@ -692,8 +692,10 @@ impl NodeTree {
 
     /// Gives the event back if the node has no running applet to send it to
     /// (containers have none, and an applet may have ended, eg by panicking)
-    // the error is just the event, as big as what was passed in
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "the error is just the event, as big as what was passed in"
+    )]
     pub fn try_send_event(&self, id: NodeId, event: StandardEvent) -> Result<(), StandardEvent> {
         match self.nodes.get(id).and_then(|node| node.main.as_ref()) {
             Some(main) => main.try_send_event(event),

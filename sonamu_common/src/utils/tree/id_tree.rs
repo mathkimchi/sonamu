@@ -307,7 +307,7 @@ impl<T> TraversableTree for IdTree<T> {
 }
 
 /// for some of the derive impls, I just took the type restrictions out of the derive macros
-#[allow(clippy::pedantic)]
+#[expect(clippy::pedantic, reason = "expanded derive macros")]
 mod derive_macro_impls {
     use super::*;
 
@@ -460,7 +460,7 @@ mod derive_macro_impls {
         where
             __D: serde::Deserializer<'de>,
         {
-            #[allow(non_camel_case_types)]
+            #[expect(non_camel_case_types, reason = "expanded serde derive")]
             #[doc(hidden)]
             enum __Field {
                 __field0,

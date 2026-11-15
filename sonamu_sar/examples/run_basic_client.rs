@@ -1,6 +1,11 @@
 //! an example of how to make a basic client with sttk,
 //! as well as code to actually run it
 
+#![expect(
+    unused_crate_dependencies,
+    reason = "examples link all of the package's dependencies"
+)]
+
 use calloop::{EventLoop, channel::Sender};
 use sonamu_common::sap::{
     packets::{BarRequest, StandardEvent, StandardRequest, StateKind, Treeview},

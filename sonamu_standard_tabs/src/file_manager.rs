@@ -273,8 +273,7 @@ impl FileManagerApplet {
         self.clamp_scroll();
     }
 
-    // sizes are non-negative
-    #[allow(clippy::cast_sign_loss)]
+    #[expect(clippy::cast_sign_loss, reason = "sizes are non-negative")]
     fn list_width(&self) -> u32 {
         (self.size.width as f32 * LIST_SPLIT) as u32
     }
@@ -288,7 +287,7 @@ impl FileManagerApplet {
         }
     }
 
-    #[allow(clippy::cast_sign_loss)]
+    #[expect(clippy::cast_sign_loss, reason = "sizes are non-negative")]
     fn document_size(&self) -> DisplayContainerSize {
         DisplayContainerSize::new(
             self.size.width.saturating_sub(self.body_left()),

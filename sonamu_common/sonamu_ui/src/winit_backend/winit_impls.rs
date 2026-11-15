@@ -39,7 +39,10 @@ impl winit::application::ApplicationHandler for UIDisplay {
             )))
             .unwrap();
         self.send_display_info(&*window);
-        #[allow(deprecated)] // `request_ime_update` needs a cursor area, which we don't track
+        #[expect(
+            deprecated,
+            reason = "`request_ime_update` needs a cursor area, which we don't track"
+        )]
         window.set_ime_allowed(true);
 
         let winit_data = WinitData::new(

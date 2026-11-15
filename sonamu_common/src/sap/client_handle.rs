@@ -107,8 +107,10 @@ impl ClientHandle {
     }
 
     /// Like `send_event`, but gives the event back if the client has ended (eg it panicked)
-    // the error is just the event, as big as what was passed in
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "the error is just the event, as big as what was passed in"
+    )]
     pub fn try_send_event(&self, event: StandardEvent) -> Result<(), StandardEvent> {
         self.event_queue.send(event).map_err(|err| err.0)
     }

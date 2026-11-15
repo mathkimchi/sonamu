@@ -1,3 +1,8 @@
+#![expect(
+    unused_crate_dependencies,
+    reason = "integration tests link all of the package's dependencies"
+)]
+
 use sonamu_common::sap::session::{SavedWl, title_without_url};
 
 fn with_title(title: &str) -> SavedWl {

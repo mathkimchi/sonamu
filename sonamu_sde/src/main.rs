@@ -1,3 +1,8 @@
+#![expect(
+    unused_crate_dependencies,
+    reason = "bins share the package's dependencies"
+)]
+
 use sonamu_sar::runner::AppletRunner;
 use sonamu_standard_tabs::{
     code_editor::CodeEditorApplet, file_manager::FileManagerApplet, image_viewer::ImageViewerApplet,

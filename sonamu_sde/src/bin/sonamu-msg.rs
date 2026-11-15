@@ -6,6 +6,11 @@
 //! - `sonamu-msg subscribe [event...]` prints `events.on` events (all if none named) as JSON lines,
 //!   `{"event": .., "args": [..]}`, until killed
 
+#![expect(
+    unused_crate_dependencies,
+    reason = "bins share the package's dependencies"
+)]
+
 use sonamu_common::{
     command::Effect,
     msg::{EvalReply, Message, SOCKET_ENV},
