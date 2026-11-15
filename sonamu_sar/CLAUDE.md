@@ -20,7 +20,7 @@ Runner-only unless noted; the tree doesn't know about these.
 ## Wallpaper (#104, `wallpaper.rs`)
 
 - Setting `wallpaper` (`battery_wallpaper` while `battery::on_battery`; `sync_wallpaper` on settings changes and when it flips), drawn first in `redraw_ui` (under background layers). The runner subscribes to settings; a timer redraws at a shader's `fps` (not under fullscreen) and checks its file for changes (1 s otherwise).
-- Shaders: Shadertoy-style GLSL (wgpu `glsl` feature) between `PREAMBLE` (uniforms as `iTime`, `iResolution`, `iFrame`, `iMouse` = 0) and `EPILOGUE` (`main` flips to Shadertoy's bottom-left origin). Checked with naga first (errors are a notification, at the user's lines; the last wallpaper stays). Rendered into an `Rgba8Unorm` texture at `scale`, sampled through an sRGB view (Shadertoy colors are display values).
+- Shaders: Shadertoy-style GLSL (wgpu `glsl` feature) between `PREAMBLE` (uniforms as `iTime`, `iResolution`, `iFrame`, `iMouse` = 0) and `EPILOGUE` (`main` flips to Shadertoy's bottom-left origin). `.wgsl` files (`Language`): `WGSL_PREAMBLE` (the same buffer as struct `shadertoy`) and `WGSL_EPILOGUE`. Checked with naga first (errors are a notification, at the user's lines; the last wallpaper stays). Rendered into an `Rgba8Unorm` texture at `scale`, sampled through an sRGB view (Shadertoy colors are display values).
 - A file is loaded once per change (`Watched`), so a broken one isn't retried every frame.
 
 ## Socket (`$SONAMU_SOCKET`, `sonamu_common::msg`, `msg_socket.rs`)

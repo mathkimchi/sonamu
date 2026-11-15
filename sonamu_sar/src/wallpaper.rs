@@ -36,6 +36,44 @@ void main() {
 }
 ";
 
+/// Shadertoy's inputs for a WGSL shader: the same buffer as `PREAMBLE`'s, as fields of `shadertoy`
+const WGSL_PREAMBLE: &str = "struct Shadertoy {
+    iResolution: vec2<f32>,
+    iTime: f32,
+    iFrame: f32,
+    iMouse: vec4<f32>,
+}
+@group(0) @binding(0) var<uniform> shadertoy: Shadertoy;
+";
+
+/// Calls the user's WGSL `mainImage`, like `EPILOGUE`
+const WGSL_EPILOGUE: &str = "
+@fragment
+fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    let color = mainImage(vec2<f32>(position.x, shadertoy.iResolution.y - position.y));
+    return vec4<f32>(color.rgb, 1.0);
+}
+";
+
+/// A wallpaper shader's language, by its file's extension: `.wgsl`, else GLSL
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Language {
+    Glsl,
+    Wgsl,
+}
+impl Language {
+    fn of(path: &Path) -> Self {
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "wgsl")
+        {
+            Self::Wgsl
+        } else {
+            Self::Glsl
+        }
+    }
+}
+
 /// A triangle covering the target
 const VERTEX: &str = "
 @vertex
@@ -52,18 +90,47 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 static NOTIFICATION: Replacing = Replacing::new();
 
 /// The user's Shadertoy-style shader as a whole fragment shader
-fn fragment_source(user: &str) -> String {
-    format!("{PREAMBLE}{user}\n{EPILOGUE}")
+fn fragment_source(user: &str, language: Language) -> String {
+    match language {
+        Language::Glsl => format!("{PREAMBLE}{user}\n{EPILOGUE}"),
+        Language::Wgsl => format!("{WGSL_PREAMBLE}{user}\n{WGSL_EPILOGUE}"),
+    }
 }
 
 /// Parses and checks the user's shader (so a mistake is a message, not a GPU error); parse errors are at lines of
 /// the user's file
-fn fragment_module(user: &str) -> Result<naga::Module, String> {
-    let source = fragment_source(user);
-    let module = naga::front::glsl::Frontend::default()
+fn fragment_module(user: &str, language: Language) -> Result<naga::Module, String> {
+    let source = fragment_source(user, language);
+    let module = match language {
+        Language::Glsl => glsl_module(user, &source)?,
+        Language::Wgsl => naga::front::wgsl::parse_str(&source).map_err(|err| {
+            let preamble_lines = WGSL_PREAMBLE.lines().count();
+            match err.location(&source) {
+                Some(at) => format!(
+                    "wgsl:{}:{}: {}",
+                    (at.line_number as usize).saturating_sub(preamble_lines),
+                    at.line_position,
+                    err.message()
+                ),
+                None => err.emit_to_string(&source),
+            }
+        })?,
+    };
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::default(),
+    )
+    .validate(&module)
+    .map_err(|err| err.emit_to_string(&source))?;
+    Ok(module)
+}
+
+/// Parses a whole GLSL fragment shader (`source`, with `user` in it); errors at `user`'s lines
+fn glsl_module(user: &str, source: &str) -> Result<naga::Module, String> {
+    naga::front::glsl::Frontend::default()
         .parse(
             &naga::front::glsl::Options::from(naga::ShaderStage::Fragment),
-            &source,
+            source,
         )
         .map_err(|err| {
             let lines: Vec<String> = err
@@ -78,14 +145,7 @@ fn fragment_module(user: &str) -> Result<naga::Module, String> {
                 })
                 .collect();
             lines.join("\n")
-        })?;
-    naga::valid::Validator::new(
-        naga::valid::ValidationFlags::all(),
-        naga::valid::Capabilities::default(),
-    )
-    .validate(&module)
-    .map_err(|err| err.emit_to_string(&source))?;
-    Ok(module)
+        })
 }
 
 /// Whether a frame is due at `now`, after one drawn at `last`
@@ -141,13 +201,18 @@ impl Shader {
     fn new(setting: &ShaderWallpaper, path: &Path, device: &wgpu::Device) -> Result<Self, String> {
         let user =
             std::fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
-        fragment_module(&user).map_err(|err| format!("{}:\n{err}", path.display()))?;
+        let language = Language::of(path);
+        fragment_module(&user, language).map_err(|err| format!("{}:\n{err}", path.display()))?;
+        let source = fragment_source(&user, language).into();
         let fragment = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("wallpaper fragment"),
-            source: wgpu::ShaderSource::Glsl {
-                shader: fragment_source(&user).into(),
-                stage: naga::ShaderStage::Fragment,
-                defines: &[],
+            source: match language {
+                Language::Glsl => wgpu::ShaderSource::Glsl {
+                    shader: source,
+                    stage: naga::ShaderStage::Fragment,
+                    defines: &[],
+                },
+                Language::Wgsl => wgpu::ShaderSource::Wgsl(source),
             },
         });
         let vertex = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -436,7 +501,7 @@ mod tests {
 
     #[test]
     fn shadertoy_shader_compiles() {
-        assert!(fragment_module(SINE).is_ok());
+        assert!(fragment_module(SINE, Language::Glsl).is_ok());
     }
 
     /// The example config's wallpaper
@@ -444,19 +509,46 @@ mod tests {
     fn example_shader_compiles() {
         let shader = include_str!("../../examples/config/wallpapers/sine.glsl");
         assert!(
-            fragment_module(shader).is_ok(),
+            fragment_module(shader, Language::Glsl).is_ok(),
             "{:?}",
-            fragment_module(shader).err()
+            fragment_module(shader, Language::Glsl).err()
         );
     }
 
     #[test]
     fn broken_shader_says_why() {
-        let err = fragment_module("void mainImage(out vec4 c, in vec2 p) {\n    c = nope;\n}")
-            .unwrap_err();
+        let err = fragment_module(
+            "void mainImage(out vec4 c, in vec2 p) {\n    c = nope;\n}",
+            Language::Glsl,
+        )
+        .unwrap_err();
         assert!(err.contains("nope"), "{err}");
         // lines are the user's, not counting the preamble
         assert!(err.contains("glsl:2:"), "{err}");
+    }
+
+    #[test]
+    fn wgsl_shader_compiles() {
+        let shader = "fn mainImage(fragCoord: vec2<f32>) -> vec4<f32> {
+            let uv = fragCoord / shadertoy.iResolution;
+            let wave = 0.5 + 0.4 * sin(uv.x * 12.0 + shadertoy.iTime);
+            return vec4<f32>(0.0, smoothstep(0.02, 0.0, abs(uv.y - wave)), 0.0, 1.0);
+        }";
+        let result = fragment_module(shader, Language::Wgsl);
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert_eq!(Language::of(Path::new("w/a.wgsl")), Language::Wgsl);
+        assert_eq!(Language::of(Path::new("w/a.frag")), Language::Glsl);
+    }
+
+    #[test]
+    fn broken_wgsl_says_where() {
+        let err = fragment_module(
+            "fn mainImage(p: vec2<f32>) -> vec4<f32> {\n    return nope;\n}",
+            Language::Wgsl,
+        )
+        .unwrap_err();
+        assert!(err.contains("nope"), "{err}");
+        assert!(err.contains("wgsl:2:"), "{err}");
     }
 
     #[test]

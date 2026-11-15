@@ -210,7 +210,7 @@
           "additionalProperties": false
         },
         {
-          "description": "A Shadertoy-style GLSL fragment shader: `void mainImage(out vec4 fragColor, in vec2 fragCoord)` with `iTime`,\n`iResolution`, `iFrame`, `iMouse`. Reloads when the file changes",
+          "description": "A Shadertoy-style fragment shader, reloaded when the file changes. GLSL: `void mainImage(out vec4 fragColor,\nin vec2 fragCoord)` with `iTime`, `iResolution`, `iFrame`, `iMouse`. A `.wgsl` file: `fn mainImage(fragCoord:\nvec2<f32>) -> vec4<f32>` with `shadertoy.iTime` (and `iResolution` as a `vec2`, `iFrame`, `iMouse`)",
           "type": "object",
           "properties": {
             "shader": {
@@ -293,7 +293,7 @@
           "additionalProperties": false
         },
         {
-          "description": "A Shadertoy-style GLSL fragment shader: `void mainImage(out vec4 fragColor, in vec2 fragCoord)` with `iTime`,\n`iResolution`, `iFrame`, `iMouse`. Reloads when the file changes",
+          "description": "A Shadertoy-style fragment shader, reloaded when the file changes. GLSL: `void mainImage(out vec4 fragColor,\nin vec2 fragCoord)` with `iTime`, `iResolution`, `iFrame`, `iMouse`. A `.wgsl` file: `fn mainImage(fragCoord:\nvec2<f32>) -> vec4<f32>` with `shadertoy.iTime` (and `iResolution` as a `vec2`, `iFrame`, `iMouse`)",
           "type": "object",
           "properties": {
             "shader": {
