@@ -159,7 +159,7 @@ enum Popup {
     /// With this section's list shown
     Hub(Option<hub::Section>, ScrollList),
     /// A tray item's menu (`Tray::menu`, read meanwhile)
-    TrayMenu,
+    TrayMenu(ScrollList),
     /// The bell's list
     Notifications(ScrollList),
     /// `StatusBar::launcher`'s
@@ -171,7 +171,7 @@ impl Popup {
             Self::Calendar(_) => Segment::Time,
             Self::Resources(..) => Segment::Resources,
             Self::Hub(..) => Segment::Hub,
-            Self::TrayMenu => Segment::Tray,
+            Self::TrayMenu(_) => Segment::Tray,
             Self::Notifications(_) => Segment::Bell,
             Self::Launcher => Segment::Launcher,
         }
@@ -629,9 +629,12 @@ impl StatusBar {
                 list,
                 hover,
             ),
-            Popup::TrayMenu => {
-                tray::draw_menu(settings, self.tray.menu.lock().unwrap().as_ref(), hover)
-            }
+            Popup::TrayMenu(list) => tray::draw_menu(
+                settings,
+                self.tray.menu.lock().unwrap().as_ref(),
+                list,
+                hover,
+            ),
         }
     }
 
@@ -645,7 +648,7 @@ impl StatusBar {
             }
             Popup::Launcher => Launcher::size(),
             Popup::Hub(open, _) => hub::size(&self.controls.state.lock().unwrap(), open),
-            Popup::TrayMenu => tray::menu_size(self.tray.menu.lock().unwrap().as_ref()),
+            Popup::TrayMenu(_) => tray::menu_size(self.tray.menu.lock().unwrap().as_ref()),
         }
     }
 
@@ -682,7 +685,7 @@ impl StatusBar {
             .set_want_processes(matches!(popup, Some(Popup::Resources(..))));
         self.controls
             .set_want_lists(matches!(popup, Some(Popup::Hub(..))));
-        if popup != Some(Popup::TrayMenu) {
+        if !matches!(popup, Some(Popup::TrayMenu(_))) {
             self.tray.close_menu();
         }
     }
@@ -896,6 +899,12 @@ impl StatusBar {
                 self.popup = Some(Popup::Hub(open, list));
                 moved
             }
+            Some(Popup::TrayMenu(mut list)) => {
+                let moved =
+                    tray::scroll_menu(self.tray.menu.lock().unwrap().as_ref(), &mut list, steps);
+                self.popup = Some(Popup::TrayMenu(list));
+                moved
+            }
             Some(Popup::Launcher) => self
                 .launcher
                 .as_mut()
@@ -941,14 +950,14 @@ impl StatusBar {
         match button {
             BTN_LEFT if item.item_is_menu => {
                 self.tray.activate(&item);
-                self.set_popup(Some(Popup::TrayMenu));
+                self.set_popup(Some(Popup::TrayMenu(ScrollList::default())));
             }
             BTN_LEFT => self.tray.activate(&item),
             BTN_MIDDLE => self.tray.secondary_activate(&item),
             BTN_RIGHT => {
                 self.set_popup(None);
                 self.tray.open_menu(&item);
-                self.set_popup(Some(Popup::TrayMenu));
+                self.set_popup(Some(Popup::TrayMenu(ScrollList::default())));
             }
             _ => {}
         }
@@ -994,8 +1003,8 @@ impl StatusBar {
                 self.apply_notification_click(click);
                 return true;
             }
-            Popup::TrayMenu => {
-                let id = tray::menu_click(self.tray.menu.lock().unwrap().as_ref(), cell);
+            Popup::TrayMenu(list) => {
+                let id = tray::menu_click(self.tray.menu.lock().unwrap().as_ref(), list, cell);
                 let Some(id) = id else {
                     return false;
                 };

@@ -1,6 +1,7 @@
 //! The tray (StatusNotifierItem): Sonamu serves `org.kde.StatusNotifierWatcher` (replacing DMS's) and is its host.
 //! Items' properties are read every few seconds; their menus (`com.canonical.dbusmenu`) when opened.
 
+use super::widgets::ScrollList;
 use sonamu_ui::ui_element::Image;
 use std::{
     collections::HashMap,
@@ -412,8 +413,20 @@ impl Watcher {
 /// The menu popup's width in characters
 const MENU_COLUMNS: usize = 32;
 
+/// Entries shown at most; longer menus scroll
+const MENU_SHOWN: usize = 16;
+
+fn menu_len(menu: Option<&Menu>) -> usize {
+    menu.map_or(0, |menu| menu.entries.len())
+}
+
 fn menu_lines(menu: Option<&Menu>) -> usize {
-    menu.map_or(1, |menu| menu.entries.len().max(1))
+    menu_len(menu).clamp(1, MENU_SHOWN)
+}
+
+/// Scrolls the menu `steps` (positive down); whether it moved
+pub fn scroll_menu(menu: Option<&Menu>, list: &mut ScrollList, steps: i32) -> bool {
+    list.scroll(steps, menu_len(menu), MENU_SHOWN)
 }
 
 pub fn menu_size(menu: Option<&Menu>) -> [f32; 2] {
@@ -424,6 +437,7 @@ pub fn menu_size(menu: Option<&Menu>) -> [f32; 2] {
 pub fn draw_menu(
     settings: &sonamu_common::settings::Settings,
     menu: Option<&Menu>,
+    list: ScrollList,
     hover: Option<super::widgets::Cell>,
 ) -> Vec<sonamu_ui::ui_element::UITree> {
     let palette = &settings.palette;
@@ -431,7 +445,9 @@ pub fn draw_menu(
     let Some(menu) = menu.filter(|menu| !menu.entries.is_empty()) else {
         return vec![lines.text(0, 0, vec![("…".to_string(), palette.inactive)])];
     };
-    menu.entries
+    let count = menu.entries.len();
+    let visible = list.visible(count, MENU_SHOWN);
+    let mut items: Vec<_> = menu.entries[visible]
         .iter()
         .enumerate()
         .flat_map(|(index, entry)| {
@@ -460,13 +476,20 @@ pub fn draw_menu(
                 hover,
             )
         })
-        .collect()
+        .collect();
+    items.extend(list.bar(&lines, [0, MENU_COLUMNS, 1], count, MENU_SHOWN, palette));
+    items
 }
 
 /// The clickable entry at `cell`
-pub fn menu_click(menu: Option<&Menu>, cell: super::widgets::Cell) -> Option<i32> {
+pub fn menu_click(
+    menu: Option<&Menu>,
+    list: ScrollList,
+    cell: super::widgets::Cell,
+) -> Option<i32> {
     let (line, _) = cell;
-    let entry = menu?.entries.get(line)?;
+    let index = list.item_at(line, 0, menu_len(menu), MENU_SHOWN)?;
+    let entry = menu?.entries.get(index)?;
     let clickable = entry.enabled && !entry.separator;
     (clickable && super::widgets::Button::row(line, MENU_COLUMNS).contains(cell))
         .then_some(entry.id)
