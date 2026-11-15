@@ -17,4 +17,5 @@ Every native applet looks and behaves alike: same shades, metrics, input handlin
 - Text: `text`, `spans`; place with `Rows::text`, `Rows::style` or `inset`. `rect`, `frame` (`Bordered`).
 - Scroll state stays clamped (`max_scroll`), also on resize and content changes; PageUp/PageDown move `page(shown)`.
 - `Rows { top, height, scroll }`: same indices for drawing (`row`, `style`, `top_of`, `text`) and clicking (`row_at`: may be past the last row, filter by count; `within`). Scrolling: `fitting`, `scroll_to`, `max_scroll`. Header: `Rows::with_height(0.0, h).row(0, ..)`.
+- Form fields (`fields`): `TextInput` (`handle_key` → `Edit`, `element`), `toggle`, `choice` + `cycle`, `swatch`. Text ones are `UIElement`s placed with `Rows::text`.
 - Char grids (hub, man page, buffer line): `fill_row`, `put`. Status bar popups: `status_bar/widgets.rs`, text helpers (`columns`, `cut`, `justified`) in `status_bar/mod.rs`.
