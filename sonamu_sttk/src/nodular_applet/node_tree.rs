@@ -2377,15 +2377,20 @@ impl NodeTree {
 
     /// Back to the zoom-out view's original scale and, if free, its center in the middle (Shift+C)
     fn reset_zoom_view(&mut self) {
+        self.center_zoom_free();
+        self.rescale_zoom(1.0);
+    }
+
+    /// Slides the free zoom-out view's center back to the middle, keeping its scale
+    fn center_zoom_free(&mut self) {
         self.bake_zoom_anchor();
         self.zoom_glide = None;
-        self.rescale_zoom(1.0);
         if Self::zoom_free_view() {
-            // slides there
             let (carried, carried_rows, _) = self.zoom_pan_offset();
             let (free, free_rows) = std::mem::replace(&mut self.zoom_free, ([0.0; 2], 0.0));
             let offset = [0, 1].map(|axis| carried[axis] + free[axis]);
             self.zoom_pan = Some((Instant::now(), offset, carried_rows + free_rows, false));
+            self.damaged = true;
         }
     }
 
@@ -2458,9 +2463,7 @@ impl NodeTree {
         };
         if let Some(target) = target {
             self.set_zoom_center(target);
-            if Self::zoom_free_view() {
-                self.show_zoom_center();
-            }
+            self.center_zoom_free();
         }
     }
 
@@ -2633,50 +2636,6 @@ impl NodeTree {
         for axis in [0, 1] {
             self.zoom_free.0[axis] += shift[axis];
         }
-    }
-
-    /// Slides the free zoom-out view so its center's pane is in sight
-    fn show_zoom_center(&mut self) {
-        let (Some(size), Some(center)) = (self.zoom_drawn.get(), self.zoom_center()) else {
-            return;
-        };
-        // where things end up
-        let pan = self.zoom_pan.take();
-        let layout = self.zoom_layout(size, 1.0);
-        self.zoom_pan = pan;
-        let Some(ZoomLayout { panes, scale, .. }) = layout else {
-            return;
-        };
-        let Some(rect) = panes
-            .iter()
-            .find(|pane| self.contains(center, pane.node))
-            .map(|pane| pane.rect.map(|value| value as f32))
-        else {
-            return;
-        };
-        let margin = settings::get().gap;
-        let view = [size.width, size.height].map(|length| length as f32 / scale);
-        let shift = [0, 1].map(|axis| {
-            let [low, high] = [rect[axis] - margin, rect[axis] + rect[axis + 2] + margin];
-            if low < 0.0 {
-                -low
-            } else if high > view[axis] {
-                (view[axis] - high).max(-low)
-            } else {
-                0.0
-            }
-        });
-        if shift.iter().all(|value| value.abs() < f32::EPSILON) {
-            return;
-        }
-        // slides there from where it was
-        let (carried, carried_rows, _) = self.zoom_pan_offset();
-        for axis in [0, 1] {
-            self.zoom_free.0[axis] += shift[axis];
-        }
-        let offset = [0, 1].map(|axis| carried[axis] - shift[axis]);
-        self.zoom_pan = Some((Instant::now(), offset, carried_rows, false));
-        self.damaged = true;
     }
 
     /// Swaps the zoom-out view's center with a sibling; it stays the center
