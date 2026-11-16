@@ -16,6 +16,6 @@
     - Commands: node (`standard_keybind`: `quit`, `close`, `wrap_project`, `toggle_half`, `spawn(program)`, `spawn_sibling(program)`, `swap_sibling(n)`, `spawn_terminal`/`spawn_browser` (+`_sibling`)); root (`RootKeybind`: `help`, `view_root`, `view_parent`, `swipe(dir)`; `buffer_mode`: `is_buffer_mode_key`, checked before the buffer line takes keys); `traverse(kind, n?)` (`Traversal::from_args`; while the treeview has keys, Alt ones also work without Alt, but `enter`); runner `pluck_place`. Test `default_keybinds_are_known`.
   - `terminal`/`browser`/`pdf_viewer` unset: env, else first installed of `TERMINALS`/`BROWSERS`/`PDF_VIEWERS` (`standard_keybinds.rs`).
   - `startup`: run once at start (`run_startup`).
-  - Alacritty theme (`alacritty_theme`): each load writes `opacity` and `palette.bg`/`fg` to `$XDG_STATE_HOME/sonamu/alacritty.toml` (only if changed; renamed into place). Alacritty's config imports it (`general.import`) and live reloads.
+  - Alacritty theme (`alacritty_theme`): each load writes `opacity`, `font_size` (as pt, ×0.75) and `palette.bg`/`fg` to `$XDG_STATE_HOME/sonamu/alacritty.toml` (only if changed; renamed into place). Alacritty's config imports it (`general.import`) and live reloads.
   - `treeview.side`/`floating*` are parsed but unused since the status bar (#150).
 - Gap: a settings program's background child holding stdout blocks reading after it exits.

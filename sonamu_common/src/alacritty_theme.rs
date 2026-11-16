@@ -1,4 +1,4 @@
-//! Sonamu's colors and opacity for Alacritty: its config imports this file and live reloads it on change.
+//! Sonamu's colors, opacity and font size for Alacritty: its config imports this file and live reloads it on change.
 
 use crate::settings::Settings;
 use sonamu_ui::color::Color;
@@ -39,8 +39,11 @@ fn toml(settings: &Settings) -> String {
     format!(
         "# Written by Sonamu from its settings; changes here are overwritten\n\
          [window]\nopacity = {}\n\n\
+         [font]\nsize = {:?}\n\n\
          [colors.primary]\nbackground = {}\nforeground = {}\n",
         settings.opacity.clamp(0.0, 1.0),
+        // Alacritty's size is in points: 3/4 px at scale 1
+        settings.font_size * 0.75,
         rgb(settings.palette.bg),
         rgb(settings.palette.fg),
     )
@@ -51,9 +54,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn colors_and_opacity() {
+    fn colors_opacity_and_font_size() {
         let mut settings = Settings {
             opacity: 0.5,
+            font_size: 24.0,
             ..Default::default()
         };
         settings.palette.bg = Color([0x07, 0x21, 0x0f, 0xCC]);
@@ -62,6 +66,7 @@ mod tests {
             toml(&settings),
             "# Written by Sonamu from its settings; changes here are overwritten\n\
              [window]\nopacity = 0.5\n\n\
+             [font]\nsize = 18.0\n\n\
              [colors.primary]\nbackground = \"#07210f\"\nforeground = \"#e7efe9\"\n"
         );
     }
