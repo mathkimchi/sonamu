@@ -27,3 +27,6 @@ extras/firefox/web-ext-artifacts/
 *.xpi
 *.zip
 .superpowers/
+
+# Claude Code worktrees
+.claude/worktrees/
