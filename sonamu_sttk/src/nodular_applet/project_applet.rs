@@ -49,7 +49,8 @@ const COLOR_ROW: usize = 3;
 const HINT_ROW: usize = 4;
 /// Rows before `NEW_ROWS` (or the directory or icon options, while setting one)
 const OPTIONS_ROW: usize = 5;
-// The color row (#76): `color:`, a button for none (plain), then a hue slider to the row's end, in font sizes
+// The color row (#76), while picking: `color:`, a button for none (plain), then a hue slider to the row's end, in
+// font sizes
 const PLAIN_LEFT: f32 = 5.0;
 const PLAIN_WIDTH: f32 = 4.0;
 const HUE_LEFT: f32 = 10.0;
@@ -181,6 +182,8 @@ pub struct ProjectApplet {
     picking_icon: Option<usize>,
     /// Its treeview color (`None`: the palette's)
     color: Option<Color>,
+    /// The color row shows its plain button and hue slider
+    picking_color: bool,
     /// The hue slider is being dragged
     dragging_hue: bool,
     /// The first icon or directory option shown
@@ -321,6 +324,7 @@ impl ProjectApplet {
             icon: None,
             picking_icon: None,
             color: None,
+            picking_color: false,
             dragging_hue: false,
             hovered: None,
             options_scroll: 0,
@@ -358,6 +362,7 @@ impl ProjectApplet {
             .unwrap_or_default();
         self.renaming = None;
         self.picking_icon = None;
+        self.picking_color = false;
         self.setting_directory = Some(PathInput::directory(directory));
         self.options_scroll = 0;
     }
@@ -367,6 +372,7 @@ impl ProjectApplet {
         let current = self.icon.as_deref().and_then(|icon| icon.chars().next());
         self.renaming = None;
         self.setting_directory = None;
+        self.picking_color = false;
         self.picking_icon = Some(
             ICONS
                 .iter()
@@ -445,8 +451,11 @@ impl ProjectApplet {
         self.color = Some(hue_color(hue));
     }
 
-    /// The color row's plain button and hue slider (its `color:` is a row of text)
+    /// The color row's plain button and hue slider while picking (its `color:` is a row of text)
     fn color_controls(&self, width: f32) -> Vec<UITree> {
+        if !self.picking_color {
+            return Vec::new();
+        }
         let settings = settings::get();
         let layout = overview_rows();
         let top = layout.top_of(COLOR_ROW);
@@ -490,6 +499,28 @@ impl ProjectApplet {
             ));
         }
         parts
+    }
+
+    /// The hint row's text while not setting the directory
+    fn hint_text(&self) -> &'static str {
+        if self.renaming.is_some() {
+            "Enter: save, Esc: cancel"
+        } else if self.picking_color {
+            "Click or drag: pick, Esc: done"
+        } else if self.picking_icon.is_some() {
+            "Up/Down + Enter or click: pick, type: that character, Backspace: default, Esc: cancel"
+        } else {
+            "r: rename, d: set directory, i: set icon, 1-9: select"
+        }
+    }
+
+    /// The color row's text: while picking, its controls follow it
+    fn color_row_text(&self) -> &'static str {
+        if self.picking_color || self.color.is_some() {
+            "color:"
+        } else {
+            "color: plain (default)"
+        }
     }
 
     /// Its icon as shown
@@ -642,6 +673,8 @@ impl ProjectApplet {
     fn handle_overview_button(&mut self, [x, y]: [f64; 2], pressed: bool) {
         if !pressed && self.dragging_hue {
             self.dragging_hue = false;
+            self.picking_color = false;
+            self.hook.damage_window();
             return;
         }
         if let Some(top) = self.zoom_top()
@@ -675,15 +708,23 @@ impl ProjectApplet {
             Some(0) => {
                 self.setting_directory = None;
                 self.picking_icon = None;
+                self.picking_color = false;
                 self.renaming = Some(String::new());
             }
             Some(DIRECTORY_ROW) => self.start_setting_directory(),
             Some(ICON_ROW) => self.start_picking_icon(),
+            Some(COLOR_ROW) if !self.picking_color => {
+                self.renaming = None;
+                self.setting_directory = None;
+                self.picking_icon = None;
+                self.picking_color = true;
+            }
             Some(COLOR_ROW) => {
                 let font = f64::from(font_size());
                 let plain_left = f64::from(PAD) + f64::from(PLAIN_LEFT) * font;
                 if (plain_left..plain_left + f64::from(PLAIN_WIDTH) * font).contains(&x) {
                     self.color = None;
+                    self.picking_color = false;
                 } else if x >= f64::from(hue_bar(self.size.width as f32).0) {
                     self.dragging_hue = true;
                     self.set_hue_at(x);
@@ -694,7 +735,7 @@ impl ProjectApplet {
                     self.add_new(index);
                 }
             }
-            Some(_) => {}
+            Some(_) => self.picking_color = false,
         }
         self.hook.damage_window();
         self.hook.damage_treeview();
@@ -716,6 +757,14 @@ impl ProjectApplet {
             // the treeview shows it
             self.hook.damage_window();
             self.hook.damage_treeview();
+            return true;
+        }
+        if self.picking_color {
+            if !matches!(key, KeySymbol::Escape) {
+                return false;
+            }
+            self.picking_color = false;
+            self.hook.damage_window();
             return true;
         }
         match (&mut self.renaming, key) {
@@ -809,7 +858,7 @@ impl ProjectApplet {
                     )
                 },
             ),
-            (renaming, None) => (
+            (_, None) => (
                 (
                     format!(
                         "directory: {}",
@@ -820,19 +869,7 @@ impl ProjectApplet {
                     ),
                     hint(),
                 ),
-                if renaming.is_some() {
-                    ("Enter: save, Esc: cancel", hint())
-                } else if self.picking_icon.is_some() {
-                    (
-                        "Up/Down + Enter or click: pick, type: that character, Backspace: default, Esc: cancel",
-                        hint(),
-                    )
-                } else {
-                    (
-                        "r: rename, d: set directory, i: set icon, 1-9: select",
-                        hint(),
-                    )
-                },
+                (self.hint_text(), hint()),
             ),
         };
         let below = self.overview_options();
@@ -842,7 +879,10 @@ impl ProjectApplet {
             (title, self.color.unwrap_or(text)),
             directory,
             icon_row,
-            ("color:".to_string(), self.color.unwrap_or(text)),
+            (
+                self.color_row_text().to_string(),
+                self.color.unwrap_or(text),
+            ),
             (hint.0.to_string(), hint.1),
         ]
         .into_iter()
@@ -917,12 +957,15 @@ impl ProjectApplet {
     }
 
     /// Behind the clickable row (or `NEW_ROWS` cell) of the overview's `count` the pointer is on, like hovered rows
-    /// elsewhere; not the color row (its parts aren't the whole row) or the selected one
+    /// elsewhere; not the color row while picking (its parts aren't the whole row) or the selected one
     fn overview_hover(&self, width: f32, count: usize, options: bool) -> Option<UITree> {
         let [x, y] = self.hovered?;
         let layout = overview_rows();
         let row = layout.row_at(y).filter(|&row| row < count)?;
-        if matches!(row, HINT_ROW | COLOR_ROW) || self.selected_option_row() == Some(row) {
+        if row == HINT_ROW
+            || (row == COLOR_ROW && self.picking_color)
+            || self.selected_option_row() == Some(row)
+        {
             return None;
         }
         let [left, w] = if row == OPTIONS_ROW && !options {
