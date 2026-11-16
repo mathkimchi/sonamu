@@ -13,7 +13,6 @@
   },
   "gap": 12.0,
   "radius": 0.0,
-  "font_size": 24.0,
   "treeview": {
     "floating": "center",
     "width": 15,
@@ -99,11 +98,6 @@
   },
   "buffer_line": "always",
   "wallpaper": {
-    "shader": {
-      "path": "wallpapers/constellation.wgsl"
-    }
-  },
-  "battery_wallpaper": {
-    "color": "#588633"
+    "color": "#4d6005"
   }
 }

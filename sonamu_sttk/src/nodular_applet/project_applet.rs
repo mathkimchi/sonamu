@@ -57,6 +57,12 @@ const HUE_LEFT: f32 = 10.0;
 /// Rects the hue slider is drawn with
 const HUE_STEPS: usize = 60;
 
+/// Picking a project's color
+struct ColorPick {
+    /// The color before, which Esc gives back
+    before: Option<Color>,
+}
+
 /// The hue slider's left and right ends in a window `width` wide
 fn hue_bar(width: f32) -> (f32, f32) {
     let left = PAD + HUE_LEFT * font_size();
@@ -183,7 +189,7 @@ pub struct ProjectApplet {
     /// Its treeview color (`None`: the palette's)
     color: Option<Color>,
     /// The color row shows its plain button and hue slider
-    picking_color: bool,
+    picking_color: Option<ColorPick>,
     /// The color Space last made plain, which Space gives back
     plain_from: Option<Color>,
     /// The hue slider is being dragged
@@ -326,7 +332,7 @@ impl ProjectApplet {
             icon: None,
             picking_icon: None,
             color: None,
-            picking_color: false,
+            picking_color: None,
             plain_from: None,
             dragging_hue: false,
             hovered: None,
@@ -365,7 +371,7 @@ impl ProjectApplet {
             .unwrap_or_default();
         self.renaming = None;
         self.picking_icon = None;
-        self.picking_color = false;
+        self.picking_color = None;
         self.setting_directory = Some(PathInput::directory(directory));
         self.options_scroll = 0;
     }
@@ -375,7 +381,7 @@ impl ProjectApplet {
         let current = self.icon.as_deref().and_then(|icon| icon.chars().next());
         self.renaming = None;
         self.setting_directory = None;
-        self.picking_color = false;
+        self.picking_color = None;
         self.picking_icon = Some(
             ICONS
                 .iter()
@@ -470,7 +476,12 @@ impl ProjectApplet {
                     self.color = Some(self.plain_from.unwrap_or_else(|| hue_color(0.0)));
                 }
             }
-            KeySymbol::Escape => self.picking_color = false,
+            KeySymbol::Enter => self.picking_color = None,
+            KeySymbol::Escape => {
+                if let Some(pick) = self.picking_color.take() {
+                    self.color = pick.before;
+                }
+            }
             _ => return false,
         }
         true
@@ -487,19 +498,22 @@ impl ProjectApplet {
         self.renaming = None;
         self.setting_directory = None;
         self.picking_icon = None;
-        self.picking_color = true;
+        self.picking_color = Some(ColorPick { before: self.color });
     }
 
     /// The color row's plain button and hue slider while picking (its `color:` is a row of text)
     fn color_controls(&self, width: f32) -> Vec<UITree> {
-        if !self.picking_color {
-            return Vec::new();
-        }
         let settings = settings::get();
         let layout = overview_rows();
         let top = layout.top_of(COLOR_ROW);
         let font = font_size();
         let plain_left = PAD + PLAIN_LEFT * font;
+        if self.picking_color.is_none() {
+            // the chosen color, after `color:`
+            return self.color.map_or_else(Vec::new, |color| {
+                vec![ui::rect(color, [plain_left, top], [font, font])]
+            });
+        }
         let plain = ui::frame(
             if self.color.is_none() {
                 settings.palette.accent
@@ -544,8 +558,8 @@ impl ProjectApplet {
     fn hint_text(&self) -> &'static str {
         if self.renaming.is_some() {
             "Enter: save, Esc: cancel"
-        } else if self.picking_color {
-            "Left/Right or click: hue, Space: plain or not, Esc: done"
+        } else if self.picking_color.is_some() {
+            "Left/Right or click: hue, Space: plain or not, Enter: save, Esc: cancel"
         } else if self.picking_icon.is_some() {
             "Up/Down + Enter or click: pick, type: that character, Backspace: default, Esc: cancel"
         } else {
@@ -555,7 +569,7 @@ impl ProjectApplet {
 
     /// The color row's text: while picking, its controls follow it
     fn color_row_text(&self) -> &'static str {
-        if self.picking_color || self.color.is_some() {
+        if self.picking_color.is_some() || self.color.is_some() {
             "color:"
         } else {
             "color: plain (default)"
@@ -712,7 +726,7 @@ impl ProjectApplet {
     fn handle_overview_button(&mut self, [x, y]: [f64; 2], pressed: bool) {
         if !pressed && self.dragging_hue {
             self.dragging_hue = false;
-            self.picking_color = false;
+            self.picking_color = None;
             self.hook.damage_window();
             return;
         }
@@ -747,18 +761,18 @@ impl ProjectApplet {
             Some(0) => {
                 self.setting_directory = None;
                 self.picking_icon = None;
-                self.picking_color = false;
+                self.picking_color = None;
                 self.renaming = Some(String::new());
             }
             Some(DIRECTORY_ROW) => self.start_setting_directory(),
             Some(ICON_ROW) => self.start_picking_icon(),
-            Some(COLOR_ROW) if !self.picking_color => self.start_picking_color(),
+            Some(COLOR_ROW) if self.picking_color.is_none() => self.start_picking_color(),
             Some(COLOR_ROW) => {
                 let font = f64::from(font_size());
                 let plain_left = f64::from(PAD) + f64::from(PLAIN_LEFT) * font;
                 if (plain_left..plain_left + f64::from(PLAIN_WIDTH) * font).contains(&x) {
                     self.color = None;
-                    self.picking_color = false;
+                    self.picking_color = None;
                 } else if x >= f64::from(hue_bar(self.size.width as f32).0) {
                     self.dragging_hue = true;
                     self.set_hue_at(x);
@@ -769,7 +783,7 @@ impl ProjectApplet {
                     self.add_new(index);
                 }
             }
-            Some(_) => self.picking_color = false,
+            Some(_) => self.picking_color = None,
         }
         self.hook.damage_window();
         self.hook.damage_treeview();
@@ -793,7 +807,7 @@ impl ProjectApplet {
             self.hook.damage_treeview();
             return true;
         }
-        if self.picking_color {
+        if self.picking_color.is_some() {
             if !self.handle_color_key(key) {
                 return false;
             }
@@ -1001,7 +1015,7 @@ impl ProjectApplet {
         let layout = overview_rows();
         let row = layout.row_at(y).filter(|&row| row < count)?;
         if row == HINT_ROW
-            || (row == COLOR_ROW && self.picking_color)
+            || (row == COLOR_ROW && self.picking_color.is_some())
             || self.selected_option_row() == Some(row)
         {
             return None;
