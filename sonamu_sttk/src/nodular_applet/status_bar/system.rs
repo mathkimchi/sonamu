@@ -1,5 +1,5 @@
 //! What the bar shows about the machine: battery, power profile, cpu, memory and processes, read on a thread from
-//! `/sys` and `/proc` (and power-profiles-daemon over the system bus).
+//! `/sys` and `/proc` (and power-profiles-daemon over the system bus). Also keeps it awake with the lid closed.
 
 use std::{
     collections::HashMap,
@@ -67,6 +67,8 @@ pub struct System {
     /// The process list is read only while its popup is open
     want_processes: Arc<AtomicBool>,
     changed: Arc<dyn Fn() + Send + Sync>,
+    /// logind's lid switch inhibitor, held while it stays awake with the lid closed
+    lid_inhibitor: Option<zbus::OwnedFd>,
 }
 
 impl System {
@@ -101,7 +103,20 @@ impl System {
             snapshot,
             want_processes,
             changed,
+            lid_inhibitor: None,
         }
+    }
+
+    /// Whether closing the lid leaves it running (off by default)
+    pub fn awake_lid_closed(&self) -> bool {
+        self.lid_inhibitor.is_some()
+    }
+
+    pub fn toggle_awake_lid_closed(&mut self) {
+        self.lid_inhibitor = match self.lid_inhibitor.take() {
+            Some(_) => None,
+            None => inhibit_lid_switch(),
+        };
     }
 
     pub fn set_want_processes(&self, want: bool) {
@@ -141,6 +156,29 @@ fn set_profile(profile: &str) {
     if let Err(err) = zbus::block_on(proxy.set_property("ActiveProfile", profile)) {
         log::warn!("Couldn't set the power profile to {profile}: {err}");
     }
+}
+
+/// Blocks logind's lid switch handling (suspend) until the fd is dropped
+fn inhibit_lid_switch() -> Option<zbus::OwnedFd> {
+    let inhibit = || -> zbus::Result<zbus::OwnedFd> {
+        let connection = zbus::block_on(zbus::Connection::system())?;
+        let reply = zbus::block_on(connection.call_method(
+            Some("org.freedesktop.login1"),
+            "/org/freedesktop/login1",
+            Some("org.freedesktop.login1.Manager"),
+            "Inhibit",
+            &(
+                "handle-lid-switch",
+                "Sonamu",
+                "Stay awake with the lid closed",
+                "block",
+            ),
+        ))?;
+        reply.body().deserialize()
+    };
+    inhibit()
+        .inspect_err(|err| log::warn!("Couldn't inhibit the lid switch: {err}"))
+        .ok()
 }
 
 /// Keeps the last cpu times, for usage since then
