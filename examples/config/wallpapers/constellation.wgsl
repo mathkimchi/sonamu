@@ -8,7 +8,8 @@ struct Wallpaper {
 }
 @group(0) @binding(0) var<uniform> wallpaper: Wallpaper;
 
-// Simple 2D-to-2D pseudo-random hash function
+// Simple 2D-to-2D pseudo-random hash function.
+// Output: 0 to 1
 fn hash22(p: vec2<f32>) -> vec2<f32> {
     // if these numbers are too big, I think there's an overflow
     let a = fract(dot(p*p*p, vec2(186.917, 736.278)));
@@ -30,10 +31,10 @@ fn line_dist(p: vec2f, a: vec2f, b: vec2f) -> f32 {
 
 // each grid cell gets a star that moves around
 fn star_uv(grid_coord: vec2f, time: f32) -> vec2f {
-    // I'm thinking something like 4 to 8
-    let periods = 4 * hash22(grid_coord) + 4;
+    // period from 1 to 2 min
+    let periods = 60 * hash22(grid_coord) + 60;
 
-    let shifted_time = time + 100;
+    let shifted_time = time + 500;
 
     // 6.28 is tau, 1.2 to allow more flexibility
     return vec2f(sin(shifted_time * 6.28 / periods.x), sin(shifted_time * 6.28 / periods.y)) * 1.2;
@@ -43,8 +44,8 @@ fn main_image(position: vec2f) -> vec4f {
     // -1 to 1
     let uv = (position - wallpaper.resolution * 0.5) / wallpaper.resolution.y;
 
-    let grid_scale = 5.0;
-    let drift_vel = vec2f(0, -0.5);
+    let grid_scale = 7.0;
+    let drift_vel = vec2f(0, -0.05);
     let pos = grid_scale * uv - drift_vel * wallpaper.time;
     // -1 to 1
     let grid_uv = 2 * fract(pos) - 1;
@@ -73,7 +74,7 @@ fn main_image(position: vec2f) -> vec4f {
     }
 
     // add lines
-    // for 
+    // TODO 
 
     return vec4f(highlight_color * intensity, 1);
 }
