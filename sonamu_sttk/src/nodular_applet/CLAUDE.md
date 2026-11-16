@@ -20,7 +20,7 @@
 - Make: `NodeRequest::Wrap(ProjectApplet::wrapper())` (Super+P, menu, hub). Dissolve: close it → `NodeRequest::Unwrap(contents)` replaces its node.
 - `holds_children`: new things for its node (keybinds, New child, drops, opened applets, wl windows) go inside, at its root. Flag lives on the initializer (`NodularAppletInitializer::holding_children`) to avoid a publish race. `NodeTree::child_target` puts a normal child right after it.
 - Wl surfaces registered while focus is inside go inside; it reports `WlKeyboardFocus` up (`Node::inner_wl_focus`).
-- Overview (focus at its inner root, `focused_node() == root()`): name (`r`), directory (`d`, #93, completion), icon (`i`), color (`c`, #76: it or a click shows plain + hue slider until a pick, Esc or another click; `Treeview::colors`, `NodeTree::title_color`), new rows (`p` empty project, `t` terminal, `b` browser), zoom-out view below. Saved as `SavedTree::{label, icon, color}` on the inner root.
+- Overview (focus at its inner root, `focused_node() == root()`): name (`r`), directory (`d`, #93, completion), icon (`i`), color (`c`, #76: it or a click shows plain + hue slider until a click pick, Esc or another click; Left/Right step the hue, Space toggles plain; `Treeview::colors`, `NodeTree::title_color`), new rows (`p` empty project, `t` terminal, `b` browser), zoom-out view below. Saved as `SavedTree::{label, icon, color}` on the inner root.
 - `frames_itself` (published): a project showing panes isn't framed by its holder; its tree frames its panes.
 - Gaps: dissolving inside the file manager drops contents; panes in an unfocused project still draw focused borders; dissolving with a pending pluck/place inside loses the answer; each nesting level adds an ack round trip.
 

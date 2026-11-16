@@ -184,6 +184,8 @@ pub struct ProjectApplet {
     color: Option<Color>,
     /// The color row shows its plain button and hue slider
     picking_color: bool,
+    /// The color Space last made plain, which Space gives back
+    plain_from: Option<Color>,
     /// The hue slider is being dragged
     dragging_hue: bool,
     /// The first icon or directory option shown
@@ -325,6 +327,7 @@ impl ProjectApplet {
             picking_icon: None,
             color: None,
             picking_color: false,
+            plain_from: None,
             dragging_hue: false,
             hovered: None,
             options_scroll: 0,
@@ -444,6 +447,35 @@ impl ProjectApplet {
         true
     }
 
+    /// A key while picking a color; whether it took it
+    fn handle_color_key(&mut self, key: KeySymbol) -> bool {
+        match key {
+            KeySymbol::ArrowKeyLeft | KeySymbol::ArrowKeyRight => {
+                let step = if matches!(key, KeySymbol::ArrowKeyLeft) {
+                    -1
+                } else {
+                    1
+                };
+                // snapped to the slider's steps, so steps don't drift
+                let index = self.color.map_or(0, |color| {
+                    (hue_of(color) * HUE_STEPS as f32).round() as isize + step
+                });
+                let hue = index.rem_euclid(HUE_STEPS as isize) as f32 / HUE_STEPS as f32;
+                self.color = Some(hue_color(hue));
+            }
+            KeySymbol::Char(' ') => {
+                if let Some(color) = self.color.take() {
+                    self.plain_from = Some(color);
+                } else {
+                    self.color = Some(self.plain_from.unwrap_or_else(|| hue_color(0.0)));
+                }
+            }
+            KeySymbol::Escape => self.picking_color = false,
+            _ => return false,
+        }
+        true
+    }
+
     /// Sets the color from the hue slider at `x`
     fn set_hue_at(&mut self, x: f64) {
         let (left, right) = hue_bar(self.size.width as f32);
@@ -513,7 +545,7 @@ impl ProjectApplet {
         if self.renaming.is_some() {
             "Enter: save, Esc: cancel"
         } else if self.picking_color {
-            "Click or drag: pick, Esc: done"
+            "Left/Right or click: hue, Space: plain or not, Esc: done"
         } else if self.picking_icon.is_some() {
             "Up/Down + Enter or click: pick, type: that character, Backspace: default, Esc: cancel"
         } else {
@@ -762,11 +794,12 @@ impl ProjectApplet {
             return true;
         }
         if self.picking_color {
-            if !matches!(key, KeySymbol::Escape) {
+            if !self.handle_color_key(key) {
                 return false;
             }
-            self.picking_color = false;
+            // the treeview shows it
             self.hook.damage_window();
+            self.hook.damage_treeview();
             return true;
         }
         match (&mut self.renaming, key) {
