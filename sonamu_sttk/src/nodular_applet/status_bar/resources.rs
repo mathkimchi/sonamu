@@ -15,18 +15,24 @@ const YELLOW: Color = Color([0xe0, 0xc0, 0x68, 0xff]);
 const CPU: &str = "\u{f4bc}";
 const MEM: &str = "\u{f035b}";
 const CHARGING: &str = "\u{f0084}";
+/// Shown red beside the battery while it stays awake with the lid closed
+const MOON: &str = "\u{f0594}";
 
 /// The popup's width in characters
 const COLUMNS: usize = 44;
-/// Lines above the process list: battery, rate, profiles, blank, header
-const HEADER_LINES: usize = 5;
+/// Lines above the process list: battery, rate, profiles, lid, blank, header
+const HEADER_LINES: usize = 6;
 /// Where the process list's cpu and memory columns start
 const CPU_COLUMN: usize = 28;
 const MEM_COLUMN: usize = 36;
 /// The profile picker's line
 const PROFILE_LINE: usize = 2;
+/// The lid toggle's line
+const LID_LINE: usize = 3;
+/// The lid toggle: label and columns
+const LID_BUTTON: (&str, [usize; 2]) = ("\u{f0594} Awake with lid closed", [0, 24]);
 /// The process list's header line
-const SORT_LINE: usize = 4;
+const SORT_LINE: usize = 5;
 /// The profile picker's buttons: label and columns
 const PROFILE_BUTTONS: [(&str, [usize; 2]); 3] = [
     ("\u{f032a} Saver", [0, 8]),
@@ -50,6 +56,7 @@ pub enum Sort {
 pub enum Click {
     Sort(Sort),
     Profile(&'static str),
+    AwakeLidClosed,
 }
 
 /// >50% green, 20–50% yellow, <20% red
@@ -74,14 +81,21 @@ fn battery_icon(battery: &Battery) -> char {
     }
 }
 
-/// `74%  12%  41%` with icons; without a battery only cpu and memory
-pub fn segment(snapshot: &Snapshot, palette: &Palette) -> Spans {
+/// `74%  12%  41%` with icons, a red moon after the battery while `awake` with the lid closed; without a
+/// battery only cpu and memory
+pub fn segment(snapshot: &Snapshot, awake: bool, palette: &Palette) -> Spans {
     let mut spans = Vec::new();
     if let Some(battery) = &snapshot.battery {
         spans.push((
-            format!("{} {}%  ", battery_icon(battery), battery.percent),
+            format!("{} {}%", battery_icon(battery), battery.percent),
             battery_color(battery.percent),
         ));
+    }
+    if awake {
+        spans.push((format!(" {MOON}"), ERROR));
+    }
+    if !spans.is_empty() {
+        spans.push(("  ".to_string(), palette.fg));
     }
     spans.push((
         format!(
@@ -124,6 +138,7 @@ fn bytes(bytes: u64) -> String {
 pub fn draw(
     settings: &Settings,
     snapshot: &Snapshot,
+    awake: bool,
     (sort, list): (Sort, ScrollList),
     hover: Option<Cell>,
 ) -> Vec<UITree> {
@@ -168,6 +183,15 @@ pub fn draw(
             ));
         }
     }
+    let (label, columns) = LID_BUTTON;
+    let color = if awake { ERROR } else { palette.inactive };
+    items.extend(Button::new(LID_LINE, columns).draw(
+        &lines,
+        palette,
+        vec![(label.to_string(), color)],
+        awake,
+        hover,
+    ));
     items.push(lines.text(
         SORT_LINE,
         0,
@@ -238,6 +262,9 @@ pub fn click(snapshot: &Snapshot, sort: Sort, cell: Cell) -> Option<Click> {
             .find(|((_, columns), _)| Button::new(PROFILE_LINE, *columns).contains(cell))
     {
         return Some(Click::Profile(name));
+    }
+    if Button::new(LID_LINE, LID_BUTTON.1).contains(cell) {
+        return Some(Click::AwakeLidClosed);
     }
     let (_, by, _) = SORT_BUTTONS
         .into_iter()

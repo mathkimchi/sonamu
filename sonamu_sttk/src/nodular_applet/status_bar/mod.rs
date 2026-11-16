@@ -369,9 +369,11 @@ impl StatusBar {
                         Segment::Time => vec![(Self::time(), fg)],
                         Segment::Tray => self.tray_spans(palette),
                         Segment::Bell => self.bell(palette),
-                        Segment::Resources => {
-                            resources::segment(&self.system.snapshot.lock().unwrap(), palette)
-                        }
+                        Segment::Resources => resources::segment(
+                            &self.system.snapshot.lock().unwrap(),
+                            self.system.awake_lid_closed(),
+                            palette,
+                        ),
                         Segment::Hub => hub::segment(&self.controls.state.lock().unwrap(), palette),
                     };
                     (segment, spans)
@@ -633,6 +635,7 @@ impl StatusBar {
             Popup::Resources(sort, list) => resources::draw(
                 settings,
                 &self.system.snapshot.lock().unwrap(),
+                self.system.awake_lid_closed(),
                 (sort, list),
                 hover,
             ),
@@ -1016,6 +1019,10 @@ impl StatusBar {
                     Some(resources::Click::Sort(sort)) => Some(Popup::Resources(sort, list)),
                     Some(resources::Click::Profile(profile)) => {
                         self.system.set_profile(profile);
+                        return true;
+                    }
+                    Some(resources::Click::AwakeLidClosed) => {
+                        self.system.toggle_awake_lid_closed();
                         return true;
                     }
                     None => None,
