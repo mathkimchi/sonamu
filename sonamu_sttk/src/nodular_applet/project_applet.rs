@@ -451,6 +451,13 @@ impl ProjectApplet {
         self.color = Some(hue_color(hue));
     }
 
+    fn start_picking_color(&mut self) {
+        self.renaming = None;
+        self.setting_directory = None;
+        self.picking_icon = None;
+        self.picking_color = true;
+    }
+
     /// The color row's plain button and hue slider while picking (its `color:` is a row of text)
     fn color_controls(&self, width: f32) -> Vec<UITree> {
         if !self.picking_color {
@@ -510,7 +517,7 @@ impl ProjectApplet {
         } else if self.picking_icon.is_some() {
             "Up/Down + Enter or click: pick, type: that character, Backspace: default, Esc: cancel"
         } else {
-            "r: rename, d: set directory, i: set icon, 1-9: select"
+            "r: rename, d: set directory, i: set icon, c: set color, 1-9: select"
         }
     }
 
@@ -713,12 +720,7 @@ impl ProjectApplet {
             }
             Some(DIRECTORY_ROW) => self.start_setting_directory(),
             Some(ICON_ROW) => self.start_picking_icon(),
-            Some(COLOR_ROW) if !self.picking_color => {
-                self.renaming = None;
-                self.setting_directory = None;
-                self.picking_icon = None;
-                self.picking_color = true;
-            }
+            Some(COLOR_ROW) if !self.picking_color => self.start_picking_color(),
             Some(COLOR_ROW) => {
                 let font = f64::from(font_size());
                 let plain_left = f64::from(PAD) + f64::from(PLAIN_LEFT) * font;
@@ -789,6 +791,9 @@ impl ProjectApplet {
             }
             (None, KeySymbol::Char('i')) if modifiers == KeyModifiers::NONE => {
                 self.start_picking_icon();
+            }
+            (None, KeySymbol::Char('c')) if modifiers == KeyModifiers::NONE => {
+                self.start_picking_color();
             }
             (None, KeySymbol::Char(key_char))
                 if modifiers == KeyModifiers::NONE
