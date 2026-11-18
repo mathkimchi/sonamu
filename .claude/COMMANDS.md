@@ -18,7 +18,7 @@ Emacs-like: every action is a named command; keybinds, hub, buffer line and sock
 - `keymap.set({mods}, key, fn, {type}?)`: static `BINDINGS`; `type`-scoped wins (focus type lags: `FOCUS_TYPE`). Runner checks after settings keybinds.
 - `events.on`: `focus(node)`, `window(app_id)`, `open(node)`, `close(node)`, `settings()`, `screens(count)`. `subscribe` streams them.
 - Messages: `sonamu_script::message` (last 200, `sonamu.messages()`), echoed over the buffer line row 5 s.
-- `complete`: Tab completion; runs read-only getters only.
+- `complete`: Tab completion; runs read-only getters only. Right after a call, the separator (`:` node, `.` table).
 - `sonamu.definitions()`: luau-lsp definitions (unchecked).
 
 ## API

@@ -1081,6 +1081,17 @@ fn completions(lua: &Lua, text: &str) -> Vec<String> {
         .find(|&(_, c)| !(c.is_alphanumeric() || "_.:()".contains(c)))
         .map_or(0, |(index, c)| index + c.len_utf8());
     let chain = &text[start..];
+    // right after a call: its separator, so the next Tab lists what follows
+    if chain.ends_with(')') {
+        return match resolve(lua, chain) {
+            Some(Resolved::Node) => vec![":".to_owned()],
+            Some(Resolved::Value(LuaValue::UserData(node))) if node.is::<Node>() => {
+                vec![":".to_owned()]
+            }
+            Some(Resolved::Value(LuaValue::Table(_))) => vec![".".to_owned()],
+            _ => Vec::new(),
+        };
+    }
     let (receiver, separator, word) = match chain.rfind(['.', ':']) {
         Some(index) => (&chain[..index], &chain[index..=index], &chain[index + 1..]),
         None => ("", "", chain),
@@ -1314,6 +1325,7 @@ mod tests {
         assert_eq!(complete_all("cont"), ["context"]);
         assert_eq!(complete_all("x = context.fo"), ["focus"]);
         assert_eq!(complete_all("context.focus():ti"), ["title"]);
+        assert_eq!(complete_all("context.focus()"), [":"]);
         assert_eq!(complete_all("string.le"), ["len"]);
         assert_eq!(
             complete_all("context.focus():title():"),
