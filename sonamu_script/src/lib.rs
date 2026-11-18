@@ -854,8 +854,8 @@ declare function require(path: string): any
     out
 }
 
-/// `HELP`, then each applet type's commands
-fn help() -> String {
+/// `HELP`, then each applet type's commands (also the agent's Luau reference)
+pub fn help() -> String {
     let mut help = HELP.to_string();
     for (applet_type, signatures) in command::all_signatures() {
         if signatures.is_empty() {

@@ -98,22 +98,31 @@ impl Running {
         }
     }
 
-    /// Its next text to append, or its output once done
-    fn try_next(&self) -> Result<Result<String, Output>, mpsc::TryRecvError> {
+    fn try_next(&self) -> Result<Next, mpsc::TryRecvError> {
         Ok(match self {
             Self::Luau { outputs, .. } => match outputs.try_recv()? {
-                sonamu_script::Output::Print(line) => Ok(line + "\n"),
-                sonamu_script::Output::Done(result) => Err(trimmed(shown(result))),
+                sonamu_script::Output::Print(line) => Next::Text(line + "\n"),
+                sonamu_script::Output::Done(result) => Next::Done(trimmed(shown(result))),
             },
             Self::Agent { outputs, .. } | Self::Shell { outputs, .. } => {
                 match outputs.try_recv()? {
-                    Streamed::Text(text) => Ok(text),
-                    Streamed::Done(Ok(())) => Err(Output::Text(String::new())),
-                    Streamed::Done(Err(err)) => Err(Output::Error(err)),
+                    Streamed::Text(text) => Next::Text(text),
+                    Streamed::Ask(answer) => Next::Ask(answer),
+                    Streamed::Done(Ok(())) => Next::Done(Output::Text(String::new())),
+                    Streamed::Done(Err(err)) => Next::Done(Output::Error(err)),
                 }
             }
         })
     }
+}
+
+/// What a running entry sent
+enum Next {
+    /// To append
+    Text(String),
+    /// The agent's question: may it run its Luau
+    Ask(mpsc::Sender<bool>),
+    Done(Output),
 }
 
 /// A line of the scrollback
@@ -148,6 +157,8 @@ pub(crate) struct Repl {
     next_job: u64,
     /// Tab's candidates on the script thread, for this prompt
     completing: Option<(String, mpsc::Receiver<Vec<String>>)>,
+    /// The agent's questions (may it run its Luau, shown in its entry), oldest first: y/Enter allows, n/Esc refuses
+    asking: Vec<mpsc::Sender<bool>>,
     /// `agent::check`'s, for `warning`
     checking: Option<mpsc::Receiver<Option<String>>>,
     waker: Waker,
@@ -166,6 +177,7 @@ impl Repl {
             next_job: 0,
             completing: None,
             checking: None,
+            asking: Vec::new(),
             waker,
         }
     }
@@ -176,12 +188,23 @@ impl Repl {
     }
 
     /// Edits the prompt, runs it (Enter), adds a newline (Shift+Enter), recalls (Up/Down), completes (Tab), pastes
-    /// (Ctrl+V), copies the last output (Ctrl+Shift+C), cancels (Ctrl+C). While running too (type-ahead: shown once it ends, Enter queues).
+    /// (Ctrl+V), copies the last output (Ctrl+Shift+C), cancels (Ctrl+C). While running too (type-ahead: shown once it ends, Enter queues);
+    /// while the agent asks, only y/n (Enter/Esc) and Ctrl+C.
     /// Returns whether it took the key.
     pub fn handle_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) -> bool {
         self.hint = None;
         self.warning = None;
         let cancel = matches!(key, KeySymbol::Char('c' | 'C')) && modifiers == KeyModifiers::CTRL;
+        if self.asking() && !cancel {
+            let answer = match key {
+                KeySymbol::Char('y' | 'Y') | KeySymbol::Enter => true,
+                KeySymbol::Char('n' | 'N') | KeySymbol::Escape => false,
+                // nothing else while it asks
+                _ => return true,
+            };
+            let _ = self.asking.remove(0).send(answer);
+            return true;
+        }
         match key {
             KeySymbol::Enter if modifiers.shift => self.insert("\n"),
             KeySymbol::Enter => self.enter(),
@@ -203,6 +226,8 @@ impl Repl {
             KeySymbol::Char('V') if modifiers == KeyModifiers::CTRL_SHIFT => self.paste(),
             KeySymbol::Char('C') if modifiers == KeyModifiers::CTRL_SHIFT => self.copy_output(),
             _ if cancel => {
+                // refused
+                self.asking.clear();
                 for eval in &self.evals {
                     eval.running.cancel();
                 }
@@ -221,6 +246,11 @@ impl Repl {
             _ => return false,
         }
         true
+    }
+
+    /// The agent waits for y/n
+    pub fn asking(&self) -> bool {
+        !self.asking.is_empty()
     }
 
     pub fn prompt_is_empty(&self) -> bool {
@@ -477,15 +507,16 @@ impl Repl {
                     Err(mpsc::TryRecvError::Empty) => break,
                     // eg it panicked
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        Err(Output::Error("its thread ended".to_string()))
+                        Next::Done(Output::Error("its thread ended".to_string()))
                     }
                 };
                 let Some(entry) = entry.as_deref_mut() else {
                     break;
                 };
                 match next {
-                    Ok(text) => entry.printed.push_str(&text),
-                    Err(output) => {
+                    Next::Text(text) => entry.printed.push_str(&text),
+                    Next::Ask(answer) => self.asking.push(answer),
+                    Next::Done(output) => {
                         entry.output = output;
                         break;
                     }
@@ -540,12 +571,17 @@ impl Repl {
     }
 
     /// The prompt on `row` of `grid` (bar background, `PROMPT`, the cursor), scrolled sideways to keep the cursor in
-    /// view; nothing while running, like a shell
+    /// view; nothing while running, like a shell, but the agent's question
     pub fn draw_prompt(&self, grid: &mut CharGrid, row: usize, palette: &Palette) {
+        let width = grid.width();
+        if self.asking() {
+            fill_row(grid, row, bar_bg(palette));
+            put(grid, row, 0, "Run this Luau? y/n", palette.accent);
+            return;
+        }
         if self.running() {
             return;
         }
-        let width = grid.width();
         fill_row(grid, row, bar_bg(palette));
         let start = put(grid, row, 0, PROMPT, palette.accent);
         let room = width.saturating_sub(start).max(1);
@@ -686,11 +722,26 @@ mod tests {
         let result = loop {
             match outputs.recv().unwrap() {
                 Streamed::Text(piece) => text.push_str(&piece),
+                Streamed::Ask(_) => unreachable!(),
                 Streamed::Done(result) => break result,
             }
         };
         assert_eq!(text, "out\nerr\n");
         assert!(result.unwrap_err().contains('3'));
+    }
+
+    #[test]
+    fn y_or_n_answers_the_agent() {
+        let mut repl = Repl::new(Kind::Agent, Arc::new(|| {}));
+        for (key, allowed) in [(KeySymbol::Char('y'), true), (KeySymbol::Escape, false)] {
+            let (answer, answered) = mpsc::channel();
+            repl.asking.push(answer);
+            // nothing else answers, or gets typed
+            repl.handle_key(KeySymbol::Char('x'), KeyModifiers::NONE);
+            assert!(repl.asking() && repl.prompt_is_empty());
+            repl.handle_key(key, KeyModifiers::NONE);
+            assert_eq!(answered.recv(), Ok(allowed));
+        }
     }
 
     #[test]

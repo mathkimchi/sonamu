@@ -196,6 +196,8 @@ impl RootNodeApplet {
         if matches!(key, KeySymbol::Escape)
             && modifiers == KeyModifiers::NONE
             && self.repl.prompt_is_empty()
+            // it refuses the agent's Luau
+            && !self.repl.asking()
         {
             self.set_buffer_mode(false);
             return;
