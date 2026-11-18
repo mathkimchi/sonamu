@@ -24,7 +24,7 @@ Emacs-like: every action is a named command; keybinds, hub, buffer line and sock
 ## API
 
 - `Node`: `close`, `focus`, `add_child(applet, args?)`, `swap_sibling`, `toggle_half`, `wrap_project`, `parent`, `children`, `inner` (project tree root), `type`, `title`, `cast(name)`; unknown keys → applet command. `<type>.from_node(n)`.
-- `context.focus()`, `context.root()`; `process.spawn`, `process.output(prog, args?, dir?, fn?)`; `clipboard.copy/paste`; `sonamu.open/reload_settings/quit/help/reset/bar_layout`.
+- `context.focus()`, `context.root()`; `process.spawn`, `process.output(prog, args?, dir?, fn?)`; `clipboard.copy/paste`; `sonamu.open/reload_settings/quit/help/reset/bar_layout`; `sonamu.setting(path)`/`set_setting(path, value)` (dotted path; edit `settings.json` via `settings_file` like the settings editor: checked, defaults removed; the watcher reloads; fails for a settings program).
 - Applets: `CommandHub` `clear/set_title/open`; `file_manager` `root/selected/open`; `code_editor` `path/text/save`; `wl_surface` `app_id/pid`.
 
 ## Prompts

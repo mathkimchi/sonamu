@@ -4,9 +4,14 @@
 
 mod require;
 
-use mlua::{Lua, MetaMethod, MultiValue, UserData, UserDataMethods, Value as LuaValue, VmState};
+use mlua::{
+    Lua, LuaSerdeExt, MetaMethod, MultiValue, UserData, UserDataMethods, Value as LuaValue, VmState,
+};
 use sonamu_command::{self as command, CommandResult, Effect, NODE_COMMANDS, NodeUid, Value};
-use sonamu_common::settings::{Action, Key, Keybind};
+use sonamu_common::{
+    settings::{Action, Key, Keybind, config_dir},
+    settings_file::{self, Source},
+};
 use std::{
     cell::RefCell,
     fmt::Write as _,
@@ -352,8 +357,7 @@ fn run(jobs: &mpsc::Receiver<Job>) {
 fn run_call(lua: &Lua, call: Call) -> Result<(), String> {
     match call {
         Call::Init => {
-            let Some(path) = sonamu_common::settings::config_dir().map(|dir| dir.join("init.luau"))
-            else {
+            let Some(path) = config_dir().map(|dir| dir.join("init.luau")) else {
                 return Ok(());
             };
             let Ok(code) = std::fs::read_to_string(&path) else {
@@ -534,6 +538,7 @@ fn new_lua() -> mlua::Result<Lua> {
             Ok(())
         })?,
     )?;
+    add_settings(&lua, &sonamu)?;
     globals.set("sonamu", sonamu)?;
 
     add_keymap_and_events(&lua, &globals)?;
@@ -545,6 +550,52 @@ fn new_lua() -> mlua::Result<Lua> {
     // builtins read-only; what evals define goes in a table of its own
     lua.sandbox(true)?;
     Ok(lua)
+}
+
+/// `sonamu.setting` and `sonamu.set_setting`: the user's `settings.json`, like the settings editor (the watcher
+/// reloads it)
+fn add_settings(lua: &Lua, sonamu: &mlua::Table) -> mlua::Result<()> {
+    sonamu.set(
+        "setting",
+        lua.create_function(|lua, path: String| {
+            let (_, user) = user_settings()?;
+            let value = settings_file::value_at(&user, &path.split('.').collect::<Vec<_>>());
+            let options = mlua::serde::SerializeOptions::new()
+                .serialize_none_to_null(false)
+                .serialize_unit_to_null(false);
+            lua.to_value_with(&value, options)
+        })?,
+    )?;
+    sonamu.set(
+        "set_setting",
+        lua.create_function(|lua, (path, value): (String, LuaValue)| {
+            allow(Effect::Modify, "sonamu.set_setting")?;
+            let (file, mut user) = user_settings()?;
+            settings_file::migrate(&mut user);
+            let value: serde_json::Value = lua.from_value(value)?;
+            settings_file::set(&mut user, &path.split('.').collect::<Vec<_>>(), value);
+            settings_file::check(&user).map_err(mlua::Error::runtime)?;
+            settings_file::write(&file, Some(&user)).map_err(mlua::Error::runtime)
+        })?,
+    )
+}
+
+/// `settings.json` and what it holds (`{}` if there is none)
+fn user_settings() -> mlua::Result<(std::path::PathBuf, serde_json::Value)> {
+    let dir = config_dir().ok_or_else(|| mlua::Error::runtime("no config dir"))?;
+    let file = match settings_file::source(&dir) {
+        Source::Json(file) => file,
+        Source::Program(program) => {
+            return Err(mlua::Error::runtime(format!(
+                "settings come from a program: {}",
+                program.display()
+            )));
+        }
+    };
+    let user = settings_file::read(&file)
+        .map_err(|err| mlua::Error::runtime(format!("{}: {err}", file.display())))?
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+    Ok((file, user))
 }
 
 /// `clipboard.copy` and `clipboard.paste`
@@ -759,6 +810,8 @@ clipboard.copy(text, {primary = true}?)   Sonamu's clipboard (or primary selecti
 clipboard.paste({primary = true}?): string?
 sonamu.open(applet, {args}?)   like `sonamu-msg open`
 sonamu.reload_settings()
+sonamu.setting(path): any      a setting (yours, else the default), path dotted, eg 'border.width'
+sonamu.set_setting(path, value)   writes it to settings.json (only if valid; the default removes it); reloads
 sonamu.bar_layout({left}, {right})   the status bar's segments by name, each left to right; default
                                {tree, launcher, time}, {tray, bell, resources, hub}
 sonamu.quit()
@@ -841,6 +894,8 @@ declare sonamu: {
     open: (applet: string, args: {string}?) -> (),
     quit: () -> (),
     reload_settings: () -> (),
+    setting: (path: string) -> any,
+    set_setting: (path: string, value: any) -> (),
     bar_layout: (left: {string}, right: {string}) -> (),
     reset: () -> (),
     messages: () -> string,
@@ -1361,8 +1416,9 @@ mod tests {
         assert!(result.unwrap_err().contains("cancelled"));
     }
 
+    /// `require` and settings, together since both read `SONAMU_CONFIG`
     #[test]
-    fn require_config_modules() {
+    fn config_dir_modules_and_settings() {
         let dir = std::env::temp_dir().join(format!("sonamu-require-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -1381,6 +1437,31 @@ mod tests {
             Ok(vec![Value::Nil]),
             "modules have their own globals"
         );
+
+        let file = dir.join("settings.json");
+        let _ = std::fs::remove_file(&file);
+        assert!(eval_all("sonamu.set_setting('border.width', 5)").1.is_ok());
+        assert_eq!(
+            eval_all("sonamu.setting('border.width')").1,
+            Ok(vec![Value::Number(5.0)])
+        );
+        assert!(
+            eval_all("sonamu.set_setting('gap', 'wide')").1.is_err(),
+            "invalid settings aren't written"
+        );
+        assert!(
+            eval_all("sonamu.set_setting('agent_url', 'http://x')")
+                .1
+                .is_ok()
+        );
+        assert!(eval_all("sonamu.set_setting('agent_url', nil)").1.is_ok());
+        assert_eq!(
+            eval_all("sonamu.setting('agent_url')").1,
+            Ok(vec![Value::Nil])
+        );
+        let user: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(user, serde_json::json!({"border": {"width": 5}}));
         let _ = std::fs::remove_dir_all(dir);
     }
 
