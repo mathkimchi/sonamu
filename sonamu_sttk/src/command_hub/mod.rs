@@ -1,6 +1,8 @@
 //! TODO: move to sttk
 
+mod agent;
 pub(crate) mod repl;
+mod shell;
 
 use crate::{
     nodular_applet::{
@@ -78,9 +80,12 @@ impl CommandHubApplet {
         let waker = hook.waker();
         Self {
             title: "Command Hub".to_string(),
-            repl: Repl::new(Arc::new(move || {
-                waker.wake();
-            })),
+            repl: Repl::new(
+                repl::Kind::Luau,
+                Arc::new(move || {
+                    waker.wake();
+                }),
+            ),
             scroll: 0,
             scrolled: ui::ScrollSteps::default(),
             palette: settings::get().palette,

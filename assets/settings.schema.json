@@ -58,8 +58,12 @@
       "$ref": "#/$defs/TreeviewSettings"
     },
     "buffer_line": {
-      "description": "When the buffer line (a Luau prompt at the bottom, like vim's command line) shows",
+      "description": "When the buffer line (a prompt at the bottom, like vim's command line: the agent, `!` Luau, `$` shell, `/` command) shows",
       "$ref": "#/$defs/BufferLine"
+    },
+    "agent_url": {
+      "description": "The buffer line's agent: an OpenAI-compatible server (eg llama.cpp's `llama-server`)",
+      "type": "string"
     },
     "swipe": {
       "$ref": "#/$defs/SwipeSettings"

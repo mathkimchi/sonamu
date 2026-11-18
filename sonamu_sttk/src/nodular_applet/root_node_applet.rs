@@ -107,7 +107,7 @@ pub struct RootNodeApplet {
     quit_asked: Option<Instant>,
     /// The focus path `remember_focus` last saw, to emit `focus` events when it moves
     last_focus: Option<WorldTreePath>,
-    /// The buffer line's prompt (a Luau REPL like the command hub's), at the bottom of the active screen
+    /// The buffer line's prompt (the command hub's, but the agent by default), at the bottom of the active screen
     repl: Repl,
     /// Keys go to the buffer line (Super+Esc), like vim's normal mode; else `INSERT`
     buffer_mode: bool,
@@ -615,7 +615,7 @@ impl RootNodeApplet {
             remembered: HashMap::new(),
             quit_asked: None,
             last_focus: None,
-            repl: Repl::new(repl_waker),
+            repl: Repl::new(repl::Kind::Agent, repl_waker),
             buffer_mode: false,
             echo: None,
             buffer_scroll: 0,

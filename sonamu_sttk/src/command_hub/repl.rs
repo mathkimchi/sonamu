@@ -1,6 +1,11 @@
-//! A Luau prompt with its history (`sonamu_script`), shared by the command hub and the root's buffer line
+//! A prompt with its history, shared by the command hub (Luau by default) and the root's buffer line (the agent):
+//! `!` Luau (`sonamu_script`), `$` shell, `/` a command of the focused node
 
-use super::PROMPT;
+use super::{
+    PROMPT,
+    agent::{self, Streamed},
+    shell::{self, Shell},
+};
 use crate::ui::{bg, raised_bg as bar_bg};
 use crate::ui::{fill_row, put};
 use sonamu_common::command::Value;
@@ -14,7 +19,7 @@ use sonamu_ui::{
 };
 use std::{
     fmt::Write as _,
-    sync::{Arc, Mutex, PoisonError, mpsc},
+    sync::{Arc, Mutex, PoisonError, atomic::AtomicBool, mpsc},
 };
 
 /// Kept; older ones are dropped
@@ -24,6 +29,32 @@ static RECALL: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Longer outputs are cut off
 const MAX_OUTPUT_LINES: usize = 500;
+/// The agent's last exchanges it's given
+const MAX_CHAT_ENTRIES: usize = 20;
+
+/// What an entered line runs: by its first char, else the prompt's default
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Agent,
+    /// `!`
+    Luau,
+    /// `$`
+    Shell,
+    /// `/name args`: `context.focus():name(args)`
+    Command,
+}
+impl Kind {
+    /// The kind of `line` and the rest of it
+    fn of(line: &str, default: Self) -> (Self, &str) {
+        let kind = match line.chars().next() {
+            Some('!') => Self::Luau,
+            Some('$') => Self::Shell,
+            Some('/') => Self::Command,
+            _ => return (default, line),
+        };
+        (kind, &line[1..])
+    }
+}
 
 pub(crate) enum Output {
     Text(String),
@@ -33,17 +64,59 @@ pub(crate) enum Output {
 }
 
 pub(crate) struct Entry {
+    pub kind: Kind,
+    /// As typed (with its prefix)
     pub command: String,
     /// Its `print`s so far
     pub printed: String,
     pub output: Output,
 }
 
-/// An entry's code running on the script thread
+/// An entry running
 struct Eval {
     job: u64,
-    handle: EvalHandle,
-    outputs: mpsc::Receiver<sonamu_script::Output>,
+    running: Running,
+}
+enum Running {
+    /// On the script thread
+    Luau {
+        handle: EvalHandle,
+        outputs: mpsc::Receiver<sonamu_script::Output>,
+    },
+    Agent {
+        cancel: Arc<AtomicBool>,
+        outputs: mpsc::Receiver<Streamed>,
+    },
+    Shell {
+        shell: Shell,
+        outputs: mpsc::Receiver<Streamed>,
+    },
+}
+impl Running {
+    fn cancel(&self) {
+        match self {
+            Self::Luau { handle, .. } => handle.cancel(),
+            Self::Agent { cancel, .. } => cancel.store(true, std::sync::atomic::Ordering::Relaxed),
+            Self::Shell { shell, .. } => shell.cancel(),
+        }
+    }
+
+    /// Its next text to append, or its output once done
+    fn try_next(&self) -> Result<Result<String, Output>, mpsc::TryRecvError> {
+        Ok(match self {
+            Self::Luau { outputs, .. } => match outputs.try_recv()? {
+                sonamu_script::Output::Print(line) => Ok(line + "\n"),
+                sonamu_script::Output::Done(result) => Err(trimmed(shown(result))),
+            },
+            Self::Agent { outputs, .. } | Self::Shell { outputs, .. } => {
+                match outputs.try_recv()? {
+                    Streamed::Text(text) => Ok(text),
+                    Streamed::Done(Ok(())) => Err(Output::Text(String::new())),
+                    Streamed::Done(Err(err)) => Err(Output::Error(err)),
+                }
+            }
+        })
+    }
 }
 
 /// A line of the scrollback
@@ -60,6 +133,8 @@ pub(crate) type Waker = Arc<dyn Fn() + Send + Sync>;
 
 pub(crate) struct Repl {
     pub history: Vec<Entry>,
+    /// What a line without a prefix runs
+    default: Kind,
     /// The thing that is currently being typed
     prompt: String,
     /// In chars, into `prompt`
@@ -77,9 +152,10 @@ pub(crate) struct Repl {
     waker: Waker,
 }
 impl Repl {
-    pub fn new(waker: Waker) -> Self {
+    pub fn new(default: Kind, waker: Waker) -> Self {
         Self {
             history: Vec::new(),
+            default,
             prompt: String::new(),
             cursor: 0,
             hint: None,
@@ -124,7 +200,7 @@ impl Repl {
             KeySymbol::Char('C') if modifiers == KeyModifiers::CTRL_SHIFT => self.copy_output(),
             _ if cancel => {
                 for eval in &self.evals {
-                    eval.handle.cancel();
+                    eval.running.cancel();
                 }
                 // also whatever runs before them (eg a stuck binding)
                 sonamu_script::interrupt();
@@ -169,29 +245,78 @@ impl Repl {
         }
         drop(recall);
 
-        // like the old verb
-        let code = if command.trim() == "help" {
-            "help()"
-        } else {
-            &command
-        };
+        let (kind, text) = Kind::of(&command, self.default);
         let job = self.next_job;
         self.next_job += 1;
         let waker = Arc::clone(&self.waker);
-        let (handle, outputs) = sonamu_script::eval(code.to_string(), move || waker());
-        self.evals.push(Eval {
-            job,
-            handle,
-            outputs,
-        });
+        let notify = move || waker();
+        let running = match kind {
+            Kind::Agent => {
+                let mut chat = self.chat();
+                chat.push(agent::Message {
+                    role: "user",
+                    content: text.to_string(),
+                });
+                let cancel = Arc::new(AtomicBool::new(false));
+                let outputs = agent::ask(chat, Arc::clone(&cancel), notify);
+                Some(Running::Agent { cancel, outputs })
+            }
+            Kind::Shell => shell::run(text, notify)
+                .inspect_err(|err| log::warn!("`{text}` failed: {err}"))
+                .ok()
+                .map(|(shell, outputs)| Running::Shell { shell, outputs }),
+            Kind::Luau | Kind::Command => {
+                let code = match kind {
+                    Kind::Command => command_code(text),
+                    // like the old verb
+                    _ if text.trim() == "help" => "help()".to_string(),
+                    _ => text.to_string(),
+                };
+                let (handle, outputs) = sonamu_script::eval(code, notify);
+                Some(Running::Luau { handle, outputs })
+            }
+        };
+        let output = match running {
+            Some(running) => {
+                self.evals.push(Eval { job, running });
+                Output::Running(job)
+            }
+            None => Output::Error("couldn't start `sh`".to_string()),
+        };
         self.history.push(Entry {
+            kind,
             command,
             printed: String::new(),
-            output: Output::Running(job),
+            output,
         });
         if self.history.len() > MAX_ENTRIES {
             self.history.remove(0);
         }
+    }
+
+    /// The agent's finished exchanges so far (its replies are their `printed`)
+    fn chat(&self) -> Vec<agent::Message> {
+        let mut exchanges: Vec<_> = self
+            .history
+            .iter()
+            .filter(|entry| entry.kind == Kind::Agent && matches!(entry.output, Output::Text(_)))
+            .collect();
+        exchanges.drain(..exchanges.len().saturating_sub(MAX_CHAT_ENTRIES));
+        exchanges
+            .into_iter()
+            .flat_map(|entry| {
+                [
+                    agent::Message {
+                        role: "user",
+                        content: entry.command.clone(),
+                    },
+                    agent::Message {
+                        role: "assistant",
+                        content: entry.printed.clone(),
+                    },
+                ]
+            })
+            .collect()
     }
 
     /// Up (`back`) or Down through entered commands; Down past the newest gives back the prompt from before
@@ -225,13 +350,14 @@ impl Repl {
         self.cursor = self.prompt.chars().count();
     }
 
-    /// Asks the script thread what could follow the prompt, when the cursor is at its end
+    /// Asks the script thread what could follow the prompt, when the cursor is at its end and it's Luau
     fn start_completion(&mut self) {
-        if self.cursor != self.prompt.chars().count() {
+        let (kind, code) = Kind::of(&self.prompt, self.default);
+        if kind != Kind::Luau || self.cursor != self.prompt.chars().count() {
             return;
         }
         let waker = Arc::clone(&self.waker);
-        let candidates = sonamu_script::complete(self.prompt.clone(), move || waker());
+        let candidates = sonamu_script::complete(code.to_string(), move || waker());
         self.completing = Some((self.prompt.clone(), candidates));
     }
 
@@ -314,24 +440,21 @@ impl Repl {
                 |entry| matches!(entry.output, Output::Running(running) if running == eval.job),
             );
             loop {
-                let output = match eval.outputs.try_recv() {
-                    Ok(output) => output,
+                let next = match eval.running.try_next() {
+                    Ok(next) => next,
                     Err(mpsc::TryRecvError::Empty) => break,
                     // eg it panicked
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        sonamu_script::Output::Done(Err("the script thread ended".to_string()))
+                        Err(Output::Error("its thread ended".to_string()))
                     }
                 };
                 let Some(entry) = entry.as_deref_mut() else {
                     break;
                 };
-                match output {
-                    sonamu_script::Output::Print(line) => {
-                        entry.printed.push_str(&line);
-                        entry.printed.push('\n');
-                    }
-                    sonamu_script::Output::Done(result) => {
-                        entry.output = trimmed(shown(result));
+                match next {
+                    Ok(text) => entry.printed.push_str(&text),
+                    Err(output) => {
+                        entry.output = output;
                         break;
                     }
                 }
@@ -411,6 +534,23 @@ impl Repl {
             cell.set_fg(bar_bg(palette)).set_bg(palette.fg);
         }
     }
+}
+
+/// Luau calling command `name` of the focused node with `args`: words, numbers and booleans as they are, others as
+/// strings (eg `swap_sibling 1`)
+fn command_code(line: &str) -> String {
+    let mut words = line.split_whitespace();
+    let name = words.next().unwrap_or_default();
+    let args: Vec<String> = words
+        .map(|word| {
+            if word.parse::<f64>().is_ok() || matches!(word, "true" | "false") {
+                word.to_string()
+            } else {
+                format!("{word:?}")
+            }
+        })
+        .collect();
+    format!("return context.focus():{name}({})", args.join(", "))
 }
 
 /// An eval's return values (nothing for none), or its error
@@ -498,5 +638,65 @@ pub(crate) fn draw_lines<'a>(
         let (accent, rest) = line.text.split_at(line.accent.min(line.text.len()));
         let column = put(grid, row, 0, accent, accent_color);
         put(grid, row, column, rest, line.fg);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefixes_pick_the_kind() {
+        assert!(Kind::of("hi", Kind::Agent) == (Kind::Agent, "hi"));
+        assert!(Kind::of("!print(1)", Kind::Agent) == (Kind::Luau, "print(1)"));
+        assert!(Kind::of("$ls", Kind::Luau) == (Kind::Shell, "ls"));
+        assert!(Kind::of("/close", Kind::Agent) == (Kind::Command, "close"));
+    }
+
+    #[test]
+    fn command_args_are_quoted_unless_literals() {
+        assert_eq!(command_code("close"), "return context.focus():close()");
+        assert_eq!(
+            command_code("swap_sibling -1"),
+            "return context.focus():swap_sibling(-1)"
+        );
+        assert_eq!(
+            command_code("open wl \"x\" true"),
+            r#"return context.focus():open("wl", "\"x\"", true)"#
+        );
+    }
+
+    #[test]
+    fn shell_streams_stdout_and_stderr() {
+        let (_shell, outputs) = shell::run("echo out; echo err >&2; exit 3", || {}).unwrap();
+        let mut text = String::new();
+        let result = loop {
+            match outputs.recv().unwrap() {
+                Streamed::Text(piece) => text.push_str(&piece),
+                Streamed::Done(result) => break result,
+            }
+        };
+        assert_eq!(text, "out\nerr\n");
+        assert!(result.unwrap_err().contains('3'));
+    }
+
+    /// Needs `llama-server` at setting `agent_url`
+    #[test]
+    #[ignore = "needs an agent server"]
+    fn agent_replies() {
+        let chat = vec![agent::Message {
+            role: "user",
+            content: "Reply with just the word: pong".to_string(),
+        }];
+        let outputs = agent::ask(chat, Arc::default(), || {});
+        let mut text = String::new();
+        let result = loop {
+            match outputs.recv().unwrap() {
+                Streamed::Text(piece) => text.push_str(&piece),
+                Streamed::Done(result) => break result,
+            }
+        };
+        result.unwrap();
+        assert!(text.to_lowercase().contains("pong"), "{text}");
     }
 }
