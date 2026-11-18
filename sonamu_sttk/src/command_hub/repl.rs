@@ -138,6 +138,8 @@ pub(crate) struct Repl {
     cursor: usize,
     /// Shown above the prompt until the next key (eg Tab's candidates)
     pub hint: Option<String>,
+    /// Like `hint`, in red (eg that there's no agent)
+    warning: Option<String>,
 
     /// Into `RECALL` while recalling, with the prompt from before
     recalling: Option<(usize, String)>,
@@ -146,6 +148,8 @@ pub(crate) struct Repl {
     next_job: u64,
     /// Tab's candidates on the script thread, for this prompt
     completing: Option<(String, mpsc::Receiver<Vec<String>>)>,
+    /// `agent::check`'s, for `warning`
+    checking: Option<mpsc::Receiver<Option<String>>>,
     waker: Waker,
 }
 impl Repl {
@@ -156,10 +160,12 @@ impl Repl {
             prompt: String::new(),
             cursor: 0,
             hint: None,
+            warning: None,
             recalling: None,
             evals: Vec::new(),
             next_job: 0,
             completing: None,
+            checking: None,
             waker,
         }
     }
@@ -174,6 +180,7 @@ impl Repl {
     /// Returns whether it took the key.
     pub fn handle_key(&mut self, key: KeySymbol, modifiers: KeyModifiers) -> bool {
         self.hint = None;
+        self.warning = None;
         let cancel = matches!(key, KeySymbol::Char('c' | 'C')) && modifiers == KeyModifiers::CTRL;
         match key {
             KeySymbol::Enter if modifiers.shift => self.insert("\n"),
@@ -347,6 +354,14 @@ impl Repl {
         self.cursor = self.prompt.chars().count();
     }
 
+    /// Checks the agent, if it's the default: `warning` when there's none
+    pub fn check_agent(&mut self) {
+        if self.default == Kind::Agent {
+            let waker = Arc::clone(&self.waker);
+            self.checking = Some(agent::check(move || waker()));
+        }
+    }
+
     /// Asks what could follow the prompt, when the cursor is at its end: the script thread for Luau, `shell` for
     /// shell
     fn start_completion(&mut self) {
@@ -433,8 +448,14 @@ impl Repl {
             .map_or(self.prompt.len(), |(index, _)| index)
     }
 
-    /// Takes what the script thread sent: evals' prints and results, Tab's candidates
+    /// Takes what threads sent: evals' prints and results, Tab's candidates, the agent's check
     pub fn wake(&mut self) {
+        if let Some(checking) = &self.checking
+            && let Ok(warning) = checking.try_recv()
+        {
+            self.warning = warning;
+            self.checking = None;
+        }
         if let Some((prompt, candidates)) = &self.completing
             && let Ok(candidates) = candidates.try_recv()
         {
@@ -477,7 +498,7 @@ impl Repl {
         self.evals.retain(|eval| !finished.contains(&eval.job));
     }
 
-    /// The scrollback from entry `from` on, wrapped at `width`, then the hint; text in the palette's colors
+    /// The scrollback from entry `from` on, wrapped at `width`, then the hint and warning; text in the palette's colors
     pub fn lines(&self, width: usize, from: usize, palette: &Palette) -> Vec<Line> {
         let mut lines = Vec::new();
         for entry in self.history.iter().skip(from) {
@@ -510,12 +531,10 @@ impl Repl {
             }
         }
         if let Some(hint) = &self.hint {
-            lines.extend(wrap(hint, width).map(|text| Line {
-                text,
-                fg: palette.inactive,
-                bg: bg(palette),
-                accent: 0,
-            }));
+            lines.extend(text_lines(hint, palette.inactive, width, palette));
+        }
+        if let Some(warning) = &self.warning {
+            lines.extend(text_lines(warning, ERROR, width, palette));
         }
         lines
     }
@@ -674,23 +693,28 @@ mod tests {
         assert!(result.unwrap_err().contains('3'));
     }
 
-    /// Needs `llama-server` at setting `agent_url`
     #[test]
-    #[ignore = "needs an agent server"]
-    fn agent_replies() {
-        let chat = vec![agent::Message {
-            role: "user",
-            content: "Reply with just the word: pong".to_string(),
-        }];
-        let outputs = agent::ask(chat, Arc::default(), || {});
-        let mut text = String::new();
-        let result = loop {
-            match outputs.recv().unwrap() {
-                Streamed::Text(piece) => text.push_str(&piece),
-                Streamed::Done(result) => break result,
-            }
+    fn no_agent_warns_and_errors() {
+        let mut repl = Repl::new(Kind::Agent, Arc::new(|| {}));
+        repl.check_agent();
+        while repl.checking.is_some() {
+            repl.wake();
+        }
+        assert!(
+            repl.warning
+                .as_ref()
+                .unwrap()
+                .contains("`agent_url` isn't set")
+        );
+
+        repl.insert("hi");
+        repl.handle_key(KeySymbol::Enter, KeyModifiers::NONE);
+        while repl.running() {
+            repl.wake();
+        }
+        let Output::Error(err) = &repl.history[0].output else {
+            panic!("no error");
         };
-        result.unwrap();
-        assert!(text.to_lowercase().contains("pong"), "{text}");
+        assert!(err.contains("`$` runs shell, `!` runs Luau"), "{err}");
     }
 }

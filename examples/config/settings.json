@@ -97,6 +97,7 @@
     "view": "free"
   },
   "buffer_line": "always",
+  "agent_url": "http://127.0.0.1:11434",
   "wallpaper": {
     "color": "#4d6005"
   }

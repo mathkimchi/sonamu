@@ -154,6 +154,9 @@ impl RootNodeApplet {
     /// Toggles buffer mode (Super+Esc), where every key goes to the buffer line
     fn set_buffer_mode(&mut self, on: bool) {
         self.buffer_mode = on;
+        if on {
+            self.repl.check_agent();
+        }
         self.sync_key_grab();
         self.surface.damage();
     }

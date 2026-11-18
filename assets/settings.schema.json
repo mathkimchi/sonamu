@@ -62,8 +62,11 @@
       "$ref": "#/$defs/BufferLine"
     },
     "agent_url": {
-      "description": "The buffer line's agent: an OpenAI-compatible server (eg llama.cpp's `llama-server`)",
-      "type": "string"
+      "description": "The buffer line's agent: an OpenAI-compatible server (eg llama.cpp's `llama-server` at\n`http://127.0.0.1:8080`); `None`: no agent",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "swipe": {
       "$ref": "#/$defs/SwipeSettings"

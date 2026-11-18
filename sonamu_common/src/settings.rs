@@ -80,8 +80,9 @@ pub struct Settings {
     pub treeview: TreeviewSettings,
     /// When the buffer line (a prompt at the bottom, like vim's command line: the agent, `!` Luau, `$` shell) shows
     pub buffer_line: BufferLine,
-    /// The buffer line's agent: an OpenAI-compatible server (eg llama.cpp's `llama-server`)
-    pub agent_url: String,
+    /// The buffer line's agent: an OpenAI-compatible server (eg llama.cpp's `llama-server` at
+    /// `http://127.0.0.1:8080`); `None`: no agent
+    pub agent_url: Option<String>,
     pub swipe: SwipeSettings,
     /// The zoom-out view (#145)
     pub zoom_out: ZoomOutSettings,
