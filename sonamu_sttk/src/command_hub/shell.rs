@@ -1,9 +1,10 @@
-//! `$` lines of a prompt: `sh -c`, its stdout and stderr streamed
+//! `$` lines of a prompt: `sh -c`, its stdout and stderr streamed; Tab completes programs and paths
 
 use super::agent::Streamed;
 use std::{
     io::Read,
-    os::unix::process::CommandExt,
+    os::unix::{fs::PermissionsExt, process::CommandExt},
+    path::PathBuf,
     process::{Command, Stdio},
     sync::mpsc,
     thread,
@@ -72,4 +73,105 @@ pub(crate) fn run(
         notify();
     });
     Ok((shell, receiver))
+}
+
+/// What `line`'s last word could be, on a thread (`notify`ing once): a program in `$PATH` as its first word, else a
+/// path (directories end in `/`)
+pub(crate) fn complete(
+    line: String,
+    notify: impl Fn() + Send + 'static,
+) -> mpsc::Receiver<Vec<String>> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sender.send(candidates(&line));
+        notify();
+    });
+    receiver
+}
+
+fn candidates(line: &str) -> Vec<String> {
+    let word = line.rsplit(char::is_whitespace).next().unwrap_or_default();
+    let first = line[..line.len() - word.len()].trim().is_empty();
+    let mut candidates = if first && !word.contains('/') {
+        programs(word)
+    } else {
+        paths(word)
+    };
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
+/// Executables in `$PATH` starting with `start`
+fn programs(start: &str) -> Vec<String> {
+    let Some(path) = std::env::var_os("PATH") else {
+        return Vec::new();
+    };
+    std::env::split_paths(&path)
+        .filter_map(|dir| std::fs::read_dir(dir).ok())
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            // follows symlinks (eg nix profiles')
+            let metadata = std::fs::metadata(entry.path()).ok()?;
+            (name.starts_with(start)
+                && metadata.is_file()
+                && metadata.permissions().mode() & 0o111 != 0)
+                .then_some(name)
+        })
+        .collect()
+}
+
+/// Paths starting with `word` (`~/` is home; hidden ones only when asked for with a `.`)
+fn paths(word: &str) -> Vec<String> {
+    let (typed_dir, start) = match word.rsplit_once('/') {
+        Some((dir, start)) => (format!("{dir}/"), start),
+        None => (String::new(), word),
+    };
+    let dir = match typed_dir.strip_prefix("~/") {
+        Some(rest) => std::env::var_os("HOME")
+            .map_or_else(PathBuf::new, PathBuf::from)
+            .join(rest),
+        None if typed_dir.is_empty() => PathBuf::from("."),
+        None => PathBuf::from(&typed_dir),
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            if !name.starts_with(start) || (name.starts_with('.') && !start.starts_with('.')) {
+                return None;
+            }
+            let slash = if entry.path().is_dir() { "/" } else { "" };
+            Some(format!("{typed_dir}{name}{slash}"))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completes_programs_then_paths() {
+        assert!(candidates(" s").contains(&"sh".to_string()));
+        let dir = std::env::temp_dir().join(format!("sonamu-complete-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("file"), "").unwrap();
+        std::fs::write(dir.join(".hidden"), "").unwrap();
+        let dir = dir.to_str().unwrap();
+        assert_eq!(
+            candidates(&format!("ls {dir}/")),
+            [format!("{dir}/file"), format!("{dir}/sub/")]
+        );
+        assert_eq!(
+            candidates(&format!("ls {dir}/.")),
+            [format!("{dir}/.hidden")]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

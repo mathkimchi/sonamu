@@ -1,5 +1,5 @@
 //! A prompt with its history, shared by the command hub (Luau by default) and the root's buffer line (the agent):
-//! `!` Luau (`sonamu_script`), `$` shell, `/` a command of the focused node
+//! `!` Luau (`sonamu_script`), `$` shell
 
 use super::{
     PROMPT,
@@ -40,8 +40,6 @@ pub(crate) enum Kind {
     Luau,
     /// `$`
     Shell,
-    /// `/name args`: `context.focus():name(args)`
-    Command,
 }
 impl Kind {
     /// The kind of `line` and the rest of it
@@ -49,7 +47,6 @@ impl Kind {
         let kind = match line.chars().next() {
             Some('!') => Self::Luau,
             Some('$') => Self::Shell,
-            Some('/') => Self::Command,
             _ => return (default, line),
         };
         (kind, &line[1..])
@@ -265,12 +262,12 @@ impl Repl {
                 .inspect_err(|err| log::warn!("`{text}` failed: {err}"))
                 .ok()
                 .map(|(shell, outputs)| Running::Shell { shell, outputs }),
-            Kind::Luau | Kind::Command => {
-                let code = match kind {
-                    Kind::Command => command_code(text),
-                    // like the old verb
-                    _ if text.trim() == "help" => "help()".to_string(),
-                    _ => text.to_string(),
+            Kind::Luau => {
+                // like the old verb
+                let code = if text.trim() == "help" {
+                    "help()".to_string()
+                } else {
+                    text.to_string()
                 };
                 let (handle, outputs) = sonamu_script::eval(code, notify);
                 Some(Running::Luau { handle, outputs })
@@ -350,25 +347,39 @@ impl Repl {
         self.cursor = self.prompt.chars().count();
     }
 
-    /// Asks the script thread what could follow the prompt, when the cursor is at its end and it's Luau
+    /// Asks what could follow the prompt, when the cursor is at its end: the script thread for Luau, `shell` for
+    /// shell
     fn start_completion(&mut self) {
-        let (kind, code) = Kind::of(&self.prompt, self.default);
-        if kind != Kind::Luau || self.cursor != self.prompt.chars().count() {
+        if self.cursor != self.prompt.chars().count() {
             return;
         }
         let waker = Arc::clone(&self.waker);
-        let candidates = sonamu_script::complete(code.to_string(), move || waker());
+        let notify = move || waker();
+        let candidates = match Kind::of(&self.prompt, self.default) {
+            (Kind::Luau, code) => sonamu_script::complete(code.to_string(), notify),
+            (Kind::Shell, line) => shell::complete(line.to_string(), notify),
+            (Kind::Agent, _) => return,
+        };
         self.completing = Some((self.prompt.clone(), candidates));
     }
 
-    /// Completes the prompt's last word: the only candidate, or what they all start with (listed in the hint)
+    /// Completes the prompt's last word (Luau: an identifier; shell: up to whitespace): the only candidate, or what
+    /// they all start with (listed in the hint)
     fn complete(&mut self, candidates: &[String]) {
+        let shell = Kind::of(&self.prompt, self.default).0 == Kind::Shell;
         let word_start = self
             .prompt
             .char_indices()
             .rev()
-            .find(|&(_, c)| !(c.is_alphanumeric() || c == '_'))
-            .map_or(0, |(index, c)| index + c.len_utf8());
+            .find(|&(_, c)| {
+                if shell {
+                    c.is_whitespace()
+                } else {
+                    !(c.is_alphanumeric() || c == '_')
+                }
+            })
+            // a shell line's first word starts after its `$`
+            .map_or(usize::from(shell), |(index, c)| index + c.len_utf8());
         let completed = match candidates {
             [] => return,
             [only] => only.clone(),
@@ -536,23 +547,6 @@ impl Repl {
     }
 }
 
-/// Luau calling command `name` of the focused node with `args`: words, numbers and booleans as they are, others as
-/// strings (eg `swap_sibling 1`)
-fn command_code(line: &str) -> String {
-    let mut words = line.split_whitespace();
-    let name = words.next().unwrap_or_default();
-    let args: Vec<String> = words
-        .map(|word| {
-            if word.parse::<f64>().is_ok() || matches!(word, "true" | "false") {
-                word.to_string()
-            } else {
-                format!("{word:?}")
-            }
-        })
-        .collect();
-    format!("return context.focus():{name}({})", args.join(", "))
-}
-
 /// An eval's return values (nothing for none), or its error
 fn shown(result: Result<Vec<Value>, String>) -> Output {
     match result {
@@ -650,20 +644,20 @@ mod tests {
         assert!(Kind::of("hi", Kind::Agent) == (Kind::Agent, "hi"));
         assert!(Kind::of("!print(1)", Kind::Agent) == (Kind::Luau, "print(1)"));
         assert!(Kind::of("$ls", Kind::Luau) == (Kind::Shell, "ls"));
-        assert!(Kind::of("/close", Kind::Agent) == (Kind::Command, "close"));
     }
 
     #[test]
-    fn command_args_are_quoted_unless_literals() {
-        assert_eq!(command_code("close"), "return context.focus():close()");
-        assert_eq!(
-            command_code("swap_sibling -1"),
-            "return context.focus():swap_sibling(-1)"
-        );
-        assert_eq!(
-            command_code("open wl \"x\" true"),
-            r#"return context.focus():open("wl", "\"x\"", true)"#
-        );
+    fn tab_completes_shell_words() {
+        let mut repl = Repl::new(Kind::Agent, Arc::new(|| {}));
+        for typed in ["$ls /us", "$/us"] {
+            repl.clear_prompt();
+            repl.insert(typed);
+            repl.handle_key(KeySymbol::Char('\t'), KeyModifiers::NONE);
+            while repl.completing.is_some() {
+                repl.wake();
+            }
+            assert_eq!(repl.prompt, typed.replace("/us", "/usr/"));
+        }
     }
 
     #[test]

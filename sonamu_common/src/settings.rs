@@ -78,7 +78,7 @@ pub struct Settings {
     /// more GPU work each time a window updates
     pub mipmaps: bool,
     pub treeview: TreeviewSettings,
-    /// When the buffer line (a prompt at the bottom, like vim's command line: the agent, `!` Luau, `$` shell, `/` command) shows
+    /// When the buffer line (a prompt at the bottom, like vim's command line: the agent, `!` Luau, `$` shell) shows
     pub buffer_line: BufferLine,
     /// The buffer line's agent: an OpenAI-compatible server (eg llama.cpp's `llama-server`)
     pub agent_url: String,
