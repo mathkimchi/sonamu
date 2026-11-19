@@ -23,6 +23,17 @@ struct Param {
     required: bool,
 }
 
+impl Param {
+    /// Its description; an `applet`'s lists the applet types
+    fn described(&self) -> String {
+        if self.name == "applet" {
+            format!("{}: {}", self.description, applet_names().join(", "))
+        } else {
+            self.description.to_owned()
+        }
+    }
+}
+
 const fn param(name: &'static str, kind: &'static str, description: &'static str) -> Param {
     Param {
         name,
@@ -170,7 +181,7 @@ pub fn definitions() -> Json {
                 .params
                 .iter()
                 .map(|param| {
-                    let mut schema = json!({"description": param.description});
+                    let mut schema = json!({"description": param.described()});
                     if let Some(kind) = param.kind {
                         schema["type"] = kind.into();
                     }
@@ -208,11 +219,9 @@ pub(crate) fn tool_text(name: &str) -> Option<String> {
         let _ = write!(
             text,
             "\n  {}: {kind}{optional}: {}",
-            param.name, param.description
+            param.name,
+            param.described()
         );
-        if param.name == "applet" {
-            let _ = write!(text, ": {}", applet_names().join(", "));
-        }
     }
     if let Some(example) = tool.example {
         let _ = write!(text, "\n  eg {example}");
@@ -392,6 +401,17 @@ mod tests {
             "{open}"
         );
         assert!(!open.contains("wl_surface"), "{open}");
+        let definitions = definitions();
+        let open = definitions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["function"]["name"] == "open")
+            .unwrap();
+        let applet = open["function"]["parameters"]["properties"]["applet"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(applet.contains("file_manager"), "{applet}");
         assert!(call("help", &json!({}), &|| false).starts_with("Tools: help, complete"));
         assert_eq!(call("run_lua", &json!({"code": "1 + 1"}), &|| false), "2");
     }
