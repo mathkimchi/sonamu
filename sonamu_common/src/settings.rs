@@ -83,6 +83,8 @@ pub struct Settings {
     /// The buffer line's agent: an OpenAI-compatible server (eg llama.cpp's `llama-server` at
     /// `http://127.0.0.1:8080`); `None`: no agent
     pub agent_url: Option<String>,
+    /// The agent's system prompt
+    pub agent_prompt: String,
     pub swipe: SwipeSettings,
     /// The zoom-out view (#145)
     pub zoom_out: ZoomOutSettings,

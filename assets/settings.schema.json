@@ -68,6 +68,10 @@
         "null"
       ]
     },
+    "agent_prompt": {
+      "description": "The agent's system prompt",
+      "type": "string"
+    },
     "swipe": {
       "$ref": "#/$defs/SwipeSettings"
     },

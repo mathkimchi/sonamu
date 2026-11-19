@@ -1,5 +1,5 @@
 //! The buffer line's agent (#155): a chatbot on an OpenAI-compatible server (setting `agent_url`), streamed; its
-//! `run_luau` tool runs Luau once the user allows it
+//! `run_lua` tool runs Luau once the user allows it
 
 use serde_json::{Value, json};
 use std::{
@@ -12,10 +12,6 @@ use std::{
     thread,
     time::Duration,
 };
-
-const SYSTEM: &str = "You are the assistant in Sonamu, a Wayland compositor. \
-    To look at or change the desktop, call run_luau; the user allows or refuses each call. \
-    Answer briefly, in plain text (no Markdown).";
 
 /// Tool calls in one reply at most, so a confused model can't loop forever
 const MAX_TOOL_ROUNDS: usize = 8;
@@ -91,11 +87,11 @@ pub(crate) fn ask(
                 &mut |text| send(Streamed::Text(text)),
                 &mut |code| {
                     let (answer, answered) = mpsc::channel();
-                    send(Streamed::Text(format!("run_luau: {code}\n")));
+                    send(Streamed::Text(format!("run_lua: {code}\n")));
                     send(Streamed::Ask(answer));
                     let allowed = answered.recv().unwrap_or(false);
                     let result = if allowed {
-                        run_luau(code)
+                        run_lua(code)
                     } else {
                         "The user refused to run it.".to_string()
                     };
@@ -118,16 +114,18 @@ fn converse(
     on_text: &mut dyn FnMut(String),
     run: &mut dyn FnMut(&str) -> String,
 ) -> Result<(), String> {
-    let mut messages: Vec<Value> = std::iter::once(json!({"role": "system", "content": SYSTEM}))
-        .chain(
-            chat.iter()
-                .map(|message| json!({"role": message.role, "content": message.content})),
-        )
-        .collect();
+    let mut messages: Vec<Value> = std::iter::once(
+        json!({"role": "system", "content": sonamu_common::settings::get().agent_prompt}),
+    )
+    .chain(
+        chat.iter()
+            .map(|message| json!({"role": message.role, "content": message.content})),
+    )
+    .collect();
     let tools = json!([{
         "type": "function",
         "function": {
-            "name": "run_luau",
+            "name": "run_lua",
             "description": format!(
                 "Run Luau in Sonamu (after the user allows it); gives its prints and return values. API:\n{}",
                 sonamu_script::help()
@@ -152,7 +150,7 @@ fn converse(
                 serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or_default())
                     .unwrap_or_default();
             let result = match arguments["code"].as_str() {
-                Some(code) if call["function"]["name"] == "run_luau" => run(code),
+                Some(code) if call["function"]["name"] == "run_lua" => run(code),
                 _ => "No such tool, or no `code`.".to_string(),
             };
             messages.push(json!({"role": "tool", "tool_call_id": call["id"], "content": result}));
@@ -227,7 +225,7 @@ fn stream(
 }
 
 /// Runs `code` on the script thread, waiting: its prints and return values, or its error
-fn run_luau(code: &str) -> String {
+fn run_lua(code: &str) -> String {
     let (_handle, outputs) = sonamu_script::eval(code.to_string(), || {});
     let mut text = String::new();
     for output in outputs {
