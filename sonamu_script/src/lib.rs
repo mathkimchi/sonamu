@@ -3,6 +3,7 @@
 //! Commands block the script thread until their world answers; worlds never wait on it, so this can't deadlock.
 
 mod require;
+pub mod tools;
 
 use mlua::{
     Lua, LuaSerdeExt, MetaMethod, MultiValue, UserData, UserDataMethods, Value as LuaValue, VmState,
@@ -99,6 +100,8 @@ enum Job {
     },
     Complete {
         text: String,
+        /// With signatures (`signed_completions`)
+        signed: bool,
         reply: mpsc::Sender<Vec<String>>,
         notify: Box<dyn Fn() + Send>,
     },
@@ -229,11 +232,28 @@ pub fn eval_limited(
 /// What could follow the end of `text` (the word it ends in), from the live state, after any evals before it.
 /// `notify` is called once it is ready.
 pub fn complete(text: String, notify: impl Fn() + Send + 'static) -> mpsc::Receiver<Vec<String>> {
+    complete_job(text, false, Box::new(notify))
+}
+
+/// `complete`'s candidates with their signatures where known (eg `title(): string`), waiting for them
+#[must_use]
+pub fn complete_signed(text: String) -> Vec<String> {
+    complete_job(text, true, Box::new(|| {}))
+        .recv()
+        .unwrap_or_default()
+}
+
+fn complete_job(
+    text: String,
+    signed: bool,
+    notify: Box<dyn Fn() + Send>,
+) -> mpsc::Receiver<Vec<String>> {
     let (reply, replied) = mpsc::channel();
     send_job(Job::Complete {
         text,
+        signed,
         reply,
-        notify: Box::new(notify),
+        notify,
     });
     replied
 }
@@ -314,10 +334,16 @@ fn run(jobs: &mpsc::Receiver<Job>) {
             } => (code, output, notify, cancelled, max),
             Job::Complete {
                 text,
+                signed,
                 reply,
                 notify,
             } => {
-                let _ = reply.send(completions(&lua, &text));
+                let complete = if signed {
+                    signed_completions
+                } else {
+                    completions
+                };
+                let _ = reply.send(complete(&lua, &text));
                 notify();
                 continue;
             }
@@ -504,7 +530,7 @@ fn new_lua() -> mlua::Result<Lua> {
     add_process(&lua, &globals)?;
 
     let sonamu = lua.create_table()?;
-    for name in ["open", "quit", "reload_settings", "bar_layout"] {
+    for name in ["open", "quit", "reload_settings", "bar_layout", "traverse"] {
         sonamu.set(name, tree_function(&lua, name)?)?;
     }
     sonamu.set(
@@ -523,8 +549,19 @@ fn new_lua() -> mlua::Result<Lua> {
                 .join("\n"))
         })?,
     )?;
-    let help_function = lua.create_function(|_, ()| Ok(help()))?;
+    let help_function = lua.create_function(|_, name: Option<String>| {
+        Ok(match name {
+            Some(name) => describe(&name).unwrap_or_else(|| {
+                format!("Nothing is named {name}; sonamu.complete lists what there is")
+            }),
+            None => help(),
+        })
+    })?;
     sonamu.set("help", help_function.clone())?;
+    sonamu.set(
+        "complete",
+        lua.create_function(|lua, text: String| Ok(signed_completions(lua, &text)))?,
+    )?;
     globals.set("help", help_function)?;
     sonamu.set(
         "reset",
@@ -552,48 +589,59 @@ fn new_lua() -> mlua::Result<Lua> {
     Ok(lua)
 }
 
-/// `sonamu.setting` and `sonamu.set_setting`: the user's `settings.json`, like the settings editor (the watcher
-/// reloads it)
+/// `sonamu.setting` and `sonamu.set_setting`
 fn add_settings(lua: &Lua, sonamu: &mlua::Table) -> mlua::Result<()> {
     sonamu.set(
         "setting",
         lua.create_function(|lua, path: String| {
-            let (_, user) = user_settings()?;
-            let value = settings_file::value_at(&user, &path.split('.').collect::<Vec<_>>());
             let options = mlua::serde::SerializeOptions::new()
                 .serialize_none_to_null(false)
                 .serialize_unit_to_null(false);
-            lua.to_value_with(&value, options)
+            lua.to_value_with(&setting(&path).map_err(mlua::Error::runtime)?, options)
         })?,
     )?;
     sonamu.set(
         "set_setting",
         lua.create_function(|lua, (path, value): (String, LuaValue)| {
             allow(Effect::Modify, "sonamu.set_setting")?;
-            let (file, mut user) = user_settings()?;
-            settings_file::migrate(&mut user);
-            let value: serde_json::Value = lua.from_value(value)?;
-            settings_file::set(&mut user, &path.split('.').collect::<Vec<_>>(), value);
-            settings_file::check(&user).map_err(mlua::Error::runtime)?;
-            settings_file::write(&file, Some(&user)).map_err(mlua::Error::runtime)
+            set_setting(&path, lua.from_value(value)?).map_err(mlua::Error::runtime)
         })?,
     )
 }
 
+/// The setting at the dotted `path` (eg `border.width`): the user's, else the default
+pub(crate) fn setting(path: &str) -> Result<serde_json::Value, String> {
+    let (_, user) = user_settings()?;
+    Ok(settings_file::value_at(
+        &user,
+        &path.split('.').collect::<Vec<_>>(),
+    ))
+}
+
+/// Writes the setting at the dotted `path` to `settings.json`, like the settings editor (if valid; the default
+/// removes it); the watcher reloads it
+pub(crate) fn set_setting(path: &str, value: serde_json::Value) -> Result<(), String> {
+    let (file, mut user) = user_settings()?;
+    settings_file::migrate(&mut user);
+    settings_file::set(&mut user, &path.split('.').collect::<Vec<_>>(), value);
+    settings_file::check(&user).map_err(|err| err.to_string())?;
+    settings_file::write(&file, Some(&user)).map_err(|err| err.to_string())
+}
+
 /// `settings.json` and what it holds (`{}` if there is none)
-fn user_settings() -> mlua::Result<(std::path::PathBuf, serde_json::Value)> {
-    let dir = config_dir().ok_or_else(|| mlua::Error::runtime("no config dir"))?;
+fn user_settings() -> Result<(std::path::PathBuf, serde_json::Value), String> {
+    let dir = config_dir().ok_or("no config dir")?;
     let file = match settings_file::source(&dir) {
         Source::Json(file) => file,
         Source::Program(program) => {
-            return Err(mlua::Error::runtime(format!(
+            return Err(format!(
                 "settings come from a program: {}",
                 program.display()
-            )));
+            ));
         }
     };
     let user = settings_file::read(&file)
-        .map_err(|err| mlua::Error::runtime(format!("{}: {err}", file.display())))?
+        .map_err(|err| format!("{}: {err}", file.display()))?
         .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
     Ok((file, user))
 }
@@ -794,7 +842,9 @@ fn add_keymap_and_events(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
 }
 
 const HELP: &str = "\
-help() / sonamu.help()         this
+help(name?) / sonamu.help(name?)   this, or about name, eg help('sonamu.set_setting'), help('code_editor.save')
+sonamu.complete(text): {string}   what could follow text, with signatures (like Tab), eg
+                               sonamu.complete('context.focus():') lists what the focused node can do
 context.focus(): Node          the innermost focused node
 context.root(): Node           the root node
 process.spawn(program, {args}?)
@@ -812,6 +862,8 @@ sonamu.open(applet, {args}?)   like `sonamu-msg open`
 sonamu.reload_settings()
 sonamu.setting(path): any      a setting (yours, else the default), path dotted, eg 'border.width'
 sonamu.set_setting(path, value)   writes it to settings.json (only if valid; the default removes it); reloads
+sonamu.traverse(kind, n?)      moves focus like a `traverse` keybind: next, prev, parent, child n (from 1),
+                               recent_child, last_child, sibling offset, select, enter
 sonamu.bar_layout({left}, {right})   the status bar's segments by name, each left to right; default
                                {tree, launcher, time}, {tray, bell, resources, hub}
 sonamu.quit()
@@ -824,6 +876,7 @@ Node: close() focus() add_child(applet, {args}?): Node swap_sibling(offset) togg
       (also <type>.from_node(n), eg file_manager.from_node(n): typed in sonamu.definitions())
       spawn(program, {args}?) (in its tree's directory) spawn_sibling(program) (its window after the node) quit()
       any other method is a command of its applet, eg hub:clear()
+Example: context.focus():add_child('file_manager', {'/tmp'}):focus()
 Effects (`sonamu-msg eval --max <effect>` refuses higher): read < modify < destructive (close, quit, reset) < spawn
       (processes, keymap.set, events.on); applet commands show theirs in [ ]
 Super+Esc: the buffer line (Esc leaves). There and in the hub: Tab completes, Up/Down recalls, Shift+Enter adds a line, PageUp/PageDown scrolls, Esc clears, Ctrl+V pastes, Ctrl+Shift+C copies the last output, Ctrl+C cancels.
@@ -894,15 +947,17 @@ declare sonamu: {
     open: (applet: string, args: {string}?) -> (),
     quit: () -> (),
     reload_settings: () -> (),
+    traverse: (kind: string, n: number?) -> (),
+    complete: (text: string) -> {string},
     setting: (path: string) -> any,
     set_setting: (path: string, value: any) -> (),
     bar_layout: (left: {string}, right: {string}) -> (),
     reset: () -> (),
     messages: () -> string,
-    help: () -> string,
+    help: (name: string?) -> string,
     definitions: () -> string,
 }
-declare function help(): string
+declare function help(name: string?): string
 declare function require(path: string): any
 ",
     );
@@ -918,18 +973,80 @@ pub fn help() -> String {
         }
         let _ = write!(help, "\n{applet_type}:");
         for signature in signatures {
-            let _ = write!(
-                help,
-                "\n  {}({}): {}  [{}] {}",
-                signature.name,
-                signature.params,
-                signature.returns,
-                signature.effect.name(),
-                signature.doc
-            );
+            let _ = write!(help, "\n  {}", signature_line(&signature));
         }
     }
     help
+}
+
+/// What `name` is: an agent tool, a Luau function (eg `sonamu.open`), a node method (`Node:close`) or an applet
+/// command (`code_editor.save`); every match
+#[must_use]
+pub fn describe(name: &str) -> Option<String> {
+    let mut found: Vec<String> = tools::tool_text(name).into_iter().collect();
+    let (owner, method) = match name.rfind(['.', ':']) {
+        Some(index) => (Some(&name[..index]), &name[index + 1..]),
+        None => (None, name),
+    };
+    if matches!(owner, None | Some("Node")) {
+        found.extend(node_method_line(method).map(|line| format!("Node:{line}")));
+    }
+    if let Some(applet_type) = owner {
+        found.extend(
+            command::signatures(applet_type)
+                .iter()
+                .find(|signature| signature.name == method)
+                .map(|signature| format!("{applet_type}:{}", signature_line(signature))),
+        );
+    }
+    found.extend(help_lines(name));
+    (!found.is_empty()).then(|| found.join("\n\n"))
+}
+
+/// `HELP`'s lines about `name` (eg `sonamu.open`): those starting with it, and the indented lines after them
+fn help_lines(name: &str) -> Option<String> {
+    let mut found = Vec::new();
+    let mut taking = false;
+    for line in HELP.lines() {
+        if line.starts_with(' ') {
+            if taking {
+                found.push(line.trim());
+            }
+            continue;
+        }
+        taking = line
+            .strip_prefix(name)
+            .is_some_and(|rest| rest.starts_with(['(', ' ', ':']));
+        if taking {
+            found.push(line);
+        }
+    }
+    (!found.is_empty()).then(|| found.join("\n"))
+}
+
+/// A node method's signature from `NODE_METHODS`, eg `title(): string`
+fn node_method_line(name: &str) -> Option<String> {
+    let line = NODE_METHODS
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with(&format!("function {name}(")))?;
+    Some(
+        line.trim_start_matches("function ")
+            .replace("(self, ", "(")
+            .replace("(self)", "()"),
+    )
+}
+
+/// An applet command's signature, eg `save(): nil  [modify] Saves the file`
+fn signature_line(signature: &command::Signature) -> String {
+    format!(
+        "{}({}): {}  [{}] {}",
+        signature.name,
+        signature.params,
+        signature.returns,
+        signature.effect.name(),
+        signature.doc
+    )
 }
 
 /// Runs the program (in `dir`, else Sonamu's) and waits for it, polling `cancelled` to kill it;
@@ -1074,6 +1191,26 @@ enum Resolved {
 /// Candidates for the word `text` ends in: globals, a table's fields after `.`, or a node's methods (its applet's
 /// commands too) after `:`
 fn completions(lua: &Lua, text: &str) -> Vec<String> {
+    candidates(lua, text)
+        .into_iter()
+        .map(|candidate| candidate.name)
+        .collect()
+}
+
+/// `completions` with their signatures where known, eg `title(): string`
+fn signed_completions(lua: &Lua, text: &str) -> Vec<String> {
+    candidates(lua, text)
+        .into_iter()
+        .map(|candidate| candidate.signature.unwrap_or(candidate.name))
+        .collect()
+}
+
+struct Candidate {
+    name: String,
+    signature: Option<String>,
+}
+
+fn candidates(lua: &Lua, text: &str) -> Vec<Candidate> {
     // the trailing chain, eg `context.focus():ti`
     let start = text
         .char_indices()
@@ -1081,44 +1218,93 @@ fn completions(lua: &Lua, text: &str) -> Vec<String> {
         .find(|&(_, c)| !(c.is_alphanumeric() || "_.:()".contains(c)))
         .map_or(0, |(index, c)| index + c.len_utf8());
     let chain = &text[start..];
+    let unsigned = |names: Vec<String>| {
+        names
+            .into_iter()
+            .map(|name| Candidate {
+                name,
+                signature: None,
+            })
+            .collect()
+    };
     // right after a call: its separator, so the next Tab lists what follows
     if chain.ends_with(')') {
-        return match resolve(lua, chain) {
+        return unsigned(match resolve(lua, chain) {
             Some(Resolved::Node) => vec![":".to_owned()],
             Some(Resolved::Value(LuaValue::UserData(node))) if node.is::<Node>() => {
                 vec![":".to_owned()]
             }
             Some(Resolved::Value(LuaValue::Table(_))) => vec![".".to_owned()],
             _ => Vec::new(),
-        };
+        });
     }
     let (receiver, separator, word) = match chain.rfind(['.', ':']) {
         Some(index) => (&chain[..index], &chain[index..=index], &chain[index + 1..]),
         None => ("", "", chain),
     };
-    let mut candidates: Vec<String> = if receiver.is_empty() {
+    let first_help_line = |name: &str| help_lines(name)?.lines().next().map(str::to_owned);
+    let mut candidates: Vec<Candidate> = if receiver.is_empty() {
         global_names(lua)
+            .into_iter()
+            .map(|name| Candidate {
+                signature: first_help_line(&name),
+                name,
+            })
+            .collect()
     } else {
-        match (resolve(lua, receiver), separator) {
-            (Some(Resolved::Node), ":") => node_methods(),
+        let applet_type = match (resolve(lua, receiver), separator) {
+            (Some(Resolved::Node), ":") => Some(None),
             (Some(Resolved::Value(LuaValue::UserData(node))), ":") if node.is::<Node>() => {
-                let mut methods = node_methods();
-                if let Some(Value::String(applet_type)) = node_call(&node, "type") {
-                    methods.extend(
-                        command::signatures(&applet_type)
-                            .iter()
-                            .map(|signature| signature.name.to_string()),
-                    );
+                Some(match node_call(&node, "type") {
+                    Some(Value::String(applet_type)) => Some(applet_type),
+                    _ => None,
+                })
+            }
+            (Some(Resolved::Value(LuaValue::Table(table))), ".") => {
+                return finish(
+                    keys(&table)
+                        .into_iter()
+                        .map(|name| Candidate {
+                            signature: first_help_line(&format!("{receiver}.{name}")),
+                            name,
+                        })
+                        .collect(),
+                    word,
+                );
+            }
+            _ => None,
+        };
+        match applet_type {
+            None => Vec::new(),
+            Some(applet_type) => {
+                let mut methods: Vec<Candidate> = node_methods()
+                    .into_iter()
+                    .map(|name| Candidate {
+                        signature: node_method_line(&name),
+                        name,
+                    })
+                    .collect();
+                if let Some(applet_type) = applet_type {
+                    methods.extend(command::signatures(&applet_type).iter().map(|signature| {
+                        Candidate {
+                            name: signature.name.to_string(),
+                            signature: Some(signature_line(signature)),
+                        }
+                    }));
                 }
                 methods
             }
-            (Some(Resolved::Value(LuaValue::Table(table))), ".") => keys(&table),
-            _ => Vec::new(),
         }
     };
-    candidates.retain(|candidate| candidate.starts_with(word));
-    candidates.sort();
-    candidates.dedup();
+    candidates = finish(candidates, word);
+    candidates
+}
+
+/// Those starting with `word`, sorted, once each
+fn finish(mut candidates: Vec<Candidate>, word: &str) -> Vec<Candidate> {
+    candidates.retain(|candidate| candidate.name.starts_with(word));
+    candidates.sort_by(|a, b| a.name.cmp(&b.name));
+    candidates.dedup_by(|a, b| a.name == b.name);
     candidates
 }
 
@@ -1345,6 +1531,45 @@ mod tests {
             }],
         );
         assert_eq!(complete_all("context.root():set"), ["set_title"]);
+        assert_eq!(
+            complete_signed("context.root():set".to_string()),
+            ["set_title(title: string): nil  [modify] "]
+        );
+        assert_eq!(
+            complete_signed("context.focus():ti".to_string()),
+            ["title(): string"]
+        );
+        assert_eq!(
+            eval_all("sonamu.complete('sonamu.set_s')[1]").1,
+            Ok(vec![Value::String(
+                "sonamu.set_setting(path, value)   writes it to settings.json (only if valid; the default \
+                 removes it); reloads"
+                    .to_string()
+            )])
+        );
+    }
+
+    #[test]
+    fn help_by_name() {
+        assert!(describe("Node:close").unwrap().contains("Node:close(): ()"));
+        let set_setting = describe("set_setting").unwrap();
+        assert!(set_setting.contains("Tool set_setting"), "{set_setting}");
+        assert!(
+            set_setting.contains(r#"eg {"path": "gap""#),
+            "{set_setting}"
+        );
+        let traverse = describe("sonamu.traverse").unwrap();
+        assert!(
+            traverse.contains("recent_child"),
+            "continued lines: {traverse}"
+        );
+        assert_eq!(describe("nope"), None);
+        assert_eq!(
+            eval_all("help('sonamu.open')").1,
+            Ok(vec![Value::String(
+                "sonamu.open(applet, {args}?)   like `sonamu-msg open`".to_string()
+            )])
+        );
     }
 
     #[test]

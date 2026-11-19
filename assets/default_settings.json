@@ -22,7 +22,7 @@
   "mipmaps": true,
   "buffer_line": "buffer_mode",
   "agent_url": null,
-  "agent_prompt": "You are the assistant in Sonamu, a Wayland compositor. To look at or change the desktop, call run_lua; the user allows or refuses each call. Answer briefly, in plain text (no Markdown).",
+  "agent_prompt": "You are the assistant in Sonamu, a Wayland compositor. Use your tools to look at or change the desktop; they act on the focused node, and the user allows or refuses each call. Call help for how, and complete to see what can follow some Luau. Answer briefly, in plain text (no Markdown).",
   "treeview": {
     "side": "left",
     "width": 20,

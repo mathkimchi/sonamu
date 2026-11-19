@@ -42,6 +42,25 @@ pub enum Value {
     Map(BTreeMap<String, Self>),
     Node(NodeUid),
 }
+/// JSON as a command's value (eg keybinds' and agent tools' args)
+impl From<serde_json::Value> for Value {
+    fn from(value: serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::Null => Self::Nil,
+            serde_json::Value::Bool(value) => Self::Bool(value),
+            serde_json::Value::Number(value) => Self::Number(value.as_f64().unwrap_or_default()),
+            serde_json::Value::String(value) => Self::String(value),
+            serde_json::Value::Array(values) => {
+                Self::List(values.into_iter().map(Self::from).collect())
+            }
+            serde_json::Value::Object(map) => Self::Map(
+                map.into_iter()
+                    .map(|(key, value)| (key, Self::from(value)))
+                    .collect(),
+            ),
+        }
+    }
+}
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -357,7 +376,7 @@ pub fn node_effect(name: &str) -> Option<Effect> {
 pub fn tree_effect(name: &str) -> Effect {
     match name {
         "focus" | "root" => Effect::Read,
-        "open" | "reload_settings" | "bar_layout" => Effect::Modify,
+        "open" | "reload_settings" | "bar_layout" | "traverse" => Effect::Modify,
         "spawn" => Effect::Spawn,
         _ => Effect::Destructive,
     }

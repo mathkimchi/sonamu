@@ -267,29 +267,11 @@ pub fn standard_keybind(ui_event: &UIEvent) -> Option<KeybindCommand> {
         "spawn_browser_sibling" => spawn("spawn_sibling", browser()),
         "quit" | "wrap_project" | "close" | "toggle_half" | "spawn" | "spawn_sibling"
         | "swap_sibling" => KeybindCommand {
-            args: args.into_iter().map(json_value).collect(),
+            args: args.into_iter().map(Value::from).collect(),
             name,
         },
         _ => return None,
     })
-}
-
-/// A keybind's arg as a command's
-fn json_value(value: serde_json::Value) -> Value {
-    match value {
-        serde_json::Value::Null => Value::Nil,
-        serde_json::Value::Bool(value) => Value::Bool(value),
-        serde_json::Value::Number(value) => Value::Number(value.as_f64().unwrap_or_default()),
-        serde_json::Value::String(value) => Value::String(value),
-        serde_json::Value::Array(values) => {
-            Value::List(values.into_iter().map(json_value).collect())
-        }
-        serde_json::Value::Object(map) => Value::Map(
-            map.into_iter()
-                .map(|(key, value)| (key, json_value(value)))
-                .collect(),
-        ),
-    }
 }
 
 #[cfg(test)]

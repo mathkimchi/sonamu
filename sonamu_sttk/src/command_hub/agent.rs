@@ -1,7 +1,8 @@
 //! The buffer line's agent (#155): a chatbot on an OpenAI-compatible server (setting `agent_url`), streamed; its
-//! `run_lua` tool runs Luau once the user allows it
+//! tools (`sonamu_script::tools`) run once the user allows each call
 
 use serde_json::{Value, json};
+use sonamu_script::tools;
 use std::{
     io::{BufRead, BufReader},
     sync::{
@@ -52,24 +53,20 @@ pub(crate) fn check(notify: impl Fn() + Send + 'static) -> mpsc::Receiver<Option
     receiver
 }
 
-/// A message of the chat so far
-pub(crate) struct Message {
-    /// `user` or `assistant`
-    pub role: &'static str,
-    pub content: String,
-}
-
 /// What a reply (or a shell command) sends while it runs
 pub(crate) enum Streamed {
     Text(String),
-    /// The agent wants to run this Luau: `true` allows it (dropped: refused)
+    /// The agent wants to run its tool call: `true` allows it (dropped: refused)
     Ask(mpsc::Sender<bool>),
+    /// A message of the agent's exchange (its replies, tool calls and results), for later turns
+    Message(Value),
     Done(Result<(), String>),
 }
 
-/// Asks the agent on a thread; its reply comes in pieces, `notify`ing each; `cancel` stops it
+/// Asks the agent on a thread, after the `chat` so far (OpenAI-style messages); its reply comes in pieces,
+/// `notify`ing each; `cancel` stops it
 pub(crate) fn ask(
-    chat: Vec<Message>,
+    chat: Vec<Value>,
     cancel: Arc<AtomicBool>,
     notify: impl Fn() + Send + 'static,
 ) -> mpsc::Receiver<Streamed> {
@@ -85,13 +82,14 @@ pub(crate) fn ask(
                 &chat,
                 &cancel,
                 &mut |text| send(Streamed::Text(text)),
-                &mut |code| {
+                &mut |message| send(Streamed::Message(message)),
+                &mut |name, args| {
                     let (answer, answered) = mpsc::channel();
-                    send(Streamed::Text(format!("run_lua: {code}\n")));
+                    send(Streamed::Text(format!("{}\n", tools::shown(name, args))));
                     send(Streamed::Ask(answer));
                     let allowed = answered.recv().unwrap_or(false);
                     let result = if allowed {
-                        run_lua(code)
+                        tools::call(name, args, &|| cancel.load(Ordering::Relaxed))
                     } else {
                         "The user refused to run it.".to_string()
                     };
@@ -105,55 +103,48 @@ pub(crate) fn ask(
     receiver
 }
 
-/// The reply from the server at `url`, `on_text` as it streams; its Luau goes through `run`, which gives what to tell
-/// the model
+/// The reply from the server at `url` after `chat`, `on_text` as it streams and `on_message` for each of its
+/// messages; its tool calls go through `run`, which gives what to tell the model
 fn converse(
     url: &str,
-    chat: &[Message],
+    chat: &[Value],
     cancel: &AtomicBool,
     on_text: &mut dyn FnMut(String),
-    run: &mut dyn FnMut(&str) -> String,
+    on_message: &mut dyn FnMut(Value),
+    run: &mut dyn FnMut(&str, &Value) -> String,
 ) -> Result<(), String> {
-    let mut messages: Vec<Value> = std::iter::once(
-        json!({"role": "system", "content": sonamu_common::settings::get().agent_prompt}),
-    )
-    .chain(
-        chat.iter()
-            .map(|message| json!({"role": message.role, "content": message.content})),
-    )
-    .collect();
-    let tools = json!([{
-        "type": "function",
-        "function": {
-            "name": "run_lua",
-            "description": format!(
-                "Run Luau in Sonamu (after the user allows it); gives its prints and return values. API:\n{}",
-                sonamu_script::help()
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "code": {"type": "string", "description": "eg `return context.focus():title()`"},
-                },
-                "required": ["code"],
-            },
-        },
-    }]);
+    let system = sonamu_common::settings::get().agent_prompt;
+    let mut messages: Vec<Value> = std::iter::once(json!({"role": "system", "content": system}))
+        .chain(chat.iter().cloned())
+        .collect();
+    let mut add = |messages: &mut Vec<Value>, message: Value| {
+        on_message(message.clone());
+        messages.push(message);
+    };
+    let tools = tools::definitions();
     for _ in 0..MAX_TOOL_ROUNDS {
         let (content, calls) = stream(url, &messages, &tools, cancel, on_text)?;
         if calls.is_empty() {
+            add(
+                &mut messages,
+                json!({"role": "assistant", "content": content}),
+            );
             return Ok(());
         }
-        messages.push(json!({"role": "assistant", "content": content, "tool_calls": calls}));
+        add(
+            &mut messages,
+            json!({"role": "assistant", "content": content, "tool_calls": calls}),
+        );
         for call in calls {
             let arguments: Value =
                 serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or_default())
                     .unwrap_or_default();
-            let result = match arguments["code"].as_str() {
-                Some(code) if call["function"]["name"] == "run_lua" => run(code),
-                _ => "No such tool, or no `code`.".to_string(),
-            };
-            messages.push(json!({"role": "tool", "tool_call_id": call["id"], "content": result}));
+            let name = call["function"]["name"].as_str().unwrap_or_default();
+            let result = run(name, &arguments);
+            add(
+                &mut messages,
+                json!({"role": "tool", "tool_call_id": call["id"], "content": result}),
+            );
         }
     }
     Err("the agent kept calling tools".to_string())
@@ -224,34 +215,6 @@ fn stream(
     Ok((content, calls))
 }
 
-/// Runs `code` on the script thread, waiting: its prints and return values, or its error
-fn run_lua(code: &str) -> String {
-    let (_handle, outputs) = sonamu_script::eval(code.to_string(), || {});
-    let mut text = String::new();
-    for output in outputs {
-        match output {
-            sonamu_script::Output::Print(line) => {
-                text.push_str(&line);
-                text.push('\n');
-            }
-            sonamu_script::Output::Done(Ok(values)) => {
-                let values: Vec<String> = values.iter().map(ToString::to_string).collect();
-                text.push_str(&values.join(", "));
-                break;
-            }
-            sonamu_script::Output::Done(Err(err)) => {
-                text = format!("{text}error: {err}");
-                break;
-            }
-        }
-    }
-    if text.is_empty() {
-        "(nothing)".to_string()
-    } else {
-        text
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,17 +222,15 @@ mod tests {
     #[test]
     #[ignore = "needs llama.cpp's `llama-server` at 127.0.0.1:11434"]
     fn agent_replies() {
-        let chat = [Message {
-            role: "user",
-            content: "Reply with just the word: pong".to_string(),
-        }];
+        let chat = [json!({"role": "user", "content": "Reply with just the word: pong"})];
         let mut text = String::new();
         converse(
             "http://127.0.0.1:11434",
             &chat,
             &AtomicBool::new(false),
             &mut |piece| text.push_str(&piece),
-            &mut |_| unreachable!(),
+            &mut |_| {},
+            &mut |_, _| unreachable!(),
         )
         .unwrap();
         assert!(text.to_lowercase().contains("pong"), "{text}");
@@ -277,11 +238,8 @@ mod tests {
 
     #[test]
     #[ignore = "needs llama.cpp's `llama-server` at 127.0.0.1:11434"]
-    fn agent_runs_luau() {
-        let chat = [Message {
-            role: "user",
-            content: "What's the focused window's title?".to_string(),
-        }];
+    fn agent_calls_tools() {
+        let chat = [json!({"role": "user", "content": "What's the focused window's title?"})];
         let mut ran = Vec::new();
         let mut text = String::new();
         converse(
@@ -289,8 +247,9 @@ mod tests {
             &chat,
             &AtomicBool::new(false),
             &mut |piece| text.push_str(&piece),
-            &mut |code| {
-                ran.push(code.to_string());
+            &mut |_| {},
+            &mut |name, args| {
+                ran.push(tools::shown(name, args));
                 "Firefox".to_string()
             },
         )

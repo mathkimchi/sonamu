@@ -8,5 +8,6 @@ workspace = true
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 calloop = { workspace = true }
 log = { workspace = true }

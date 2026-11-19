@@ -8,6 +8,7 @@ use super::{
 };
 use crate::ui::{bg, raised_bg as bar_bg};
 use crate::ui::{fill_row, put};
+use serde_json::json;
 use sonamu_common::command::Value;
 use sonamu_common::settings::ERROR;
 use sonamu_common::settings::Palette;
@@ -67,6 +68,8 @@ pub(crate) struct Entry {
     /// Its `print`s so far
     pub printed: String,
     pub output: Output,
+    /// The agent's messages after the user's (replies, tool calls and results), for later turns
+    pub messages: Vec<serde_json::Value>,
 }
 
 /// An entry running
@@ -108,6 +111,7 @@ impl Running {
                 match outputs.try_recv()? {
                     Streamed::Text(text) => Next::Text(text),
                     Streamed::Ask(answer) => Next::Ask(answer),
+                    Streamed::Message(message) => Next::Message(message),
                     Streamed::Done(Ok(())) => Next::Done(Output::Text(String::new())),
                     Streamed::Done(Err(err)) => Next::Done(Output::Error(err)),
                 }
@@ -120,8 +124,9 @@ impl Running {
 enum Next {
     /// To append
     Text(String),
-    /// The agent's question: may it run its Luau
+    /// The agent's question: may it run its tool call
     Ask(mpsc::Sender<bool>),
+    Message(serde_json::Value),
     Done(Output),
 }
 
@@ -287,10 +292,7 @@ impl Repl {
         let running = match kind {
             Kind::Agent => {
                 let mut chat = self.chat();
-                chat.push(agent::Message {
-                    role: "user",
-                    content: text.to_string(),
-                });
+                chat.push(json!({"role": "user", "content": text}));
                 let cancel = Arc::new(AtomicBool::new(false));
                 let outputs = agent::ask(chat, Arc::clone(&cancel), notify);
                 Some(Running::Agent { cancel, outputs })
@@ -322,14 +324,15 @@ impl Repl {
             command,
             printed: String::new(),
             output,
+            messages: Vec::new(),
         });
         if self.history.len() > MAX_ENTRIES {
             self.history.remove(0);
         }
     }
 
-    /// The agent's finished exchanges so far (its replies are their `printed`)
-    fn chat(&self) -> Vec<agent::Message> {
+    /// The agent's finished exchanges so far, as OpenAI-style messages
+    fn chat(&self) -> Vec<serde_json::Value> {
         let mut exchanges: Vec<_> = self
             .history
             .iter()
@@ -339,16 +342,9 @@ impl Repl {
         exchanges
             .into_iter()
             .flat_map(|entry| {
-                [
-                    agent::Message {
-                        role: "user",
-                        content: entry.command.clone(),
-                    },
-                    agent::Message {
-                        role: "assistant",
-                        content: entry.printed.clone(),
-                    },
-                ]
+                let (_, text) = Kind::of(&entry.command, self.default);
+                std::iter::once(json!({"role": "user", "content": text}))
+                    .chain(entry.messages.iter().cloned())
             })
             .collect()
     }
@@ -516,6 +512,7 @@ impl Repl {
                 match next {
                     Next::Text(text) => entry.printed.push_str(&text),
                     Next::Ask(answer) => self.asking.push(answer),
+                    Next::Message(message) => entry.messages.push(message),
                     Next::Done(output) => {
                         entry.output = output;
                         break;
@@ -576,7 +573,7 @@ impl Repl {
         let width = grid.width();
         if self.asking() {
             fill_row(grid, row, bar_bg(palette));
-            put(grid, row, 0, "Run this Luau? y/n", palette.accent);
+            put(grid, row, 0, "Run this? y/n", palette.accent);
             return;
         }
         if self.running() {
@@ -722,7 +719,7 @@ mod tests {
         let result = loop {
             match outputs.recv().unwrap() {
                 Streamed::Text(piece) => text.push_str(&piece),
-                Streamed::Ask(_) => unreachable!(),
+                Streamed::Ask(_) | Streamed::Message(_) => unreachable!(),
                 Streamed::Done(result) => break result,
             }
         };

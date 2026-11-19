@@ -1064,6 +1064,35 @@ impl RootNodeApplet {
             }
             return;
         }
+        // like a `traverse` keybind (`sonamu.traverse`)
+        if call.uid.is_none() && call.name == "traverse" {
+            // Luau's numbers are floats; `from_args` wants integers
+            let args: Vec<serde_json::Value> = call
+                .args
+                .iter()
+                .map(|arg| match arg {
+                    &Value::Number(number) if number.fract() == 0.0 => (number as i64).into(),
+                    arg => serde_json::to_value(arg).unwrap_or_default(),
+                })
+                .collect();
+            let result = if command::tree_effect(&call.name) > call.max {
+                Err(format!(
+                    "traverse is above this eval's limit ({:?})",
+                    call.max
+                ))
+            } else if let Some(traversal) = Traversal::from_args(&args) {
+                self.traverse(traversal);
+                Ok(Value::Nil)
+            } else {
+                Err(format!(
+                    "no traversal {}: next, prev, parent, child n, recent_child, last_child, \
+                     sibling offset, select, enter",
+                    serde_json::Value::from(args)
+                ))
+            };
+            let _ = call.reply.send(result);
+            return;
+        }
         match self.holder.handle_node_call(call) {
             None | Some(NodeRequest::FocusSelf) => {}
             Some(_) => log::warn!("The root holder has no node to pass a request to"),
