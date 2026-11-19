@@ -2,7 +2,7 @@
 //! `run_lua`
 // TODO: relative and absolute node paths, not only the focused node
 
-use crate::{Output, complete_signed, describe, eval, help, set_setting, setting};
+use crate::{Output, complete_signed, describe, eval, help};
 use serde_json::{Value as Json, json};
 use sonamu_command::{self as command, Value};
 use std::fmt::Write as _;
@@ -86,26 +86,6 @@ const TOOLS: &[Tool] = &[
         description: "The focused node's applet type",
         params: &[],
         example: None,
-    },
-    Tool {
-        name: "setting",
-        description: "A setting (the user's, else the default)",
-        params: &[param("path", "string", "dotted, eg `border.width`")],
-        example: None,
-    },
-    Tool {
-        name: "set_setting",
-        description: "Writes a setting to settings.json (only if valid; the default removes it)",
-        params: &[
-            param("path", "string", "dotted, eg `border.width`"),
-            Param {
-                name: "value",
-                kind: None,
-                description: "its value",
-                required: true,
-            },
-        ],
-        example: Some(r#"{"path": "gap", "value": 8}"#),
     },
     Tool {
         name: "traverse",
@@ -302,11 +282,6 @@ fn run(name: &str, args: &Json, cancelled: &dyn Fn() -> bool) -> Result<String, 
             }
         }
         "run_lua" => run_lua(text("code")?),
-        "setting" => setting(text("path")?)?.to_string(),
-        "set_setting" => {
-            set_setting(text("path")?, args["value"].clone())?;
-            "ok".to_owned()
-        }
         "open" | "traverse" => result(command::call(None, name, positional, cancelled)?),
         _ => {
             let focus = command::focus(cancelled)?;

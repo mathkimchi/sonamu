@@ -658,14 +658,14 @@ fn split_path(path: &str) -> Vec<&str> {
 }
 
 /// The setting at the dotted `path` (eg `border.width`): the user's, else the default
-pub(crate) fn setting(path: &str) -> Result<serde_json::Value, String> {
+fn setting(path: &str) -> Result<serde_json::Value, String> {
     let (_, user) = user_settings()?;
     Ok(settings_file::value_at(&user, &split_path(path)))
 }
 
 /// Writes the setting at the dotted `path` to `settings.json`, like the settings editor (if valid; the default
 /// removes it); the watcher reloads it
-pub(crate) fn set_setting(path: &str, value: serde_json::Value) -> Result<(), String> {
+fn set_setting(path: &str, value: serde_json::Value) -> Result<(), String> {
     let (file, mut user) = user_settings()?;
     settings_file::migrate(&mut user);
     settings_file::set(&mut user, &split_path(path), value);
@@ -1635,11 +1635,11 @@ mod tests {
     #[test]
     fn help_by_name() {
         assert!(describe("Node:close").unwrap().contains("Node:close(): ()"));
-        let set_setting = describe("set_setting").unwrap();
-        assert!(set_setting.contains("Tool set_setting"), "{set_setting}");
+        let open = describe("open").unwrap();
+        assert!(open.contains("Tool open"), "{open}");
         assert!(
-            set_setting.contains(r#"eg {"path": "gap""#),
-            "{set_setting}"
+            open.contains(r#"eg {"applet": "settings_editor""#),
+            "{open}"
         );
         let traverse = describe("sonamu.traverse").unwrap();
         assert!(
