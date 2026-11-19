@@ -210,11 +210,22 @@ pub(crate) fn tool_text(name: &str) -> Option<String> {
             "\n  {}: {kind}{optional}: {}",
             param.name, param.description
         );
+        if param.name == "applet" {
+            let _ = write!(text, ": {}", applet_names().join(", "));
+        }
     }
     if let Some(example) = tool.example {
         let _ = write!(text, "\n  eg {example}");
     }
     Some(text)
+}
+
+/// The applet types that can be opened by name: every declared one but `wl_surface` (programs' windows)
+fn applet_names() -> Vec<String> {
+    command::all_signatures()
+        .into_keys()
+        .filter(|name| name != "wl_surface")
+        .collect()
 }
 
 /// A call as shown to the user, eg `traverse(child, 1)`
@@ -373,6 +384,14 @@ mod tests {
         assert_eq!(shown("close", &Json::Null), "close()");
         assert_eq!(call("nope", &json!({}), &|| false), "error: no tool nope");
         assert!(call("help", &json!({"name": "title"}), &|| false).contains("Tool title"));
+        command::declare("file_manager", &[]);
+        command::declare("wl_surface", &[]);
+        let open = call("help", &json!({"name": "open"}), &|| false);
+        assert!(
+            open.contains("its type: ") && open.contains("file_manager"),
+            "{open}"
+        );
+        assert!(!open.contains("wl_surface"), "{open}");
         assert!(call("help", &json!({}), &|| false).starts_with("Tools: help, complete"));
         assert_eq!(call("run_lua", &json!({"code": "1 + 1"}), &|| false), "2");
     }
