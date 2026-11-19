@@ -42,6 +42,7 @@ use sonamu_ui::{
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, SwipePhase, UIEvent},
 };
 use std::{
+    cell::Cell,
     collections::{BTreeMap, HashMap},
     path::PathBuf,
     sync::{Arc, RwLock, atomic::Ordering},
@@ -113,6 +114,10 @@ pub struct RootNodeApplet {
     buffer_mode: bool,
     /// Lines the buffer line is scrolled up (PageUp) through its history; 0: the last entry's output
     buffer_scroll: usize,
+    /// Mouse scrolling over the buffer line not yet a line
+    buffer_scrolled: ui::ScrollSteps,
+    /// The buffer line's height (px) on the active screen when last drawn in buffer mode, where scrolls scroll it
+    buffer_line_height: Cell<f32>,
     /// The last `sonamu_script` message, shown over the buffer line for `ECHO_TIME` (Emacs' echo area)
     echo: Option<(sonamu_script::Message, Instant)>,
     /// `sonamu_script::last_message`'s count when last echoed
@@ -203,23 +208,8 @@ impl RootNodeApplet {
             return;
         }
         match key {
-            // through the whole history (`buffer_line`)
-            KeySymbol::PageUp => {
-                let [_, _, width, height] = self.screens[self.holder.tree.active_screen()].rect;
-                let (columns, _) =
-                    CharGrid::largest_fittable_size(DisplayContainerSize::new(width, height));
-                let max = self
-                    .repl
-                    .lines(columns, 0, &settings::get().palette)
-                    .len()
-                    .saturating_sub(BUFFER_OUTPUT_ROWS);
-                self.buffer_scroll = (self.buffer_scroll + ui::page(BUFFER_OUTPUT_ROWS)).min(max);
-            }
-            KeySymbol::PageDown => {
-                self.buffer_scroll = self
-                    .buffer_scroll
-                    .saturating_sub(ui::page(BUFFER_OUTPUT_ROWS));
-            }
+            KeySymbol::PageUp => self.scroll_buffer(ui::page(BUFFER_OUTPUT_ROWS) as isize),
+            KeySymbol::PageDown => self.scroll_buffer(-(ui::page(BUFFER_OUTPUT_ROWS) as isize)),
             _ => {
                 if matches!(key, KeySymbol::Enter) {
                     self.buffer_scroll = 0;
@@ -228,6 +218,19 @@ impl RootNodeApplet {
             }
         }
         self.surface.damage();
+    }
+
+    /// Scrolls the buffer line `lines` up (negative: down) through the whole history (`buffer_line`)
+    fn scroll_buffer(&mut self, lines: isize) {
+        let [_, _, width, height] = self.screens[self.holder.tree.active_screen()].rect;
+        let (columns, _) =
+            CharGrid::largest_fittable_size(DisplayContainerSize::new(width, height));
+        let max = self
+            .repl
+            .lines(columns, 0, &settings::get().palette)
+            .len()
+            .saturating_sub(BUFFER_OUTPUT_ROWS);
+        self.buffer_scroll = self.buffer_scroll.saturating_add_signed(lines).min(max);
     }
 
     /// Where the treeview is drawn (`[x, y, width, height]`, frame included), and how;
@@ -302,6 +305,7 @@ impl RootNodeApplet {
             view_path,
             screens,
             repl,
+            buffer_line_height,
             ..
         } = self;
         let active = holder.tree.active_screen();
@@ -343,23 +347,20 @@ impl RootNodeApplet {
                     let full = DisplayContainerSize::new(size.width, height);
                     let echo = echo.filter(|_| index == active);
                     if index == active && buffer_mode {
-                        window.push(buffer_line(
+                        let (line, height) = buffer_line(
                             repl,
                             echo,
                             full,
                             Bar::Prompt(buffer_scroll),
                             &settings.palette,
-                        ));
+                        );
+                        buffer_line_height.set(height);
+                        window.push(line);
                     } else if settings.buffer_line == BufferLine::Always {
-                        window.push(buffer_line(
-                            repl,
-                            echo,
-                            full,
-                            Bar::Insert,
-                            &settings.palette,
-                        ));
+                        window
+                            .push(buffer_line(repl, echo, full, Bar::Insert, &settings.palette).0);
                     } else if echo.is_some() {
-                        window.push(buffer_line(repl, echo, full, Bar::None, &settings.palette));
+                        window.push(buffer_line(repl, echo, full, Bar::None, &settings.palette).0);
                     }
                     UITree::new_container_styled(
                         Style::absolute([x as f32, y as f32], [size.width as f32, height as f32]),
@@ -624,6 +625,8 @@ impl RootNodeApplet {
             buffer_mode: false,
             echo: None,
             buffer_scroll: 0,
+            buffer_scrolled: ui::ScrollSteps::default(),
+            buffer_line_height: Cell::new(0.0),
             echoed: 0,
             bar_state: BarState::default(),
             loop_handle: event_loop.clone(),
@@ -916,8 +919,19 @@ impl RootNodeApplet {
             self.activate_screen(index);
         }
         // in the active screen's coords
-        let [x, y, ..] = self.screens[self.holder.tree.active_screen()].rect;
+        let [x, y, _, screen_height] = self.screens[self.holder.tree.active_screen()].rect;
         mouse_event.position = [pointer_x - f64::from(x), pointer_y - f64::from(y)];
+        if let MouseEventKind::Scroll { delta, v120, .. } = mouse_event.kind
+            && self.buffer_mode
+            && mouse_event.position[1]
+                >= f64::from(screen_height) - f64::from(self.buffer_line_height.get())
+        {
+            // positive scrolls down, toward the newest
+            let steps = self.buffer_scrolled.add(delta, v120) as isize;
+            self.scroll_buffer(-steps);
+            self.surface.damage();
+            return;
+        }
         let settings = settings::get();
         let treeview_area = self.treeview_area(&settings);
         // a hidden treeview has no rows to hit
@@ -1686,14 +1700,14 @@ enum Bar {
     None,
 }
 
-/// The buffer line at the bottom of a screen of `size`: `bar`, under the echoed message
+/// The buffer line at the bottom of a screen of `size`: `bar`, under the echoed message; and its height (px)
 fn buffer_line(
     repl: &Repl,
     echo: Option<&sonamu_script::Message>,
     size: DisplayContainerSize,
     bar: Bar,
     palette: &Palette,
-) -> UITree {
+) -> (UITree, f32) {
     let (columns, _) = CharGrid::largest_fittable_size(size);
     let (mut lines, scroll) = match bar {
         Bar::Prompt(0) => (
@@ -1729,7 +1743,7 @@ fn buffer_line(
     }
     let height = grid.display_size().height as f32;
     let top = size.height as f32 - height;
-    UITree::new_container_styled(
+    let line = UITree::new_container_styled(
         Style::absolute([0.0, top], [size.width as f32, height]),
         vec![
             // the grid is whole cells; the bar spans the screen
@@ -1740,7 +1754,8 @@ fn buffer_line(
             ),
             grid.element().into(),
         ],
-    )
+    );
+    (line, height)
 }
 
 #[cfg(test)]
@@ -2085,6 +2100,49 @@ mod tests {
 
     /// Random swipes, screen switches and focus jumps on two screens never lose a tab: no applet panics, and no
     /// tab is sized past a screen or flooded with resizes (a wl client is dropped when it can't keep up)
+    #[test]
+    fn wheel_scrolls_the_buffer_line() {
+        let mut event_loop = EventLoop::<RootNodeApplet>::try_new().unwrap();
+        let (world, _calls) = calloop::channel::channel();
+        let (request_sender, _requests) = calloop::channel::channel();
+        let surface = SharedState::new(StateKind::Surface, UITree::leaf(UIElement::Nothing));
+        let mut root = RootNodeApplet::new(
+            ProjectApplet::restorer(container(Some("p"), vec![tab("0", Vec::new())])),
+            BTreeMap::from([("tab".to_string(), Box::new(TabSpawner) as AppletSpawner)]),
+            None,
+            surface,
+            request_sender,
+            &event_loop.handle(),
+            world,
+        );
+        root.repl.history.push(repl::Entry {
+            kind: repl::Kind::Luau,
+            command: "!x".to_string(),
+            printed: String::new(),
+            output: repl::Output::Text("line\n".repeat(30)),
+            messages: Vec::new(),
+        });
+        root.buffer_mode = true;
+        root.buffer_line_height.set(100.0);
+        let scroll = |y| {
+            StandardEvent::UIEvent(UIEvent::Mouse(MouseEvent {
+                position: [10.0, y],
+                kind: MouseEventKind::Scroll {
+                    delta: [0.0, -15.0],
+                    v120: Some([0, -360]),
+                    stop: [false; 2],
+                    ctrl: false,
+                    logo: false,
+                },
+                time_msec: None,
+            }))
+        };
+        send(&mut event_loop, &mut root, scroll(590.0));
+        assert_eq!(root.buffer_scroll, 3, "three notches up, over it");
+        send(&mut event_loop, &mut root, scroll(100.0));
+        assert_eq!(root.buffer_scroll, 3, "not over it");
+    }
+
     #[test]
     fn swipes_keep_every_tab() {
         // an applet's thread panicking (eg a project's) freezes it, its tabs gone from the screen
