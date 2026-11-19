@@ -1743,17 +1743,29 @@ fn buffer_line(
     }
     let height = grid.display_size().height as f32;
     let top = size.height as f32 - height;
+    let mut children = vec![
+        // the grid is whole cells; the bar spans the screen
+        ui::rect(
+            ui::raised_bg(palette),
+            [0.0, 0.0],
+            [size.width as f32, height],
+        ),
+        grid.element().into(),
+    ];
+    // only through the whole history: unscrolled, it shows just the last entry
+    if scroll > 0 {
+        children.extend(ui::grid_scrollbar(
+            palette,
+            columns,
+            0,
+            end - shown.len(),
+            shown.len(),
+            lines.len(),
+        ));
+    }
     let line = UITree::new_container_styled(
         Style::absolute([0.0, top], [size.width as f32, height]),
-        vec![
-            // the grid is whole cells; the bar spans the screen
-            ui::rect(
-                ui::raised_bg(palette),
-                [0.0, 0.0],
-                [size.width as f32, height],
-            ),
-            grid.element().into(),
-        ],
+        children,
     );
     (line, height)
 }
