@@ -575,7 +575,7 @@ fn new_lua() -> mlua::Result<Lua> {
             Ok(())
         })?,
     )?;
-    add_settings(&lua, &sonamu)?;
+    sonamu.set("config", Settings(String::new()))?;
     globals.set("sonamu", sonamu)?;
 
     add_keymap_and_events(&lua, &globals)?;
@@ -589,33 +589,8 @@ fn new_lua() -> mlua::Result<Lua> {
     Ok(lua)
 }
 
-/// `sonamu.setting`, `sonamu.set_setting` and `settings`
-fn add_settings(lua: &Lua, sonamu: &mlua::Table) -> mlua::Result<()> {
-    lua.globals().set("settings", Settings(String::new()))?;
-    sonamu.set(
-        "setting",
-        lua.create_function(|lua, path: String| {
-            setting_to_lua(lua, &setting(&path).map_err(mlua::Error::runtime)?)
-        })?,
-    )?;
-    sonamu.set(
-        "set_setting",
-        lua.create_function(|lua, (path, value): (String, LuaValue)| {
-            allow(Effect::Modify, "sonamu.set_setting")?;
-            set_setting(&path, lua.from_value(value)?).map_err(mlua::Error::runtime)
-        })?,
-    )
-}
-
-fn setting_to_lua(lua: &Lua, value: &serde_json::Value) -> mlua::Result<LuaValue> {
-    let options = mlua::serde::SerializeOptions::new()
-        .serialize_none_to_null(false)
-        .serialize_unit_to_null(false);
-    lua.to_value_with(value, options)
-}
-
-/// `settings`: the settings under a dotted path (`""`: all) as fields, eg `settings.border.width = 5` is
-/// `sonamu.set_setting('border.width', 5)`; a field holding an object is another `Settings`
+/// `sonamu.config`: the settings under a dotted path (`""`: all) as fields, eg `sonamu.config.border.width = 5`
+/// (`set_setting`); a field holding an object is another `Settings`
 struct Settings(String);
 
 impl Settings {
@@ -633,7 +608,12 @@ impl Settings {
             serde_json::Value::Object(_) => {
                 lua.create_userdata(Settings(path)).map(LuaValue::UserData)
             }
-            value => setting_to_lua(lua, &value),
+            value => lua.to_value_with(
+                &value,
+                mlua::serde::SerializeOptions::new()
+                    .serialize_none_to_null(false)
+                    .serialize_unit_to_null(false),
+            ),
         }
     }
 
@@ -663,7 +643,7 @@ impl UserData for Settings {
         methods.add_meta_method(
             MetaMethod::NewIndex,
             |lua, this, (key, value): (String, LuaValue)| {
-                allow(Effect::Modify, "settings")?;
+                allow(Effect::Modify, "sonamu.config")?;
                 set_setting(&this.path(&key), lua.from_value(value)?).map_err(mlua::Error::runtime)
             },
         );
@@ -907,7 +887,7 @@ fn add_keymap_and_events(lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
 }
 
 const HELP: &str = "\
-help(name?) / sonamu.help(name?)   this, or about name, eg help('sonamu.set_setting'), help('code_editor.save')
+help(name?) / sonamu.help(name?)   this, or about name, eg help('sonamu.traverse'), help('code_editor.save')
 sonamu.complete(text): {string}   what could follow text, with signatures (like Tab), eg
                                sonamu.complete('context.focus():') lists what the focused node can do
 context.focus(): Node          the innermost focused node
@@ -925,10 +905,9 @@ clipboard.copy(text, {primary = true}?)   Sonamu's clipboard (or primary selecti
 clipboard.paste({primary = true}?): string?
 sonamu.open(applet, {args}?)   like `sonamu-msg open`
 sonamu.reload_settings()
-sonamu.setting(path): any      a setting (yours, else the default), path dotted, eg 'border.width'
-sonamu.set_setting(path, value)   writes it to settings.json (only if valid; the default removes it); reloads
-settings                       the settings as fields, eg settings.border.width = 5 is set_setting('border.width', 5);
-                               an object is another `settings` (tostring: JSON; sonamu.setting gives a table)
+sonamu.config                  the settings (yours, else the default) as fields, eg sonamu.config.border.width = 5
+                               writes settings.json (only if valid; the default removes it) and reloads; an object
+                               is another config (tostring: JSON)
 sonamu.traverse(kind, n?)      moves focus like a `traverse` keybind: next, prev, parent, child n (from 1),
                                recent_child, last_child, sibling offset, select, enter
 sonamu.bar_layout({left}, {right})   the status bar's segments by name, each left to right; default
@@ -1016,8 +995,7 @@ declare sonamu: {
     reload_settings: () -> (),
     traverse: (kind: string, n: number?) -> (),
     complete: (text: string) -> {string},
-    setting: (path: string) -> any,
-    set_setting: (path: string, value: any) -> (),
+    config: CONFIG,
     bar_layout: (left: {string}, right: {string}) -> (),
     reset: () -> (),
     messages: () -> string,
@@ -1028,12 +1006,7 @@ declare function help(name: string?): string
 declare function require(path: string): any
 ",
     );
-    let _ = writeln!(
-        out,
-        "declare settings: {}",
-        luau_type(&settings_file::defaults())
-    );
-    out
+    out.replace("CONFIG", &luau_type(&settings_file::defaults()))
 }
 
 /// The Luau type of a default setting (`any` where it may be anything, eg `null`)
@@ -1627,8 +1600,8 @@ mod tests {
         );
         assert!(eval_all("my_var = 1").1.is_ok());
         assert_eq!(complete_all("my_v"), ["my_var"]);
-        assert_eq!(complete_all("settings.bor"), ["border"]);
-        assert_eq!(complete_all("settings.border.wi"), ["width"]);
+        assert_eq!(complete_all("sonamu.config.bor"), ["border"]);
+        assert_eq!(complete_all("sonamu.config.border.wi"), ["width"]);
         // the fake root is a command hub (its `type` answer is `"type []"`, declared below)
         command::declare(
             "type []",
@@ -1650,10 +1623,10 @@ mod tests {
             ["title(): string"]
         );
         assert_eq!(
-            eval_all("sonamu.complete('sonamu.set_s')[1]").1,
+            eval_all("sonamu.complete('sonamu.con')[1]").1,
             Ok(vec![Value::String(
-                "sonamu.set_setting(path, value)   writes it to settings.json (only if valid; the default \
-                 removes it); reloads"
+                "sonamu.config                  the settings (yours, else the default) as fields, eg \
+                 sonamu.config.border.width = 5"
                     .to_string()
             )])
         );
@@ -1787,35 +1760,25 @@ mod tests {
 
         let file = dir.join("settings.json");
         let _ = std::fs::remove_file(&file);
-        assert!(eval_all("sonamu.set_setting('border.width', 5)").1.is_ok());
+        let config = |code: &str| eval_all(&format!("local config = sonamu.config\n{code}")).1;
+        assert!(config("config.border.width = 5").is_ok());
+        assert!(config("config.palette.fg = '#ffffff'").is_ok());
         assert_eq!(
-            eval_all("sonamu.setting('border.width')").1,
-            Ok(vec![Value::Number(5.0)])
-        );
-        assert!(eval_all("settings.palette.fg = '#ffffff'").1.is_ok());
-        assert_eq!(
-            eval_all("settings.palette.fg, settings.border.width, settings.gap").1,
+            config("return config.palette.fg, config.border.width, config.gap"),
             Ok(vec![
                 Value::String("#ffffff".to_string()),
                 Value::Number(5.0),
                 Value::Number(8.0)
             ])
         );
-        assert!(eval_all("settings.palette.fg = '#dfdfdf'").1.is_ok());
+        assert!(config("config.palette.fg = '#dfdfdf'").is_ok());
         assert!(
-            eval_all("sonamu.set_setting('gap', 'wide')").1.is_err(),
+            config("config.gap = 'wide'").is_err(),
             "invalid settings aren't written"
         );
-        assert!(
-            eval_all("sonamu.set_setting('agent_url', 'http://x')")
-                .1
-                .is_ok()
-        );
-        assert!(eval_all("sonamu.set_setting('agent_url', nil)").1.is_ok());
-        assert_eq!(
-            eval_all("sonamu.setting('agent_url')").1,
-            Ok(vec![Value::Nil])
-        );
+        assert!(config("config.agent_url = 'http://x'").is_ok());
+        assert!(config("config.agent_url = nil").is_ok());
+        assert_eq!(config("return config.agent_url"), Ok(vec![Value::Nil]));
         let user: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(user, serde_json::json!({"border": {"width": 5}}));

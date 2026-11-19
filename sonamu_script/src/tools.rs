@@ -59,7 +59,7 @@ const TOOLS: &[Tool] = &[
         params: &[optional(
             "name",
             "string",
-            "a tool, Luau function or applet command, eg `sonamu.set_setting`, `code_editor.save`",
+            "a tool, Luau function or applet command, eg `sonamu.traverse`, `code_editor.save`",
         )],
         example: Some(r#"{"name": "code_editor.save"}"#),
     },
