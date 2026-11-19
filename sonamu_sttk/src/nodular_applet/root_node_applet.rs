@@ -220,17 +220,17 @@ impl RootNodeApplet {
         self.surface.damage();
     }
 
-    /// Scrolls the buffer line `lines` up (negative: down) through the whole history (`buffer_line`)
-    fn scroll_buffer(&mut self, lines: isize) {
+    /// Scrolls the buffer line `by` lines up (negative: down) through the whole history (`buffer_line`)
+    fn scroll_buffer(&mut self, by: isize) {
         let [_, _, width, height] = self.screens[self.holder.tree.active_screen()].rect;
         let (columns, _) =
             CharGrid::largest_fittable_size(DisplayContainerSize::new(width, height));
-        let max = self
-            .repl
-            .lines(columns, 0, &settings::get().palette)
-            .len()
-            .saturating_sub(BUFFER_OUTPUT_ROWS);
-        self.buffer_scroll = self.buffer_scroll.saturating_add_signed(lines).min(max);
+        let echo = self.echo.as_ref().map(|(message, _)| message);
+        let (lines, last) = buffer_lines(&self.repl, echo, columns, &settings::get().palette);
+        self.buffer_scroll = self
+            .buffer_scroll
+            .saturating_add_signed(by)
+            .min(max_buffer_scroll(lines.len(), last));
     }
 
     /// Where the treeview is drawn (`[x, y, width, height]`, frame included), and how;
@@ -1691,13 +1691,58 @@ fn content_size(settings: &Settings, [_, _, width, height]: [u32; 4]) -> Display
 /// The buffer line's bottom row
 #[derive(Clone, Copy, PartialEq)]
 enum Bar {
-    /// In buffer mode: the prompt, under the last entry's output and Tab's candidates, or the whole history
-    /// scrolled up this many lines (clamped)
+    /// In buffer mode: the prompt, under the last entry's output and Tab's candidates, scrolled up this many lines
+    /// through the whole history (clamped; `buffer_window`)
     Prompt(usize),
     /// `-- INSERT --` (setting `buffer_line: always`)
     Insert,
     /// Only the echoed message
     None,
+}
+
+/// The echoed message's lines
+fn echo_lines(
+    echo: Option<&sonamu_script::Message>,
+    columns: usize,
+    palette: &Palette,
+) -> Vec<repl::Line> {
+    echo.map(|message| {
+        let fg = if message.error { ERROR } else { palette.fg };
+        repl::text_lines(&message.text, fg, columns, palette)
+    })
+    .unwrap_or_default()
+}
+
+/// The buffer line's lines in buffer mode, the whole history then the echoed message; and how many of them from the
+/// last entry on (shown unscrolled)
+fn buffer_lines(
+    repl: &Repl,
+    echo: Option<&sonamu_script::Message>,
+    columns: usize,
+    palette: &Palette,
+) -> (Vec<repl::Line>, usize) {
+    let echo = echo_lines(echo, columns, palette);
+    let last = repl
+        .lines(columns, repl.history.len().saturating_sub(1), palette)
+        .len()
+        + echo.len();
+    let mut lines = repl.lines(columns, 0, palette);
+    lines.extend(echo);
+    (lines, last)
+}
+
+/// The most `buffer_window` scrolls up through `count` lines, the `last` of them shown unscrolled
+fn max_buffer_scroll(count: usize, last: usize) -> usize {
+    count - last.min(BUFFER_OUTPUT_ROWS)
+}
+
+/// Which of `count` lines the buffer line shows, scrolled up `scroll` lines from the `last` ones: first it grows
+/// upward to `BUFFER_OUTPUT_ROWS`, then it moves up, so it never jumps
+fn buffer_window(count: usize, last: usize, scroll: usize) -> std::ops::Range<usize> {
+    let scroll = scroll.min(max_buffer_scroll(count, last));
+    let rows = (last + scroll).min(BUFFER_OUTPUT_ROWS);
+    let end = count - scroll.saturating_sub(BUFFER_OUTPUT_ROWS - last.min(BUFFER_OUTPUT_ROWS));
+    end - rows..end
 }
 
 /// The buffer line at the bottom of a screen of `size`: `bar`, under the echoed message; and its height (px)
@@ -1709,23 +1754,18 @@ fn buffer_line(
     palette: &Palette,
 ) -> (UITree, f32) {
     let (columns, _) = CharGrid::largest_fittable_size(size);
-    let (mut lines, scroll) = match bar {
-        Bar::Prompt(0) => (
-            repl.lines(columns, repl.history.len().saturating_sub(1), palette),
-            0,
-        ),
-        Bar::Prompt(scroll) => (repl.lines(columns, 0, palette), scroll),
-        Bar::Insert | Bar::None => (Vec::new(), 0),
+    let (lines, last, scroll) = match bar {
+        Bar::Prompt(scroll) => {
+            let (lines, last) = buffer_lines(repl, echo, columns, palette);
+            (lines, last, scroll)
+        }
+        Bar::Insert | Bar::None => {
+            let lines = echo_lines(echo, columns, palette);
+            let last = lines.len();
+            (lines, last, 0)
+        }
     };
-    if let Some(message) = echo {
-        let fg = if message.error { ERROR } else { palette.fg };
-        lines.extend(repl::text_lines(&message.text, fg, columns, palette));
-    }
-    let end = lines
-        .len()
-        .saturating_sub(scroll)
-        .max(BUFFER_OUTPUT_ROWS.min(lines.len()));
-    let shown = &lines[end.saturating_sub(BUFFER_OUTPUT_ROWS)..end];
+    let shown = &lines[buffer_window(lines.len(), last, scroll)];
     let bar_rows = usize::from(bar != Bar::None);
     let mut grid = CharGrid::new_empty(columns, shown.len() + bar_rows);
     repl::draw_lines(&mut grid, 0, shown, palette.accent);
@@ -1758,7 +1798,7 @@ fn buffer_line(
             palette,
             columns,
             0,
-            end - shown.len(),
+            buffer_window(lines.len(), last, scroll).start,
             shown.len(),
             lines.len(),
         ));
@@ -2112,6 +2152,22 @@ mod tests {
 
     /// Random swipes, screen switches and focus jumps on two screens never lose a tab: no applet panics, and no
     /// tab is sized past a screen or flooded with resizes (a wl client is dropped when it can't keep up)
+    #[test]
+    fn buffer_window_grows_then_moves() {
+        // a 3-line last entry under 30 lines: it grows up to 10 rows, then moves a line a step
+        assert_eq!(buffer_window(30, 3, 0), 27..30);
+        assert_eq!(buffer_window(30, 3, 1), 26..30);
+        assert_eq!(buffer_window(30, 3, 7), 20..30);
+        assert_eq!(buffer_window(30, 3, 8), 19..29);
+        assert_eq!(buffer_window(30, 3, 99), 0..10);
+        // a long last entry already fills it
+        assert_eq!(buffer_window(30, 20, 0), 20..30);
+        assert_eq!(buffer_window(30, 20, 1), 19..29);
+        // all of it fits
+        assert_eq!(buffer_window(5, 2, 99), 0..5);
+        assert_eq!(buffer_window(0, 0, 0), 0..0);
+    }
+
     #[test]
     fn wheel_scrolls_the_buffer_line() {
         let mut event_loop = EventLoop::<RootNodeApplet>::try_new().unwrap();
