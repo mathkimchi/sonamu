@@ -589,15 +589,13 @@ fn new_lua() -> mlua::Result<Lua> {
     Ok(lua)
 }
 
-/// `sonamu.setting` and `sonamu.set_setting`
+/// `sonamu.setting`, `sonamu.set_setting` and `settings`
 fn add_settings(lua: &Lua, sonamu: &mlua::Table) -> mlua::Result<()> {
+    lua.globals().set("settings", Settings(String::new()))?;
     sonamu.set(
         "setting",
         lua.create_function(|lua, path: String| {
-            let options = mlua::serde::SerializeOptions::new()
-                .serialize_none_to_null(false)
-                .serialize_unit_to_null(false);
-            lua.to_value_with(&setting(&path).map_err(mlua::Error::runtime)?, options)
+            setting_to_lua(lua, &setting(&path).map_err(mlua::Error::runtime)?)
         })?,
     )?;
     sonamu.set(
@@ -609,13 +607,80 @@ fn add_settings(lua: &Lua, sonamu: &mlua::Table) -> mlua::Result<()> {
     )
 }
 
+fn setting_to_lua(lua: &Lua, value: &serde_json::Value) -> mlua::Result<LuaValue> {
+    let options = mlua::serde::SerializeOptions::new()
+        .serialize_none_to_null(false)
+        .serialize_unit_to_null(false);
+    lua.to_value_with(value, options)
+}
+
+/// `settings`: the settings under a dotted path (`""`: all) as fields, eg `settings.border.width = 5` is
+/// `sonamu.set_setting('border.width', 5)`; a field holding an object is another `Settings`
+struct Settings(String);
+
+impl Settings {
+    fn path(&self, key: &str) -> String {
+        if self.0.is_empty() {
+            key.to_owned()
+        } else {
+            format!("{}.{key}", self.0)
+        }
+    }
+
+    fn field(&self, lua: &Lua, key: &str) -> mlua::Result<LuaValue> {
+        let path = self.path(key);
+        match setting(&path).map_err(mlua::Error::runtime)? {
+            serde_json::Value::Object(_) => {
+                lua.create_userdata(Settings(path)).map(LuaValue::UserData)
+            }
+            value => setting_to_lua(lua, &value),
+        }
+    }
+
+    /// Its fields: the defaults' and the user's
+    fn keys(&self) -> Vec<String> {
+        let path = split_path(&self.0);
+        let mut keys = Vec::new();
+        let user = user_settings().map(|(_, user)| user).unwrap_or_default();
+        for settings in [settings_file::defaults(), user] {
+            if let serde_json::Value::Object(map) = settings_file::value_at(&settings, &path) {
+                keys.extend(
+                    map.into_iter()
+                        .map(|(key, _)| key)
+                        .filter(|key| !key.starts_with('$')),
+                );
+            }
+        }
+        keys
+    }
+}
+
+impl UserData for Settings {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(MetaMethod::Index, |lua, this, key: String| {
+            this.field(lua, &key)
+        });
+        methods.add_meta_method(
+            MetaMethod::NewIndex,
+            |lua, this, (key, value): (String, LuaValue)| {
+                allow(Effect::Modify, "settings")?;
+                set_setting(&this.path(&key), lua.from_value(value)?).map_err(mlua::Error::runtime)
+            },
+        );
+        methods.add_meta_method(MetaMethod::ToString, |_, this, ()| {
+            Ok(setting(&this.0).map_err(mlua::Error::runtime)?.to_string())
+        });
+    }
+}
+
+fn split_path(path: &str) -> Vec<&str> {
+    path.split('.').filter(|key| !key.is_empty()).collect()
+}
+
 /// The setting at the dotted `path` (eg `border.width`): the user's, else the default
 pub(crate) fn setting(path: &str) -> Result<serde_json::Value, String> {
     let (_, user) = user_settings()?;
-    Ok(settings_file::value_at(
-        &user,
-        &path.split('.').collect::<Vec<_>>(),
-    ))
+    Ok(settings_file::value_at(&user, &split_path(path)))
 }
 
 /// Writes the setting at the dotted `path` to `settings.json`, like the settings editor (if valid; the default
@@ -623,7 +688,7 @@ pub(crate) fn setting(path: &str) -> Result<serde_json::Value, String> {
 pub(crate) fn set_setting(path: &str, value: serde_json::Value) -> Result<(), String> {
     let (file, mut user) = user_settings()?;
     settings_file::migrate(&mut user);
-    settings_file::set(&mut user, &path.split('.').collect::<Vec<_>>(), value);
+    settings_file::set(&mut user, &split_path(path), value);
     settings_file::check(&user).map_err(|err| err.to_string())?;
     settings_file::write(&file, Some(&user)).map_err(|err| err.to_string())
 }
@@ -862,6 +927,8 @@ sonamu.open(applet, {args}?)   like `sonamu-msg open`
 sonamu.reload_settings()
 sonamu.setting(path): any      a setting (yours, else the default), path dotted, eg 'border.width'
 sonamu.set_setting(path, value)   writes it to settings.json (only if valid; the default removes it); reloads
+settings                       the settings as fields, eg settings.border.width = 5 is set_setting('border.width', 5);
+                               an object is another `settings` (tostring: JSON; sonamu.setting gives a table)
 sonamu.traverse(kind, n?)      moves focus like a `traverse` keybind: next, prev, parent, child n (from 1),
                                recent_child, last_child, sibling offset, select, enter
 sonamu.bar_layout({left}, {right})   the status bar's segments by name, each left to right; default
@@ -961,7 +1028,30 @@ declare function help(name: string?): string
 declare function require(path: string): any
 ",
     );
+    let _ = writeln!(
+        out,
+        "declare settings: {}",
+        luau_type(&settings_file::defaults())
+    );
     out
+}
+
+/// The Luau type of a default setting (`any` where it may be anything, eg `null`)
+fn luau_type(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Bool(_) => "boolean".to_owned(),
+        serde_json::Value::Number(_) => "number".to_owned(),
+        serde_json::Value::String(_) => "string".to_owned(),
+        serde_json::Value::Object(map) => format!(
+            "{{ {} }}",
+            map.iter()
+                .filter(|(key, _)| !key.starts_with('$'))
+                .map(|(key, value)| format!("{key}: {}", luau_type(value)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        _ => "any".to_owned(),
+    }
 }
 
 /// `HELP`, then each applet type's commands (also the agent's Luau reference)
@@ -1260,6 +1350,15 @@ fn candidates(lua: &Lua, text: &str) -> Vec<Candidate> {
                     _ => None,
                 })
             }
+            (Some(Resolved::Value(LuaValue::UserData(settings))), ".")
+                if settings.is::<Settings>() =>
+            {
+                let keys = settings
+                    .borrow::<Settings>()
+                    .map(|s| s.keys())
+                    .unwrap_or_default();
+                return finish(unsigned(keys), word);
+            }
             (Some(Resolved::Value(LuaValue::Table(table))), ".") => {
                 return finish(
                     keys(&table)
@@ -1324,6 +1423,15 @@ fn resolve(lua: &Lua, chain: &str) -> Option<Resolved> {
             (None, None, false) => Resolved::Value(lua.globals().get(name).ok()?),
             (Some(Resolved::Value(LuaValue::Table(table))), Some('.'), false) => {
                 Resolved::Value(table.get(name).ok()?)
+            }
+            (Some(Resolved::Value(LuaValue::UserData(settings))), Some('.'), false)
+                if settings.is::<Settings>() =>
+            {
+                // its fields come from the defaults too, so no need to read it
+                let path = settings.borrow::<Settings>().ok()?.path(name);
+                Resolved::Value(LuaValue::UserData(
+                    lua.create_userdata(Settings(path)).ok()?,
+                ))
             }
             (Some(Resolved::Value(LuaValue::Table(table))), Some('.'), true)
                 if READ_ONLY_CALLS.contains(&name) =>
@@ -1519,6 +1627,8 @@ mod tests {
         );
         assert!(eval_all("my_var = 1").1.is_ok());
         assert_eq!(complete_all("my_v"), ["my_var"]);
+        assert_eq!(complete_all("settings.bor"), ["border"]);
+        assert_eq!(complete_all("settings.border.wi"), ["width"]);
         // the fake root is a command hub (its `type` answer is `"type []"`, declared below)
         command::declare(
             "type []",
@@ -1682,6 +1792,16 @@ mod tests {
             eval_all("sonamu.setting('border.width')").1,
             Ok(vec![Value::Number(5.0)])
         );
+        assert!(eval_all("settings.palette.fg = '#ffffff'").1.is_ok());
+        assert_eq!(
+            eval_all("settings.palette.fg, settings.border.width, settings.gap").1,
+            Ok(vec![
+                Value::String("#ffffff".to_string()),
+                Value::Number(5.0),
+                Value::Number(8.0)
+            ])
+        );
+        assert!(eval_all("settings.palette.fg = '#dfdfdf'").1.is_ok());
         assert!(
             eval_all("sonamu.set_setting('gap', 'wide')").1.is_err(),
             "invalid settings aren't written"
