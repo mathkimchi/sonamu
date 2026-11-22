@@ -49,7 +49,7 @@ Children side by side, full or half width (`Super+F`, `ToggleHalf`, saved `Saved
 - Drawn while focus ends at a node without a main. One row per depth down the center's chain (`zoom_rows`, `Strips::whole`), all in one `Scaled` (fits 4 × 3 views × pinch scale `ZOOM_PINCH`, ¼–4×). Center = `last_focus` if below focus, else remembered child.
 - Arrows/scroll move the center, not focus; click centers then focuses; drag to a pane edge moves the node (`zoom_drop`, `move_node`); right press opens the treeview menu. Shift+C resets view.
 - `zoom_out.view: free`: scrolls move the view (`zoom_free`, bounded, momentum `zoom_glide`); pinch/Ctrl+scroll scale around the pointer. Arrows slide the center back to the middle (`center_zoom_free`), keeping the scale.
-- Animations: `ZoomAnim` (in/out spring), `zoom_pan`, `move_zoom_panes`; `zoom_animating` drives holders' redraws (paced by `DamageAck`).
+- Animations: `ZoomAnim` (in/out spring), `zoom_pan` (its lateral part, to a sibling, slides only the center's row and below, #166), `move_zoom_panes`; `zoom_animating` drives holders' redraws (paced by `DamageAck`).
 - Gotcha: a UI node with an explicit size clips its children, so the `Scaled` box covers `size` and panes sit in an equally big container.
 
 ## Treeview

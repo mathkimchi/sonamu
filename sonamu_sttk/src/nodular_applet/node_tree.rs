@@ -184,9 +184,9 @@ pub struct NodeTree {
     /// Whether focus was at a node without a main (zoomed out) at the last `update_layout`; `None` before it
     was_zoomed: Option<bool>,
     /// The zoom-out view springing to its moved center: since when, and from how far off: px (before scaling) and
-    /// rows down (rows are further apart than their views when zoomed out, by their titles); lateral (to a node
-    /// in the same row): the rows above stay
-    zoom_pan: Option<(Instant, [f32; 2], f32, bool)>,
+    /// rows down (rows are further apart than their views when zoomed out, by their titles), and px across for
+    /// the center's row and those below only (a lateral move, to a sibling: the rows above stay)
+    zoom_pan: Option<(Instant, [f32; 2], f32, f32)>,
     /// Panes sliding to where a drop or swap put them in the zoom-out view: since when, and from how far off (px,
     /// before scaling) per node and its occurrence (rows show a node more than once)
     zoom_moves: Option<(Instant, ZoomOccurrences<[f32; 2]>)>,
@@ -2483,10 +2483,10 @@ impl NodeTree {
         self.bake_zoom_anchor();
         self.zoom_glide = None;
         if Self::zoom_free_view() {
-            let (carried, carried_rows, _) = self.zoom_pan_offset();
+            let (carried, carried_rows, lateral) = self.zoom_pan_offset();
             let (free, free_rows) = std::mem::replace(&mut self.zoom_free, ([0.0; 2], 0.0));
             let offset = [0, 1].map(|axis| carried[axis] + free[axis]);
-            self.zoom_pan = Some((Instant::now(), offset, carried_rows + free_rows, false));
+            self.zoom_pan = Some((Instant::now(), offset, carried_rows + free_rows, lateral));
             self.damaged = true;
         }
     }
@@ -2503,14 +2503,16 @@ impl NodeTree {
     }
 
     /// How far off its center the zoom-out view still is while panning to it (like `zoom_pan`)
-    fn zoom_pan_offset(&self) -> ([f32; 2], f32, bool) {
-        self.zoom_pan.map_or(
-            ([0.0; 2], 0.0, false),
-            |(started, offset, rows, lateral)| {
+    fn zoom_pan_offset(&self) -> ([f32; 2], f32, f32) {
+        self.zoom_pan
+            .map_or(([0.0; 2], 0.0, 0.0), |(started, offset, rows, lateral)| {
                 let left = 1.0 - swipe::spring_progress(started).unwrap_or(1.0);
-                (offset.map(|value| value * left), rows * left, lateral)
-            },
-        )
+                (
+                    offset.map(|value| value * left),
+                    rows * left,
+                    lateral * left,
+                )
+            })
     }
 
     /// While the zoom-out view springs: how zoomed out it is, 0 (its center's view) to 1; holders redraw meanwhile
@@ -2570,12 +2572,12 @@ impl NodeTree {
         if back.iter().all(|value| value.abs() < f32::EPSILON) {
             return;
         }
-        let (carried, carried_rows, _) = self.zoom_pan_offset();
+        let (carried, carried_rows, lateral) = self.zoom_pan_offset();
         for axis in [0, 1] {
             self.zoom_free.0[axis] += back[axis];
         }
         let offset = [0, 1].map(|axis| carried[axis] - back[axis]);
-        self.zoom_pan = Some((Instant::now(), offset, carried_rows, false));
+        self.zoom_pan = Some((Instant::now(), offset, carried_rows, lateral));
         self.damaged = true;
     }
 
@@ -2775,28 +2777,27 @@ impl NodeTree {
         if let (Some(old), Some((old_parent, (before, before_row)))) = (old, before)
             && let Some((after, after_row)) = self.zoom_position(old)
         {
-            let offset = [0, 1].map(|axis| (before[axis] - after[axis]) as f32 + carried[axis]);
-            let rows = (before_row - after_row) as f32 + carried_rows;
+            let moved = [0, 1].map(|axis| (before[axis] - after[axis]) as f32);
             let siblings =
                 self.zoom_center().map(|center| self.nodes[center].parent) == Some(old_parent);
-            let lateral =
-                siblings && before_row == after_row && (carried_lateral || self.zoom_pan.is_none());
-            if !Self::zoom_free_view() {
-                self.zoom_pan = Some((Instant::now(), offset, rows, lateral));
-                return;
-            }
-            // free: it stays put, but for a lateral move's row sliding under its parent
-            let (free, free_rows) = &mut self.zoom_free;
-            let x = if lateral {
-                self.zoom_pan = Some((Instant::now(), [offset[0], 0.0], 0.0, true));
-                0.0
+            // a lateral move slides only the center's row and those below, under its parent
+            let (moved, lateral) = if siblings && before_row == after_row {
+                ([0.0, moved[1]], carried_lateral + moved[0])
             } else {
-                self.zoom_pan = None;
-                offset[0]
+                (moved, carried_lateral)
             };
-            free[0] += x;
-            free[1] += offset[1];
-            *free_rows += rows;
+            let mut offset = [0, 1].map(|axis| moved[axis] + carried[axis]);
+            let mut rows = (before_row - after_row) as f32 + carried_rows;
+            if Self::zoom_free_view() {
+                // free: it stays put, but for the lateral part
+                let (free, free_rows) = &mut self.zoom_free;
+                for axis in [0, 1] {
+                    free[axis] += offset[axis];
+                }
+                *free_rows += rows;
+                (offset, rows) = ([0.0; 2], 0.0);
+            }
+            self.zoom_pan = Some((Instant::now(), offset, rows, lateral));
         }
     }
 
@@ -3264,17 +3265,16 @@ impl NodeTree {
         };
         let dragged = self.zoom_press.map_or([0.0; 2], |press| press.scroll);
         let scroll = [0, 1].map(|axis| dragged[axis] + free[axis]);
-        let [[x, x_still], [y, _]] = [
+        let [x_above, y] = [
             [size.width as f32, width, pan[0], scroll[0]],
             [size.height as f32, height, pan[1], scroll[1]],
         ]
         .map(|[size, length, pan, scroll]| {
-            let still =
-                (size / full_scale / 2.0 - length / 2.0) * full_scale * zoomed / scale + scroll;
-            [(still + pan).round() as i32, still.round() as i32]
+            ((size / full_scale / 2.0 - length / 2.0) * full_scale * zoomed / scale + scroll + pan)
+                .round() as i32
         });
         // a lateral pan leaves the rows above the center's and the box alone
-        let x_above = if lateral { x_still } else { x };
+        let x = x_above + lateral.round() as i32;
         // moved panes are still this far off
         let moves = self.zoom_moves.as_ref().map(|(started, moves)| {
             let left = 1.0 - swipe::spring_progress(*started).unwrap_or(1.0);
@@ -3473,9 +3473,9 @@ impl NodeTree {
             }
             self.bound_zoom_free(size);
         } else if scroll.iter().any(|value| value.abs() > f32::EPSILON) {
-            let (carried, carried_rows, _) = self.zoom_pan_offset();
+            let (carried, carried_rows, lateral) = self.zoom_pan_offset();
             let offset = [0, 1].map(|axis| carried[axis] + scroll[axis]);
-            self.zoom_pan = Some((Instant::now(), offset, carried_rows, false));
+            self.zoom_pan = Some((Instant::now(), offset, carried_rows, lateral));
         }
         if self.nodes.contains_key(id) && !ui::dragged(from, position) {
             // a click
@@ -4020,4 +4020,66 @@ fn intersect(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
         (a[1] + a[3]).min(b[1] + b[3]),
     ];
     [left, top, (right - left).max(0), (bottom - top).max(0)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nodular_applet::node_holder::client_spawners;
+    use sonamu_common::sap::session::SavedApplet;
+    use std::{
+        collections::BTreeMap,
+        sync::{Arc, RwLock},
+    };
+
+    /// A node with a main (hibernating, so nothing runs)
+    fn tab(children: Vec<SavedTree>) -> SavedTree {
+        SavedTree {
+            main: Some(SavedApplet::Spawner {
+                name: "tab".to_string(),
+                args: Vec::new(),
+                inner: None,
+            }),
+            children,
+            ..SavedTree::default()
+        }
+    }
+
+    /// Where `node`'s pane is drawn in the zoom-out view now
+    fn zoom_x(tree: &NodeTree, size: DisplayContainerSize, node: NodeId) -> i32 {
+        let layout = tree.zoom_layout(size, 1.0).unwrap();
+        layout
+            .panes
+            .iter()
+            .find(|pane| pane.node == node)
+            .unwrap()
+            .rect[0]
+    }
+
+    /// Left/Right in the zoom-out view slide the center's row under its parent, which stays (#166)
+    #[test]
+    fn lateral_zoom_move_leaves_parent_still() {
+        let event_loop = calloop::EventLoop::<()>::try_new().unwrap();
+        let (spawn_client, attach_client) = client_spawners(
+            &event_loop.handle(),
+            Arc::new(RwLock::new(BTreeMap::new())),
+            |(), _, _| {},
+        );
+        let (world, _calls) = calloop::channel::channel();
+        let saved = SavedTree {
+            children: vec![tab(vec![tab(Vec::new()), tab(Vec::new())]), tab(Vec::new())],
+            ..SavedTree::default()
+        };
+        let mut tree = NodeTree::restore(saved, spawn_client, attach_client, world);
+        let size = DisplayContainerSize::new(1600, 1000);
+        tree.latest_size = Some(size);
+        tree.focus_path(&WorldTreePath::default());
+        let parent = tree.nodes[tree.root()].children[0];
+        tree.move_zoom(Traversal::Child(0));
+        tree.zoom_pan = None;
+        let before = zoom_x(&tree, size, parent);
+        tree.move_zoom(Traversal::Sibling(1));
+        assert!(tree.zoom_pan.is_some(), "the row slides");
+        assert_eq!(zoom_x(&tree, size, parent), before);
+    }
 }
