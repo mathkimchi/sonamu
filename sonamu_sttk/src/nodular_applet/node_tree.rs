@@ -181,7 +181,8 @@ pub struct NodeTree {
     zoom_rescale: Option<(Instant, f32)>,
     /// The zoom-out view growing out of, or back into, a node's view
     zoom_anim: Option<ZoomAnim>,
-    /// Whether focus was at a node without a main (zoomed out) at the last `update_layout`; `None` before it
+    /// Whether focus was at a node without a main (zoomed out) at the last `update_layout`; `None` before it and
+    /// after switching screens
     was_zoomed: Option<bool>,
     /// The zoom-out view springing to its moved center: since when, and from how far off: px (before scaling) and
     /// rows down (rows are further apart than their views when zoomed out, by their titles), and px across for
@@ -1429,6 +1430,8 @@ impl NodeTree {
         self.latest_size = size;
         self.panes = panes;
         self.pointer_grab = None;
+        // the other screen's, so it isn't taken as zooming (#167)
+        self.was_zoomed = None;
         self.view_root = Some(view_root)
             .filter(|&id| self.nodes.contains_key(id))
             .unwrap_or(self.root);
