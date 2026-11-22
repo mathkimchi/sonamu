@@ -86,10 +86,7 @@ impl SmithayState {
 
     /// Drawn in the window's px, over everything
     pub fn floating_elements(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Vec<UITree> {
-        let size = self
-            .output
-            .current_mode()
-            .map_or([0.0; 2], |mode| [mode.size.w as f32, mode.size.h as f32]);
+        let size = self.screens_extent();
         self.floating_roots()
             .enumerate()
             .map(|(index, root)| {

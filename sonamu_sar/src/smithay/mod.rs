@@ -495,15 +495,29 @@ impl SmithayState {
         }
     }
 
-    /// The single output represents the whole Sonamu window
+    /// To the far corner of the screens (px), for containers of things drawn anywhere on them
+    /// (a sized node clips its children)
+    pub(super) fn screens_extent(&self) -> [f32; 2] {
+        self.screens
+            .iter()
+            .fold([0.0; 2], |[width, height], &[x, y, w, h]| {
+                [width.max((x + w) as f32), height.max((y + h) as f32)]
+            })
+    }
+
+    /// The single output is the main screen (`screens[0]`), where it is in the window
     pub fn resize_output(&self, size: DisplayContainerSize) {
         let mode = Mode {
             size: (size.width as i32, size.height as i32).into(),
             // 60 Hz when unknown
             refresh: self.refresh_millihertz.map_or(60_000, u32::cast_signed),
         };
+        let [x, y, ..] = self.screens.first().copied().unwrap_or_default();
+        let location = Point::<f64, Physical>::from((f64::from(x), f64::from(y)))
+            .to_logical(self.scale)
+            .to_i32_round();
         self.output
-            .change_current_state(Some(mode), None, None, None);
+            .change_current_state(Some(mode), None, None, Some(location));
         self.output.set_preferred(mode);
         self.update_capture_constraints();
     }
