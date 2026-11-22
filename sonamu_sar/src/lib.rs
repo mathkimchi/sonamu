@@ -1,4 +1,5 @@
 pub mod battery;
+mod brightness;
 mod msg_socket;
 mod pluck_place;
 pub mod runner;

@@ -2,7 +2,7 @@
 
 Sonamu owns the session (apps' own restore should be off).
 
-- Form (`sap/session.rs`): `Session { tree: SavedTree, monitor_focus, treeview_pinned }`; `SavedApplet` = `Spawner { name, args, inner }` or `Wl(SavedWl { argv, cwd, app_id, title, running })`. Inner trees (projects, file manager documents) go in `inner` (`saved_with_inner`, `AppletSpawnerTrait::restore_initializer`).
+- Form (`sap/session.rs`): `Session { tree: SavedTree, monitor_focus, brightness, treeview_pinned }` (`brightness`: by monitor name, #158, `sonamu_sar/CLAUDE.md`); `SavedApplet` = `Spawner { name, args, inner }` or `Wl(SavedWl { argv, cwd, app_id, title, running })`. Inner trees (projects, file manager documents) go in `inner` (`saved_with_inner`, `AppletSpawnerTrait::restore_initializer`).
 - Publishing: every applet publishes `StandardApplet::save()` as `Treeview::saved` (`None` leaves the node out). Spawner names in each `save` must match `sonamu_sde/src/main.rs`. Saved paths are absolute.
 - Writing (`RootNodeApplet::save_session`): every 2 s if changed, and before quit; atomic. `$SONAMU_SESSION` (empty: none), else `$XDG_STATE_HOME/sonamu/session.json`. Unparsable → `.json.bad`. No session: an empty project with the help.
 - Node ids (#158): `SavedTree::id` is the node's `NodeUid`, kept on restore (`SavedTree::reserve_ids` first, so new ones don't collide); none for applet-owned inner nodes (eg file manager documents).

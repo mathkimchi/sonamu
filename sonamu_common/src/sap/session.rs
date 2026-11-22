@@ -11,6 +11,9 @@ pub struct Session {
     /// Each monitor's focus (by `ScreenArea::name`): the focused node's id, then its ancestors' (#158)
     #[serde(default)]
     pub monitor_focus: BTreeMap<String, Vec<NodeUid>>,
+    /// Each monitor's brightness, 0 to 1 (#158)
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub brightness: BTreeMap<String, f32>,
     /// Before monitors had names, each screen's; the first is used if `monitor_focus` is empty
     #[serde(default, skip_serializing)]
     pub screen_focus: Vec<Vec<NodeUid>>,

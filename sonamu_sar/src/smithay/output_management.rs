@@ -100,6 +100,11 @@ impl OutputManagementState {
         }
     }
 
+    /// Every connected monitor, as last told
+    pub(crate) fn monitors(&self) -> &[MonitorInfo] {
+        &self.monitors
+    }
+
     fn monitor(&self, connector: &str) -> Option<&MonitorInfo> {
         self.monitors
             .iter()

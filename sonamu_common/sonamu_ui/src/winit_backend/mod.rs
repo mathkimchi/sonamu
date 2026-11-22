@@ -271,6 +271,12 @@ pub type DisplayProxy = Box<dyn Fn(DisplayRequest) + Send>;
 pub enum DisplayRequest {
     /// Where monitors go (the `displays` setting, #158)
     SetLayout(Vec<(String, layout::Placement)>),
+    /// Darkens the monitor with this connector to `level` (0 to 1) when drawing, for brightness without a
+    /// backlight or DDC (#158)
+    SoftwareBrightness {
+        connector: String,
+        level: f32,
+    },
     /// The ui content changed
     Redraw,
     SetPointerGrab(PointerGrab),

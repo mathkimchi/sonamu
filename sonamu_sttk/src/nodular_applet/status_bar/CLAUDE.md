@@ -5,10 +5,10 @@ Replaces DMS (bar, notifications, tray, OSD). Code: `sonamu_sttk/src/nodular_app
 ## Architecture
 
 - Own client (`StatusBarApplet`, `ClientHandle<BarRequest>`) held by the runner beside the root, like a layer surface. Publishes `BarInput` (height, input areas, `popup`, `keys`); the runner gives the root screens minus its row and routes to it: mouse in its areas, presses while `popup`, keys while `keys`, bare Esc while `popup`.
-- Root ↔ bar via the runner: `BarState`, `ToggleTreeview`, `ActivateScreen`, `Open` (hub's Settings row), `BarCommand` (`sonamu.bar_layout`, effect-checked by the root).
+- Root ↔ bar via the runner: `BarState`, `ToggleTreeview`, `ActivateScreen`, `Open` (hub's Settings row), `BarCommand` (`sonamu.bar_layout`, effect-checked by the root). Brightness is the runner's (#158): `StandardEvent::Brightness` (slider = main screen's; OSD names the screen), slider → `BarRequest::SetBrightness`.
 - Segments: tree arrow, launcher, time | tray, bell, resources, hub. `layout` drops segments on narrow screens (`LEFT_OUT`); wide popups drawn `Scaled` (`fit`).
 - Text is monospace by column (`Lines`, `char_width()` = 0.6 em; Nerd Font icons = 2 columns). `widgets.rs`: `Button` (draws and hit-tests together), `ScrollList`.
-- Services on threads, pinging the bar: `system.rs` (sysfs battery, power-profiles D-Bus, `/proc`; processes only while open; sets power-saver once on tty; the popup's lid toggle holds a logind `handle-lid-switch` inhibitor, red moon beside the battery while held, off on start), `notifications.rs` (zbus 6 server), `tray.rs` (StatusNotifierWatcher + host, polls items every 2 s, DBusMenu), `controls.rs` (brightness sysfs, `pactl subscribe`, `nmcli`, `bluetoothctl`, `wpctl`; `command_within` timeouts), `desktop.rs`/`launcher.rs`, `icons.rs` (icon theme, resvg).
+- Services on threads, pinging the bar: `system.rs` (sysfs battery, power-profiles D-Bus, `/proc`; processes only while open; sets power-saver once on tty; the popup's lid toggle holds a logind `handle-lid-switch` inhibitor, red moon beside the battery while held, off on start), `notifications.rs` (zbus 6 server), `tray.rs` (StatusNotifierWatcher + host, polls items every 2 s, DBusMenu), `controls.rs` (`pactl subscribe`, `nmcli`, `bluetoothctl`, `wpctl`; `command_within` timeouts), `desktop.rs`/`launcher.rs`, `icons.rs` (icon theme, resvg).
 - Bus names are requested queued (`serve_queued`): with DMS running, Sonamu gets them once it leaves.
 
 ## Gotchas

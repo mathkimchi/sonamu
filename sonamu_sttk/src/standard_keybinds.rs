@@ -79,7 +79,7 @@ pub enum ArgKind {
     None,
     /// A program to run
     Program,
-    /// How many siblings to move by (eg -1)
+    /// A signed step (eg -1 sibling, -5 percent)
     Offset,
     /// `left`, `right`, `up` or `down`
     Direction,
@@ -181,6 +181,10 @@ pub const KEYBIND_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "pluck_place",
         args: ArgKind::None,
+    },
+    CommandSpec {
+        name: "brightness",
+        args: ArgKind::Offset,
     },
     CommandSpec {
         name: "view_root",

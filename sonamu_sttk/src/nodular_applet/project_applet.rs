@@ -1138,7 +1138,9 @@ impl StandardApplet for ProjectApplet {
             | StandardEvent::Command { .. }
             | StandardEvent::NodeUid(_) => {}
             // only the root gets these
-            StandardEvent::Capturing(_) | StandardEvent::Screens(_) => {}
+            StandardEvent::Capturing(_)
+            | StandardEvent::Screens(_)
+            | StandardEvent::Brightness { .. } => {}
             StandardEvent::Swipe(view) => self.holder.tree.set_swipe(view),
             StandardEvent::ScreenMouse(screen, event) => {
                 self.holder.tree.screen_mouse(screen, event);

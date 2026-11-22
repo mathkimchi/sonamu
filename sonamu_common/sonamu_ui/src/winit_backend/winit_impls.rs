@@ -71,7 +71,7 @@ impl winit::application::ApplicationHandler for UIDisplay {
             match request {
                 DisplayRequest::Redraw => window.request_redraw(),
                 // a window's screens are split by the runner
-                DisplayRequest::SetLayout(_) => {}
+                DisplayRequest::SetLayout(_) | DisplayRequest::SoftwareBrightness { .. } => {}
                 DisplayRequest::Capture => {
                     self.capture = true;
                     window.request_redraw();

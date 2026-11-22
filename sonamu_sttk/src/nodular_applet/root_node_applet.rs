@@ -94,6 +94,8 @@ pub struct RootNodeApplet {
     session_path: Option<PathBuf>,
     /// The last one written, so unchanged ones aren't written again
     saved_session: Option<Session>,
+    /// Each monitor's brightness, saved in the session (#158; set by the runner)
+    brightness: BTreeMap<String, f32>,
     /// The screen the pointer was last over, if any
     pointer_screen: Option<usize>,
     /// While a swipe acts on the screen under the pointer (#158): the screen keys stay on, made active again
@@ -492,6 +494,7 @@ impl RootNodeApplet {
         let session = Session {
             tree: self.holder.tree.save(),
             monitor_focus: self.monitor_focus.clone(),
+            brightness: self.brightness.clone(),
             screen_focus: Vec::new(),
             focus: WorldTreePath::root(),
             treeview_pinned: self.treeview_pinned,
@@ -628,6 +631,12 @@ impl RootNodeApplet {
             .as_ref()
             .map(|saved| saved.monitor_focus.clone())
             .unwrap_or_default();
+        let brightness = saved_session
+            .as_ref()
+            .map(|saved| saved.brightness.clone())
+            .unwrap_or_default();
+        // the runner sets it as monitors connect
+        let _ = request_sender.send(StandardRequest::SavedBrightness(brightness.clone()));
         let send = {
             let request_sender = request_sender.clone();
             // the runner may already be gone while shutting down
@@ -657,6 +666,7 @@ impl RootNodeApplet {
             applet_area: [0, 800],
             session_path,
             saved_session,
+            brightness,
             pointer_screen: None,
             lent_from: None,
             monitor_focus,
@@ -893,6 +903,9 @@ impl RootNodeApplet {
             StandardEvent::NodeAction(path, action) => self.holder.node_action(&path, action),
             StandardEvent::Capturing(_) => {}
             StandardEvent::Screens(rects) => self.set_screens(rects),
+            StandardEvent::Brightness { screen, level, .. } => {
+                self.brightness.insert(screen, level);
+            }
             // it has the screens itself
             StandardEvent::ScreenViews { .. } => {}
             StandardEvent::ToggleTreeview => self.toggle_treeview(),

@@ -636,7 +636,9 @@ impl NodeHolder {
                 .send_event(id, StandardEvent::SettingsChanged(settings::get())),
             // only the root sends these
             NodeRequest::Standard(
-                StandardRequest::BarState(_) | StandardRequest::BarCommand { .. },
+                StandardRequest::BarState(_)
+                | StandardRequest::BarCommand { .. }
+                | StandardRequest::SavedBrightness(_),
             ) => {}
             // the applet's path is inside its inner tree
             NodeRequest::Standard(StandardRequest::RequestPluck(path)) => {

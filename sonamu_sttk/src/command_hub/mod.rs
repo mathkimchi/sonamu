@@ -237,6 +237,7 @@ impl StandardApplet for CommandHubApplet {
             | StandardEvent::Focus(_)
             | StandardEvent::FocusChain { .. }
             | StandardEvent::ScreenMouse(..)
+            | StandardEvent::Brightness { .. }
             | StandardEvent::ToggleCollapsed(_)
             | StandardEvent::Command { .. }
             | StandardEvent::NodeUid(_) => {}

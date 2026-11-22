@@ -49,6 +49,7 @@ use smithay::{
 };
 use sonamu_sync::TrackedEncapsulatedLock;
 use std::{
+    collections::HashMap,
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
@@ -146,6 +147,8 @@ struct DrmDisplay {
     connected: Vec<Connected>,
     /// Where they go (`DisplayRequest::SetLayout`)
     layout: Vec<(String, Placement)>,
+    /// Brightness drawn darker, by connector (`DisplayRequest::SoftwareBrightness`)
+    software_brightness: HashMap<String, f32>,
     /// Draws into every output's buffers
     renderer: WgpuData,
     device: wgpu::Device,
@@ -311,6 +314,7 @@ impl DrmDisplay {
             outputs: Vec::new(),
             connected: Vec::new(),
             layout: Vec::new(),
+            software_brightness: HashMap::new(),
             renderer: WgpuData::offscreen(
                 dmabuf::WGPU_FORMAT,
                 gpu.device.clone(),
@@ -566,6 +570,13 @@ impl DrmDisplay {
                     self.arrange();
                 }
             }
+            DisplayRequest::SoftwareBrightness { connector, level } => {
+                self.software_brightness.insert(connector, level);
+                for output in &mut self.outputs {
+                    output.dirty = true;
+                }
+                self.needs_draw = true;
+            }
             DisplayRequest::Redraw => self.needs_draw = true,
             DisplayRequest::Capture => {
                 self.capture = true;
@@ -605,7 +616,29 @@ impl DrmDisplay {
         {
             return;
         }
-        let scene = self.scene_with_cursor().into_owned();
+        let mut scene = self.scene_with_cursor().into_owned();
+        // software brightness: black over the monitor, cursor and all
+        for output in &self.outputs {
+            let level = self
+                .software_brightness
+                .get(&output.monitor.connector)
+                .copied()
+                .unwrap_or(1.0);
+            if level < 1.0 {
+                let [x, y] = output.origin.map(u32::cast_signed);
+                let [width, height] = output.monitor.size.map(u32::cast_signed);
+                scene.elements.push((
+                    UIPrimitiveElement::RoundRect(RoundRect {
+                        corner_radius: 0.0,
+                        border_width: 0.0,
+                        main_color: [0.0, 0.0, 0.0, 1.0 - level.clamp(0.0, 1.0)],
+                        border_color: [0.0; 4],
+                    }),
+                    DisplayAreaPx::new(x, y, x + width, y + height),
+                    None,
+                ));
+            }
+        }
         for (index, output) in self.outputs.iter_mut().enumerate() {
             if !output.dirty || output.pending {
                 continue;

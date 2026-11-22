@@ -138,6 +138,9 @@ pub struct NewWlSurface {
 /// Client to server
 #[derive(Debug)]
 pub enum StandardRequest {
+    /// From the root at start: each monitor's brightness as saved in the session (#158), set as monitors connect
+    /// (but backlights, which the system restores)
+    SavedBrightness(std::collections::BTreeMap<String, f32>),
     /// The client published a new value of this state
     Damage(StateKind),
     Quit,
@@ -189,6 +192,8 @@ pub enum BarRequest {
     ActivateScreen(usize),
     /// Open an applet (eg the hub's Settings row): passed to the root as `StandardEvent::Open`
     Open(OpenApplet),
+    /// The hub's slider: the main screen's brightness, 0 to 1 (#158)
+    SetBrightness(f32),
 }
 impl From<StandardRequest> for BarRequest {
     fn from(request: StandardRequest) -> Self {
@@ -248,6 +253,13 @@ pub enum StandardEvent {
     Place(Option<WorldTreePath>, SpawnPosition, DetachedTree),
     /// Focus the element at this path of the client's treeview (eg it was clicked in the root's treeview)
     Focus(WorldTreePath),
+    /// A monitor's brightness (0 to 1) changed, or is the main screen's at start (#158): the root saves it; the bar's
+    /// slider shows the main screen's, and its OSD shows it if `osd`
+    Brightness {
+        screen: String,
+        level: f32,
+        osd: bool,
+    },
     /// A pointer event (not a press) on an inactive screen, for a client showing each screen a window
     /// (`Treeview::screen_windows`, eg a project); others get it as a plain `UIEvent::Mouse` (#158)
     ScreenMouse(usize, MouseEvent),

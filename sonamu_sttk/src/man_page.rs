@@ -131,6 +131,11 @@ fn describe(action: &Action) -> String {
         ("spawn_browser_sibling", _) => "spawn browser as sibling".to_owned(),
         ("swap_sibling", _) => format!("swap with the {} sibling", direction(number(0))),
         ("pluck_place", _) => "pluck/place the focused node".to_owned(),
+        ("brightness", _) => match number(0) {
+            Some(step) if step < 0 => format!("dim the screen under the pointer by {}%", -step),
+            Some(step) => format!("brighten the screen under the pointer by {step}%"),
+            None => "brightness".to_owned(),
+        },
         ("buffer_mode", _) => "buffer line: agent, !Luau, $shell (Esc leaves)".to_owned(),
         ("help", _) => "bring up this basic usage manual".to_owned(),
         ("view_root", _) => "toggle the focused node as view root".to_owned(),

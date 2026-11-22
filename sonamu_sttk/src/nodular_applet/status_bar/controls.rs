@@ -1,10 +1,8 @@
 //! The hub's controls, through their CLIs: volume and output (`wpctl`, changes followed with `pactl subscribe`),
-//! brightness (`/sys/class/backlight`, set with `brightnessctl`), wifi (`nmcli`), bluetooth (`bluetoothctl`)
+//! brightness (the runner's, #158), wifi (`nmcli`), bluetooth (`bluetoothctl`)
 
 use std::{
-    fs,
     io::{BufRead, BufReader},
-    path::PathBuf,
     process::{Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -14,8 +12,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// How often brightness is read (to show the OSD when a key changes it)
-const BRIGHTNESS_INTERVAL: Duration = Duration::from_millis(150);
 /// How often wifi, bluetooth and outputs are read while the hub is open
 const LISTS_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -58,8 +54,10 @@ pub enum Osd {
 #[derive(Debug, Clone, Default)]
 pub struct State {
     pub volume: Option<Volume>,
-    /// 0 to 1
+    /// The main screen's, 0 to 1 (`StatusBar::brightness_changed`)
     pub brightness: Option<f32>,
+    /// The last change, for the OSD: its screen and level
+    pub shown_brightness: Option<(String, f32)>,
     pub wifi_enabled: bool,
     pub networks: Vec<Network>,
     pub bluetooth_powered: bool,
@@ -85,7 +83,6 @@ impl Controls {
     pub fn start(changed: Arc<dyn Fn() + Send + Sync>) -> Self {
         let state = Arc::new(Mutex::new(State::default()));
         let want_lists = Arc::new(AtomicBool::new(false));
-        spawn_watch_brightness(Arc::clone(&state), Arc::clone(&changed));
         spawn_watch_volume(Arc::clone(&state), Arc::clone(&changed));
         {
             let (state, changed, want_lists) = (
@@ -146,12 +143,6 @@ impl Controls {
 
     pub fn toggle_mute(&self) {
         self.run(|| command("wpctl", &["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]));
-    }
-
-    pub fn set_brightness(&self, level: f32) {
-        self.state.lock().unwrap().brightness = Some(level);
-        let percent = format!("{:.0}%", level * 100.0);
-        self.run(move || command("brightnessctl", &["--quiet", "set", &percent]));
     }
 
     pub fn toggle_wifi(&self) {
@@ -232,45 +223,6 @@ fn command_within(program: &str, args: &[&str], timeout: Duration) -> Option<Str
     };
     let out = reader.join().ok()?.ok()?;
     status.success().then_some(out)
-}
-
-/// The first backlight's `[brightness, max_brightness]` files
-fn backlight() -> Option<[PathBuf; 2]> {
-    let dir = fs::read_dir("/sys/class/backlight")
-        .ok()?
-        .flatten()
-        .next()?
-        .path();
-    Some([dir.join("brightness"), dir.join("max_brightness")])
-}
-
-fn read_brightness([now, max]: &[PathBuf; 2]) -> Option<f32> {
-    let read = |path: &PathBuf| fs::read_to_string(path).ok()?.trim().parse::<u64>().ok();
-    let (now, max) = (read(now)?, read(max)?);
-    (max > 0).then(|| now as f32 / max as f32)
-}
-
-/// Polls brightness; a change shows the OSD
-fn spawn_watch_brightness(state: Arc<Mutex<State>>, changed: Arc<dyn Fn() + Send + Sync>) {
-    thread::spawn(move || {
-        let Some(paths) = backlight() else {
-            return;
-        };
-        let mut last = read_brightness(&paths);
-        state.lock().unwrap().brightness = last;
-        loop {
-            thread::sleep(BRIGHTNESS_INTERVAL);
-            let now = read_brightness(&paths);
-            if now != last {
-                last = now;
-                let mut state = state.lock().unwrap();
-                state.brightness = now;
-                state.osd = Some((Osd::Brightness, Instant::now()));
-                drop(state);
-                changed();
-            }
-        }
-    });
 }
 
 fn read_volume() -> Option<Volume> {

@@ -100,6 +100,7 @@ impl UIHandle {
                     }
                     DisplayNotification::Monitors(monitors) => {
                         runner.smithay_state.set_monitors(monitors);
+                        runner.monitors_changed();
                     }
                     DisplayNotification::Screens(screens) => {
                         runner.display_screens = Some(screens);
@@ -197,6 +198,10 @@ impl UIHandle {
 
     pub fn set_display_layout(&self, layout: Vec<(String, Placement)>) {
         (self.display_proxy)(DisplayRequest::SetLayout(layout));
+    }
+
+    pub fn set_software_brightness(&self, connector: String, level: f32) {
+        (self.display_proxy)(DisplayRequest::SoftwareBrightness { connector, level });
     }
 
     pub fn set_pointer_grab(&self, grab: PointerGrab) {

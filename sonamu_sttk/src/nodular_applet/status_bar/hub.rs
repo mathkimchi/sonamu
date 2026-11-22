@@ -385,10 +385,13 @@ pub fn osd(state: &State, palette: &Palette) -> Option<Spans> {
                 },
             )]
         }
-        Osd::Brightness => vec![(
-            format!("{BRIGHTNESS} {}", slider(state.brightness?)),
-            palette.fg,
-        )],
+        Osd::Brightness => {
+            let (screen, level) = state.shown_brightness.as_ref()?;
+            vec![(
+                format!("{BRIGHTNESS} {} {screen}", slider(*level)),
+                palette.fg,
+            )]
+        }
     })
 }
 

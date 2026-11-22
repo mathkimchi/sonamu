@@ -28,10 +28,10 @@ use sonamu_ui::{
 /// Using Singularity UI requires the user to be active,
 /// but using Applet Runner is passive.
 pub struct AppletRunner {
-    ui_handle: UIHandle,
+    pub(crate) ui_handle: UIHandle,
     pub(crate) root_client: ClientHandle,
     /// The status bar, beside the root like a layer surface (eg dms' bar): its row is kept free atop each screen
-    bar_client: ClientHandle,
+    pub(crate) bar_client: ClientHandle,
     /// Where the bar takes input, from it
     bar_input: BarInput,
     /// The pointer was in the bar's region at the last mouse event (so it gets one more, to clear its hover)
@@ -47,7 +47,9 @@ pub struct AppletRunner {
     /// The monitors' areas in the window, if the display has several
     pub(crate) display_screens: Option<Vec<ScreenArea>>,
     /// `SmithayState::screens`' names
-    screen_names: Vec<String>,
+    pub(crate) screen_names: Vec<String>,
+    /// Each monitor's (#158)
+    pub(crate) brightness: crate::brightness::Brightness,
     /// Setting `displays` as last sent to the display
     displays: Option<Vec<(String, Placement)>>,
     /// Set by damage; the redraw happens once per event loop iteration
@@ -114,6 +116,7 @@ impl AppletRunner {
             },
             display_screens: None,
             screen_names: Vec::new(),
+            brightness: crate::brightness::Brightness::default(),
             displays: None,
             needs_redraw: true,
             wallpaper: Wallpaper::new(),
@@ -438,6 +441,7 @@ impl AppletRunner {
                     .send_event(StandardEvent::ActivateScreen(index));
             }
             BarRequest::Open(open) => self.root_client.send_event(StandardEvent::Open(open)),
+            BarRequest::SetBrightness(level) => self.set_main_brightness(level),
         }
     }
 
@@ -532,6 +536,25 @@ impl AppletRunner {
         }
     }
 
+    /// A keybind to one of the runner's commands (`pluck_place`, `brightness`); whether it was one
+    fn runner_keybind(&mut self, event: &UIEvent) -> bool {
+        let UIEvent::Key { modifiers, .. } = *event else {
+            return false;
+        };
+        if sonamu_common::capturing() {
+            return false;
+        }
+        match sonamu_common::settings::keybind_command(event, modifiers) {
+            Some((command, _)) if command == "pluck_place" => self.toggle_pluck_place(),
+            Some((command, args)) if command == "brightness" => {
+                let step = args.first().and_then(serde_json::Value::as_i64);
+                self.step_brightness(step.unwrap_or_default());
+            }
+            _ => return false,
+        }
+        true
+    }
+
     pub(crate) fn handle_ui_event(&mut self, mut event: UIEvent) {
         self.track_super(&event);
         if let UIEvent::Key {
@@ -620,13 +643,7 @@ impl AppletRunner {
         if sonamu_common::capturing() && self.smithay_state.wl_target.is_some() {
             sonamu_common::end_capture();
         }
-        // global keybinds
-        if let UIEvent::Key { modifiers, .. } = event
-            && !sonamu_common::capturing()
-            && sonamu_common::settings::keybind_command(&event, modifiers)
-                .is_some_and(|(command, _)| command == "pluck_place")
-        {
-            self.toggle_pluck_place();
+        if self.runner_keybind(&event) {
             return;
         }
 
@@ -661,6 +678,7 @@ impl AppletRunner {
             // the root draws its treeview into its surface
             StandardRequest::Damage(StateKind::Treeview) => {}
             StandardRequest::Quit => self.ui_handle.quit(),
+            StandardRequest::SavedBrightness(saved) => self.saved_brightness(saved),
             StandardRequest::WlKeyboardFocus(surface_id) => self.focus_wl_keyboard(surface_id),
             StandardRequest::Plucked(plucked) => self.plucked(plucked),
             StandardRequest::Placed(given_back) => self.placed(given_back),

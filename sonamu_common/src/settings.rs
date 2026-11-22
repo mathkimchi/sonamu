@@ -481,9 +481,17 @@ pub struct Display {
     /// The main screen (layer surfaces, eg bars; capture); else the first monitor
     #[serde(default)]
     pub primary: bool,
+    /// Brightness through DDC/CI (`ddcutil`, needs `i2c-dev` and access to `/dev/i2c-*`); else drawn darker.
+    /// Laptop panels use their backlight.
+    #[serde(default)]
+    pub ddc: bool,
 }
 impl From<Display> for sonamu_ui::winit_backend::layout::Placement {
-    fn from(Display { position, primary }: Display) -> Self {
+    fn from(
+        Display {
+            position, primary, ..
+        }: Display,
+    ) -> Self {
         Self {
             position,
             primary,

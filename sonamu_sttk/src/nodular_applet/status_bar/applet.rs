@@ -31,6 +31,8 @@ pub struct StatusBarApplet {
     request_sender: Sender<BarRequest>,
     /// `[x, y, width, height]` in the window, from the runner: the bar is atop each
     screens: Vec<[u32; 4]>,
+    /// The main screen's monitor (`ScreenArea::name`)
+    main_screen: String,
     /// From the root; the active screen also follows presses on the bar
     state: packets::BarState,
     /// What the runner was last told
@@ -90,6 +92,7 @@ impl StatusBarApplet {
                     surface: StatePublisher::new(surface),
                     request_sender,
                     screens: Vec::new(),
+                    main_screen: String::new(),
                     state: packets::BarState::default(),
                     input: BarInput::default(),
                 };
@@ -110,11 +113,19 @@ impl StatusBarApplet {
                 ..
             }) => self.handle_key(key),
             StandardEvent::Screens(screens) => {
+                if let Some(main) = screens.first() {
+                    self.main_screen.clone_from(&main.name);
+                }
                 self.screens = screens.into_iter().map(|screen| screen.rect).collect();
                 self.state.active_screen = self
                     .state
                     .active_screen
                     .min(self.screens.len().saturating_sub(1));
+                self.surface.damage();
+            }
+            StandardEvent::Brightness { screen, level, osd } => {
+                let main = screen == self.main_screen;
+                self.bar.brightness_changed(screen, level, main, osd);
                 self.surface.damage();
             }
             StandardEvent::BarState(state) => {
@@ -190,6 +201,9 @@ impl StatusBarApplet {
         match response.action {
             Some(BarAction::ToggleTreeview) => {
                 let _ = self.request_sender.send(BarRequest::ToggleTreeview);
+            }
+            Some(BarAction::SetBrightness(level)) => {
+                let _ = self.request_sender.send(BarRequest::SetBrightness(level));
             }
             Some(BarAction::OpenSettings) => {
                 let _ = self.request_sender.send(BarRequest::Open(OpenApplet {

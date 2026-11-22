@@ -165,6 +165,8 @@ pub enum BarAction {
     ToggleTreeview,
     /// The hub's Settings row: open the settings editor
     OpenSettings,
+    /// The hub's slider: the main screen's brightness (#158)
+    SetBrightness(f32),
 }
 
 /// What the root tells the bar
@@ -1090,7 +1092,10 @@ impl StatusBar {
             hub::Click::ToggleMute => controls.toggle_mute(),
             hub::Click::Volume(level) => controls.set_volume(level),
             hub::Click::Output(id) => controls.set_default_sink(id),
-            hub::Click::Brightness(level) => controls.set_brightness(level),
+            hub::Click::Brightness(level) => {
+                controls.state.lock().unwrap().brightness = Some(level);
+                self.action = Some(BarAction::SetBrightness(level));
+            }
             hub::Click::Settings => {
                 self.action = Some(BarAction::OpenSettings);
                 self.set_popup(None);
@@ -1099,6 +1104,18 @@ impl StatusBar {
     }
 
     /// Sets the segments by name, `left` and `right` each left to right (`sonamu.bar_layout`)
+    /// A monitor's brightness changed (`StandardEvent::Brightness`): the slider is the main screen's (`main`)
+    pub fn brightness_changed(&self, screen: String, level: f32, main: bool, osd: bool) {
+        let mut state = self.controls.state.lock().unwrap();
+        if main {
+            state.brightness = Some(level);
+        }
+        if osd {
+            state.shown_brightness = Some((screen, level));
+            state.osd = Some((controls::Osd::Brightness, std::time::Instant::now()));
+        }
+    }
+
     pub fn set_layout(&mut self, left: &[String], right: &[String]) -> Result<(), String> {
         let named = |names: &[String]| -> Result<Vec<Segment>, String> {
             names.iter().map(|name| Segment::named(name)).collect()
