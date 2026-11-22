@@ -4082,4 +4082,33 @@ mod tests {
         assert!(tree.zoom_pan.is_some(), "the row slides");
         assert_eq!(zoom_x(&tree, size, parent), before);
     }
+
+    /// Switching from a zoomed-out screen to one showing a pane doesn't spring the zoom-out view (#167)
+    #[test]
+    fn switching_screens_doesnt_zoom() {
+        let event_loop = calloop::EventLoop::<()>::try_new().unwrap();
+        let (spawn_client, attach_client) = client_spawners(
+            &event_loop.handle(),
+            Arc::new(RwLock::new(BTreeMap::new())),
+            |(), _, _| {},
+        );
+        let (world, _calls) = calloop::channel::channel();
+        let saved = SavedTree {
+            children: vec![tab(Vec::new())],
+            ..SavedTree::default()
+        };
+        let mut tree = NodeTree::restore(saved, spawn_client, attach_client, world);
+        tree.latest_size = Some(DisplayContainerSize::new(1600, 1000));
+        tree.set_screen_count(2);
+        tree.activate_screen(0);
+        tree.focus_path(&WorldTreePath(vec![Step::Child(0)]));
+        tree.update_layout();
+        tree.activate_screen(1);
+        tree.focus_path(&WorldTreePath::default());
+        tree.update_layout();
+        tree.zoom_anim = None;
+        tree.activate_screen(0);
+        tree.update_layout();
+        assert!(tree.zoom_anim.is_none());
+    }
 }
