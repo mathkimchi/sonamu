@@ -10,6 +10,7 @@ Runner-only unless noted; the tree doesn't know about these.
 - Window geometry is the tile (#55, like niri): drawn at `-window_geometry.loc`, `Tiled*` states, clipped to geometry.
 - Event times are CLOCK_MONOTONIC ms (`now_input_time`; libinput's own for its events): Firefox's pan gestures rely on it. Touchpad scroll stop → `wl_pointer.axis_stop`.
 - IME text and relative motion are `DisplayNotification`s, not `UIEvent`s (`UIEvent` must stay `Copy`).
+- Main screen (`screens[0]`) = the wl output, anywhere in the window (#158): layer placements and the usable area are in window logical coords, offset by its origin (`arrange_layers`).
 - Fullscreen (#121, `SmithayState::fullscreen`): covers its screen (overlay layers above), gets the mouse, until it stops or focus leaves its tile (`focus_wl_keyboard`).
 - Floating (#148, `smithay/floating.rs`): toplevels with a parent or min == max size. Centered on the pointer's screen, over layers, focused like a layer surface (`layer_focus`). Super+left drag moves (`floating_drag_mouse`, `super_held`).
 - Pinch (#152, DRM): to the wl pointer focus (`AppletRunner::pinch`, `zwp_pointer_gestures_v1`); with none, to the root as `UIEvent::Pinch` (`NodeTree::zoom_pinch`). Swipes/holds aren't forwarded.

@@ -4,7 +4,7 @@ use crate::{
     nodular_applet::{
         AppletSpawner, NodeRequest, NodularAppletInitializer,
         node_holder::{NodeHolder, client_spawners},
-        node_tree::{NodeId, NodeTree},
+        node_tree::{AttachClient, NodeId, NodeTree, SpawnClient},
         project_applet::ProjectApplet,
         swipe::{Settle, Strip, Swipe},
         traversal::{self, Traversal},
@@ -40,6 +40,7 @@ use sonamu_ui::{
     display_units::DisplayContainerSize,
     ui_element::{CharGrid, Style, UIElement, UITree, font_size},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, SwipePhase, UIEvent},
+    winit_backend::ScreenArea,
 };
 use std::{
     cell::Cell,
@@ -90,8 +91,8 @@ pub struct RootNodeApplet {
     session_path: Option<PathBuf>,
     /// The last one written, so unchanged ones aren't written again
     saved_session: Option<Session>,
-    /// Each screen's focus (`NodeTree::screen_focus_uids`) as last saved, kept for screens that went away (#158)
-    screen_focus: Vec<Vec<NodeUid>>,
+    /// Each monitor's focus (`NodeTree::screen_focus_uids`) as last saved, kept for monitors that went away (#158)
+    monitor_focus: BTreeMap<String, Vec<NodeUid>>,
     /// Every screen (#60), each with its own focus (see `NodeTree::activate_screen`).
     /// The active one's view is the fields above (`latest_size`, `view_path`, `treeview_pointer`).
     screens: Vec<Screen>,
@@ -132,6 +133,8 @@ pub struct RootNodeApplet {
 /// A screen, in the root's area. While inactive it keeps its view, and shows the treeview only if pinned.
 #[derive(Default)]
 struct Screen {
+    /// Its monitor's (`ScreenArea::name`); empty until the runner tells
+    name: String,
     /// `[x, y, width, height]`
     rect: [u32; 4],
     view_path: Option<WorldTreePath>,
@@ -376,23 +379,28 @@ impl RootNodeApplet {
     }
 
     /// The screens' areas from the runner
-    fn set_screens(&mut self, rects: Vec<[u32; 4]>) {
-        if rects.is_empty() {
+    fn set_screens(&mut self, areas: Vec<ScreenArea>) {
+        if areas.is_empty() {
             return;
         }
-        // a screen going away keeps its focus for when it's back
+        // a monitor going away (or moving to another screen) keeps its focus for when it's back
         self.remember_screen_focus();
-        let (old_count, count) = (self.screens.len(), rects.len());
+        let old_names: Vec<String> = self
+            .screens
+            .iter()
+            .map(|screen| screen.name.clone())
+            .collect();
         // the active one may be gone
-        let active = self.holder.tree.active_screen().min(rects.len() - 1);
+        let active = self.holder.tree.active_screen().min(areas.len() - 1);
         self.activate_screen(active);
-        self.holder.tree.set_screen_count(rects.len());
-        if self.screens.len() != rects.len() {
-            sonamu_script::emit("screens", vec![Value::Number(rects.len() as f64)]);
+        self.holder.tree.set_screen_count(areas.len());
+        if self.screens.len() != areas.len() {
+            sonamu_script::emit("screens", vec![Value::Number(areas.len() as f64)]);
         }
-        self.screens.resize_with(rects.len(), Screen::default);
-        for (screen, rect) in self.screens.iter_mut().zip(rects) {
-            screen.rect = rect;
+        self.screens.resize_with(areas.len(), Screen::default);
+        for (screen, area) in self.screens.iter_mut().zip(areas) {
+            screen.rect = area.rect;
+            screen.name = area.name;
         }
         self.latest_size = content_size(&settings::get(), self.screens[active].rect);
         self.surface.damage();
@@ -402,23 +410,26 @@ impl RootNodeApplet {
                 self.inner_applet_size(),
             )));
         self.resize_inactive_screens();
-        // new screens (eg at startup) get their saved focus
-        for screen in old_count..count {
-            if let Some(chain) = self.screen_focus.get(screen) {
-                self.holder.tree.focus_chain(screen, chain);
+        // a screen showing another monitor (eg at startup) gets that monitor's focus
+        for (index, screen) in self.screens.iter().enumerate() {
+            if old_names.get(index) != Some(&screen.name)
+                && let Some(chain) = self.monitor_focus.get(&screen.name)
+            {
+                self.holder.tree.focus_chain(index, chain);
             }
         }
     }
 
-    /// Keeps each screen's focus in `screen_focus`
+    /// Keeps each monitor's focus in `monitor_focus`
     fn remember_screen_focus(&mut self) {
-        let tree = &self.holder.tree;
-        let count = tree.screen_count();
-        if self.screen_focus.len() < count {
-            self.screen_focus.resize(count, Vec::new());
-        }
-        for screen in 0..count {
-            self.screen_focus[screen] = tree.screen_focus_uids(screen);
+        for (index, screen) in self.screens.iter().enumerate() {
+            // not before the runner names it
+            if !screen.name.is_empty() && index < self.holder.tree.screen_count() {
+                self.monitor_focus.insert(
+                    screen.name.clone(),
+                    self.holder.tree.screen_focus_uids(index),
+                );
+            }
         }
     }
 
@@ -472,7 +483,8 @@ impl RootNodeApplet {
         self.remember_screen_focus();
         let session = Session {
             tree: self.holder.tree.save(),
-            screen_focus: self.screen_focus.clone(),
+            monitor_focus: self.monitor_focus.clone(),
+            screen_focus: Vec::new(),
             focus: WorldTreePath::root(),
             treeview_pinned: self.treeview_pinned,
         };
@@ -601,22 +613,12 @@ impl RootNodeApplet {
         );
         let saved_session = session_path.as_deref().and_then(session::load);
         let tree = match &saved_session {
-            Some(saved) => {
-                saved.tree.reserve_ids();
-                let mut tree =
-                    NodeTree::restore(saved.tree.clone(), spawn_client, attach_client, world);
-                // the other screens' once they're known (`set_screens`)
-                match saved.screen_focus.first() {
-                    Some(chain) => tree.focus_chain(0, chain),
-                    None => tree.focus_path(&saved.focus),
-                }
-                tree
-            }
+            Some(saved) => restore_tree(saved, spawn_client, attach_client, world),
             None => NodeTree::new(root_initializer, spawn_client, attach_client, world),
         };
-        let screen_focus = saved_session
+        let monitor_focus = saved_session
             .as_ref()
-            .map(|saved| saved.screen_focus.clone())
+            .map(|saved| saved.monitor_focus.clone())
             .unwrap_or_default();
         let send = {
             let request_sender = request_sender.clone();
@@ -647,7 +649,7 @@ impl RootNodeApplet {
             applet_area: [0, 800],
             session_path,
             saved_session,
-            screen_focus,
+            monitor_focus,
             screens: vec![Screen {
                 rect: [0, 0, 800, 600],
                 ..Screen::default()
@@ -1855,6 +1857,25 @@ fn buffer_line(
     (line, height)
 }
 
+/// The saved tree, with focus from before monitors had names; else each monitor's comes once they're known
+/// (`set_screens`)
+fn restore_tree(
+    saved: &Session,
+    spawn_client: SpawnClient,
+    attach_client: AttachClient,
+    world: World,
+) -> NodeTree {
+    saved.tree.reserve_ids();
+    let mut tree = NodeTree::restore(saved.tree.clone(), spawn_client, attach_client, world);
+    if saved.monitor_focus.is_empty() {
+        match saved.screen_focus.first() {
+            Some(chain) => tree.focus_chain(0, chain),
+            None => tree.focus_path(&saved.focus),
+        }
+    }
+    tree
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2073,10 +2094,23 @@ mod tests {
     }
 
     /// Two screens of different sizes, side by side
-    fn screens(rng: &mut Rng) -> Vec<[u32; 4]> {
+    fn screens(rng: &mut Rng) -> Vec<ScreenArea> {
         let mut size = || [800 + rng.below(1760) as u32, 600 + rng.below(1000) as u32];
         let [[width, height], [width2, height2]] = [size(), size()];
-        vec![[0, 0, width, height], [width, 0, width2, height2]]
+        named(&[
+            ("A", [0, 0, width, height]),
+            ("B", [width, 0, width2, height2]),
+        ])
+    }
+
+    fn named(screens: &[(&str, [u32; 4])]) -> Vec<ScreenArea> {
+        screens
+            .iter()
+            .map(|&(name, rect)| ScreenArea {
+                name: name.to_string(),
+                rect,
+            })
+            .collect()
     }
 
     /// Runs the root's loop (and its applets) for `ms`, as the runner's thread would
@@ -2358,7 +2392,8 @@ mod tests {
             // kept, so sending to them doesn't fail
             (event_loop, root, (calls, requests))
         };
-        let screens = || StandardEvent::Screens(vec![[0, 0, 800, 600], [800, 0, 1000, 700]]);
+        let (a, b) = (("A", [0_u32, 0, 800, 600]), ("B", [800_u32, 0, 1000, 700]));
+        let screens = || StandardEvent::Screens(named(&[a, b]));
         let inner =
             |steps: &[usize]| WorldTreePath(steps.iter().map(|&i| Step::Inner(i)).collect());
         let focus = |root: &RootNodeApplet| {
@@ -2407,19 +2442,34 @@ mod tests {
         else {
             panic!("the root's project isn't saved: {saved:?}");
         };
-        let Some(SavedApplet::Spawner { inner: Some(a), .. }) = &mut root_inner.children[0].main
+        let Some(SavedApplet::Spawner {
+            inner: Some(project_a),
+            ..
+        }) = &mut root_inner.children[0].main
         else {
             panic!("project a isn't saved: {saved:?}");
         };
-        a.children.pop();
+        project_a.children.pop();
         session::write(&session, &saved).unwrap();
         let (mut event_loop, mut root, _channels) = start();
         send(&mut event_loop, &mut root, screens());
         pump(&mut event_loop, &mut root, 300);
-        let _ = std::fs::remove_file(&session);
         let after = focus(&root);
         assert_eq!(after[0].0, inner(&[0]));
         assert_eq!(after[1], before[1]);
+
+        // the monitors swapped screens: focus follows them
+        let (mut event_loop, mut root, _channels) = start();
+        send(
+            &mut event_loop,
+            &mut root,
+            StandardEvent::Screens(named(&[b, a])),
+        );
+        pump(&mut event_loop, &mut root, 300);
+        let _ = std::fs::remove_file(&session);
+        let swapped = focus(&root);
+        assert_eq!(swapped[0], after[1]);
+        assert_eq!(swapped[1].0, after[0].0);
     }
 
     /// Projects' colors reach the root's treeview rows through the projects holding them (#76)

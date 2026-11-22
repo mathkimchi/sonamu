@@ -70,6 +70,8 @@ impl winit::application::ApplicationHandler for UIDisplay {
         while let Ok(request) = self.requests.try_recv() {
             match request {
                 DisplayRequest::Redraw => window.request_redraw(),
+                // a window's screens are split by the runner
+                DisplayRequest::SetLayout(_) => {}
                 DisplayRequest::Capture => {
                     self.capture = true;
                     window.request_redraw();

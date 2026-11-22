@@ -12,7 +12,8 @@ use crate::{
     },
     winit_backend::{
         CapturedFrame, DisplayInfo, DisplayNotification, DisplayProxy, DisplayRequest, Gpu,
-        PointerGrab, UIDisplay, WgpuData,
+        PointerGrab, ScreenArea, UIDisplay, WgpuData,
+        layout::{self, Monitor, Placement},
     },
 };
 use calloop::{
@@ -75,6 +76,7 @@ struct CursorImage {
 /// A monitor, showing its part of the scene
 struct DrmOutput {
     connector: connector::Handle,
+    monitor: Monitor,
     mode: Mode,
     crtc: crtc::Handle,
     /// Its scanout buffers
@@ -131,8 +133,10 @@ struct DrmDisplay {
     loop_handle: LoopHandle<'static, Self>,
 
     /// Before the devices, since the surfaces must be dropped first.
-    /// Side by side, left to right, in connector order.
+    /// The main one first, then in connector order (`layout::arrange`).
     outputs: Vec<DrmOutput>,
+    /// Where they go (`DisplayRequest::SetLayout`)
+    layout: Vec<(String, Placement)>,
     /// Draws into every output's buffers
     renderer: WgpuData,
     device: wgpu::Device,
@@ -296,6 +300,7 @@ impl DrmDisplay {
             loop_signal: event_loop.get_signal(),
             loop_handle: handle,
             outputs: Vec::new(),
+            layout: Vec::new(),
             renderer: WgpuData::offscreen(
                 dmabuf::WGPU_FORMAT,
                 gpu.device.clone(),
@@ -374,7 +379,7 @@ impl DrmDisplay {
     }
 
     /// Shows on the connected monitors (at startup, and when they may have changed, eg one was plugged in):
-    /// keeps the ones still connected at the same mode, adds the others side by side, and tells the runner.
+    /// keeps the ones still connected at the same mode, adds the others, and arranges them.
     fn update_outputs(&mut self) {
         let connected = connected_outputs(&self.drm_device).unwrap_or_else(|err| {
             log::warn!("Can't list the monitors: {err}");
@@ -409,19 +414,38 @@ impl DrmDisplay {
             };
             self.outputs.push(output);
         }
+        self.arrange();
+    }
+
+    /// Places the monitors by `layout`, the main one first, and tells the runner
+    fn arrange(&mut self) {
         if self.outputs.is_empty() {
             return;
         }
-
+        let monitors: Vec<Monitor> = self
+            .outputs
+            .iter()
+            .map(|output| output.monitor.clone())
+            .collect();
+        let names = layout::names(&monitors);
+        let mut outputs: Vec<Option<DrmOutput>> = std::mem::take(&mut self.outputs)
+            .into_iter()
+            .map(Some)
+            .collect();
         let mut size = DisplayContainerSize::new(0, 0);
         let mut screens = Vec::new();
-        for output in &mut self.outputs {
-            let (width, height) = output.mode.size();
-            let (width, height) = (u32::from(width), u32::from(height));
-            output.origin = [size.width, 0];
+        for (index, origin @ [x, y]) in layout::arrange(&monitors, &self.layout) {
+            let mut output = outputs[index].take().unwrap();
+            let [width, height] = output.monitor.size;
+            output.origin = origin;
             output.dirty = true;
-            screens.push([size.width, 0, width, height]);
-            size = DisplayContainerSize::new(size.width + width, size.height.max(height));
+            screens.push(ScreenArea {
+                name: names[index].clone(),
+                rect: [x, y, width, height],
+            });
+            size =
+                DisplayContainerSize::new(size.width.max(x + width), size.height.max(y + height));
+            self.outputs.push(output);
         }
         if size != self.size {
             self.size = size;
@@ -472,8 +496,14 @@ impl DrmDisplay {
             self.formats.iter().copied(),
         )
         .map_err(|err| err.to_string())?;
+        let edid = edid(&self.drm_device, connector).unwrap_or_default();
         Ok(DrmOutput {
             connector,
+            monitor: Monitor {
+                connector: format!("{}-{}", info.interface().as_str(), info.interface_id()),
+                description: layout::description(&edid),
+                size: [u32::from(width), u32::from(height)],
+            },
             mode,
             crtc,
             surface,
@@ -486,6 +516,12 @@ impl DrmDisplay {
 
     fn handle_request(&mut self, request: DisplayRequest) {
         match request {
+            DisplayRequest::SetLayout(layout) => {
+                if layout != self.layout {
+                    self.layout = layout;
+                    self.arrange();
+                }
+            }
             DisplayRequest::Redraw => self.needs_draw = true,
             DisplayRequest::Capture => {
                 self.capture = true;
@@ -967,6 +1003,19 @@ fn key_symbol(keysym: Keysym) -> Option<KeySymbol> {
         Keysym::Tab | Keysym::ISO_Left_Tab => KeySymbol::Char('\t'),
         _ => KeySymbol::Char(keysym.key_char()?),
     })
+}
+
+/// The connector's EDID, if it has one
+fn edid(drm: &DrmDevice, connector: connector::Handle) -> Option<Vec<u8>> {
+    let properties = drm.get_properties(connector).ok()?;
+    let (handles, values) = properties.as_props_and_values();
+    let blob = handles.iter().zip(values).find_map(|(&handle, &value)| {
+        let info = drm.get_property(handle).ok()?;
+        (info.name().to_bytes() == b"EDID").then_some(value)
+    })?;
+    (blob != 0)
+        .then(|| drm.get_property_blob(blob).ok())
+        .flatten()
 }
 
 /// The connected connectors, at their preferred modes

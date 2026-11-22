@@ -97,6 +97,8 @@ pub struct Settings {
     pub restore_programs: Vec<RestoreProgram>,
     /// Shell commands run once when Sonamu starts (eg `dms run`)
     pub startup: Vec<String>,
+    /// Where monitors go (#158), by `"Make Model Serial"` or connector (eg `DP-1`), like niri
+    pub displays: IndexMap<String, Display>,
     /// Program started by Super+T; `None`: `$TERMINAL`, else the first installed of a list
     pub terminal: Option<String>,
     /// Program started by Super+N; `None`: `$BROWSER`, else the first installed of a list
@@ -467,6 +469,23 @@ pub struct TreeviewSettings {
     pub floating: TreeviewFloating,
     /// A `Center` floating one's width and height, in percent of the window's
     pub floating_size: [u32; 2],
+}
+
+/// A monitor's place (#158)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[schemars(transform = optional_fields)]
+pub struct Display {
+    /// Its top left, px; `null`: to the right of the others (also if it overlaps one placed before)
+    #[serde(default)]
+    pub position: Option<[i32; 2]>,
+    /// The main screen (layer surfaces, eg bars; capture); else the first monitor
+    #[serde(default)]
+    pub primary: bool,
+}
+impl From<Display> for sonamu_ui::winit_backend::layout::Placement {
+    fn from(Display { position, primary }: Display) -> Self {
+        Self { position, primary }
+    }
 }
 
 /// 3 finger touchpad swipes between nodes (#141): left / right between siblings, up / down between parent and child (#144)

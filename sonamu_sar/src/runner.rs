@@ -19,6 +19,7 @@ use sonamu_ui::{
     display_units::{DisplayAreaPx, DisplayContainerSize, ToPx},
     ui_element::{PrimitiveScene, Style, UIElement, UITree},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, PinchPhase, UIEvent},
+    winit_backend::ScreenArea,
 };
 
 /// The Singularity Applet Runner (SAR) is kind of just a wrapper around the Singularity UI.
@@ -44,7 +45,9 @@ pub struct AppletRunner {
 
     window_size: DisplayContainerSize,
     /// The monitors' areas in the window, if the display has several
-    pub(crate) display_screens: Option<Vec<[u32; 4]>>,
+    pub(crate) display_screens: Option<Vec<ScreenArea>>,
+    /// `SmithayState::screens`' names
+    screen_names: Vec<String>,
     /// Set by damage; the redraw happens once per event loop iteration
     pub(crate) needs_redraw: bool,
     /// The setting `wallpaper` (`battery_wallpaper` on battery), drawn under everything
@@ -108,6 +111,7 @@ impl AppletRunner {
                 height: 100,
             },
             display_screens: None,
+            screen_names: Vec::new(),
             needs_redraw: true,
             wallpaper: Wallpaper::new(),
             on_battery: false,
@@ -200,6 +204,7 @@ impl AppletRunner {
         if let Some(msg_socket) = msg_socket {
             msg_socket.insert(&event_loop.handle());
         }
+        runner.sync_displays();
         runner.follow_wallpaper(&event_loop.handle());
         // native applets' paste and copy (`sonamu_common::clipboard`)
         let (clipboard, clipboard_requests) = calloop::channel::channel();
@@ -241,7 +246,10 @@ impl AppletRunner {
         let (settings_tx, settings_rx) = calloop::channel::channel();
         sonamu_common::settings::subscribe(settings_tx);
         handle
-            .insert_source(settings_rx, |_, (), runner| runner.sync_wallpaper())
+            .insert_source(settings_rx, |_, (), runner| {
+                runner.sync_wallpaper();
+                runner.sync_displays();
+            })
             .unwrap();
         handle
             .insert_source(calloop::timer::Timer::immediate(), |_, (), runner| {
@@ -260,6 +268,16 @@ impl AppletRunner {
                 )
             })
             .unwrap();
+    }
+
+    /// Tells the display where the monitors go (setting `displays`)
+    fn sync_displays(&self) {
+        let layout = sonamu_common::settings::get()
+            .displays
+            .iter()
+            .map(|(name, &display)| (name.clone(), display.into()))
+            .collect();
+        self.ui_handle.set_display_layout(layout);
     }
 
     /// Draws the wallpaper the settings give for now (plugged in or on battery)
@@ -321,7 +339,7 @@ impl AppletRunner {
 
     /// The monitors, else the window split into `SONAMU_SCREENS` side by side (to try several in a window)
     pub(crate) fn update_screens(&mut self) {
-        self.smithay_state.screens = self.display_screens.clone().unwrap_or_else(|| {
+        let screens = self.display_screens.clone().unwrap_or_else(|| {
             let count = std::env::var("SONAMU_SCREENS")
                 .ok()
                 .and_then(|count| count.parse().ok())
@@ -331,10 +349,15 @@ impl AppletRunner {
             (0..count)
                 .map(|index| {
                     let x = width * index / count;
-                    [x, 0, width * (index + 1) / count - x, height]
+                    ScreenArea {
+                        name: format!("window-{index}"),
+                        rect: [x, 0, width * (index + 1) / count - x, height],
+                    }
                 })
                 .collect()
         });
+        self.smithay_state.screens = screens.iter().map(|screen| screen.rect).collect();
+        self.screen_names = screens.into_iter().map(|screen| screen.name).collect();
         // the wl output is only the main screen, so layer surfaces (eg dms' bar) are only there
         let [_, _, width, height] = self.smithay_state.screens[0];
         self.smithay_state
@@ -347,18 +370,29 @@ impl AppletRunner {
     /// and the root, less the bar's row atop each
     fn send_screens(&mut self) {
         let ([left, top], size) = self.smithay_state.content_area();
-        let mut screens = self.smithay_state.screens.clone();
+        let mut screens: Vec<ScreenArea> = self
+            .smithay_state
+            .screens
+            .iter()
+            .zip(&self.screen_names)
+            .map(|(&rect, name)| ScreenArea {
+                name: name.clone(),
+                rect,
+            })
+            .collect();
         // none before the first `WindowResized`
         if screens.is_empty() {
             return;
         }
-        // the output's origin is the main screen's
-        let [x, y, ..] = screens[0];
-        screens[0] = [x + left.to_px(), y + top.to_px(), size.width, size.height];
+        screens[0].rect = [left.to_px(), top.to_px(), size.width, size.height];
         self.bar_client
             .send_event(StandardEvent::Screens(screens.clone()));
         let bar = self.bar_input.height;
-        for [_, y, _, height] in &mut screens {
+        for ScreenArea {
+            rect: [_, y, _, height],
+            ..
+        } in &mut screens
+        {
             let taken = bar.min(*height);
             *y += taken;
             *height -= taken;

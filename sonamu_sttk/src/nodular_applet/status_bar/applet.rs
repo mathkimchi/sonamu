@@ -110,7 +110,7 @@ impl StatusBarApplet {
                 ..
             }) => self.handle_key(key),
             StandardEvent::Screens(screens) => {
-                self.screens = screens;
+                self.screens = screens.into_iter().map(|screen| screen.rect).collect();
                 self.state.active_screen = self
                     .state
                     .active_screen

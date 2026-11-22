@@ -9,6 +9,7 @@ use sonamu_ui::{
     color::Color,
     display_units::DisplayContainerSize,
     ui_event::{MouseEvent, UIEvent},
+    winit_backend::ScreenArea,
 };
 
 /// A piece of client state the server reads through a `SharedState`
@@ -266,9 +267,9 @@ pub enum StandardEvent {
     Directory(Option<std::path::PathBuf>),
     /// Open an applet where focus is, like a new wl surface (eg from `sonamu-msg`)
     Open(OpenApplet),
-    /// The screens' areas (`[x, y, width, height]`) in the client's window, each showing the tree
-    /// with its own focus (#60). Only the root gets these, after each `WindowResized`.
-    Screens(Vec<[u32; 4]>),
+    /// The screens' areas in the client's window, each showing the tree with its own focus (#60),
+    /// the main one first. Only the root gets these, after each `WindowResized`.
+    Screens(Vec<ScreenArea>),
     /// The size the client is shown at on each screen (`None` where it isn't), and which screen is active (#60),
     /// when either changes. A client can show each screen its own window (`Treeview::screen_windows`).
     ScreenViews {

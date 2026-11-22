@@ -88,6 +88,7 @@
   },
   "restore_programs": [],
   "startup": [],
+  "displays": {},
   "terminal": null,
   "browser": null,
   "pdf_viewer": null

@@ -3,7 +3,7 @@ use calloop::LoopHandle;
 use sonamu_sync::TrackedEncapsulatedLock;
 use sonamu_ui::{
     DisplayNotification, DisplayProxy, DisplayRequest, Gpu, PointerGrab, UIDisplay,
-    run_drm_display, ui_element::PrimitiveScene,
+    run_drm_display, ui_element::PrimitiveScene, winit_backend::layout::Placement,
 };
 use std::{
     sync::{Arc, atomic::AtomicBool, mpsc},
@@ -190,6 +190,10 @@ impl UIHandle {
     /// The display sends back its next drawn frame (`DisplayNotification::Captured`)
     pub fn capture(&self) {
         (self.display_proxy)(DisplayRequest::Capture);
+    }
+
+    pub fn set_display_layout(&self, layout: Vec<(String, Placement)>) {
+        (self.display_proxy)(DisplayRequest::SetLayout(layout));
     }
 
     pub fn set_pointer_grab(&self, grab: PointerGrab) {

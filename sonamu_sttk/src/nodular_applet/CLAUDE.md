@@ -62,11 +62,11 @@ Children side by side, full or half width (`Super+F`, `ToggleHalf`, saved `Saved
 
 ## Screens (#60)
 
-- DRM: each monitor side by side in one scene; window: `SONAMU_SCREENS=N`. Root gets `StandardEvent::Screens`; each screen has its own focus, view root, treeview state; inactive ones live in `screens`, swapped by `activate_screen`. Last clicked screen is active; others ignore the pointer until clicked.
+- DRM: monitors placed by setting `displays` (#158, `.claude/SETTINGS.md`) in one scene, main first; window: `SONAMU_SCREENS=N` side by side, named `window-<i>`. Root gets `StandardEvent::Screens`; each screen has its own focus, view root, treeview state; inactive ones live in `screens`, swapped by `activate_screen`. Last clicked screen is active; others ignore the pointer until clicked.
 - Main (first) screen = the one wl output: layer surfaces, capture.
 - Applets get `ScreenViews { sizes, active }`; may publish `screen_windows` (one per screen). Projects mirror screens in their tree (`set_screen_count`, `at_root_on`, `Treeview::screen_focus`).
-- Each screen's focus is saved (`.claude/SESSIONS.md`), by screen index until #158 keys it by monitor.
-- Gaps: no wallpaper/bar layers on other screens; monitors always side by side at scale 1.
+- Each monitor's focus is saved (`.claude/SESSIONS.md`).
+- Gaps: no wallpaper/bar layers on other screens; scale 1 (#164); preferred modes only (#165).
 
 ## Directories (#124)
 

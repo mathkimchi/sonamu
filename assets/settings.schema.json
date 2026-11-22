@@ -107,6 +107,13 @@
         "type": "string"
       }
     },
+    "displays": {
+      "description": "Where monitors go (#158), by `\"Make Model Serial\"` or connector (eg `DP-1`), like niri",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Display"
+      }
+    },
     "terminal": {
       "description": "Program started by Super+T; `None`: `$TERMINAL`, else the first installed of a list",
       "type": [
@@ -580,6 +587,31 @@
           ]
         }
       ]
+    },
+    "Display": {
+      "description": "A monitor's place (#158)",
+      "type": "object",
+      "properties": {
+        "position": {
+          "description": "Its top left, px; `null`: to the right of the others (also if it overlaps one placed before)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": null
+        },
+        "primary": {
+          "description": "The main screen (layer surfaces, eg bars; capture); else the first monitor",
+          "type": "boolean",
+          "default": false
+        }
+      }
     }
   }
 }

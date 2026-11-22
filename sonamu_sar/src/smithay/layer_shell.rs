@@ -113,10 +113,17 @@ impl SmithayState {
         let Some(mode) = self.output.current_mode() else {
             return false;
         };
-        let full = Rectangle::from_size(self.to_logical(DisplayContainerSize::new(
-            mode.size.w.cast_unsigned(),
-            mode.size.h.cast_unsigned(),
-        )));
+        // the output is the main screen, wherever it is in the window
+        let [x, y, ..] = self.screens.first().copied().unwrap_or_default();
+        let origin =
+            Point::<f64, Physical>::from((f64::from(x), f64::from(y))).to_logical(self.scale);
+        let full = Rectangle::new(
+            origin.to_i32_round(),
+            self.to_logical(DisplayContainerSize::new(
+                mode.size.w.cast_unsigned(),
+                mode.size.h.cast_unsigned(),
+            )),
+        );
         let mut usable = full;
         let mut placements = Vec::new();
 
@@ -202,11 +209,12 @@ impl SmithayState {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Vec<UITree> {
-        // absolute, or the wrappers would take up places in the flow and push the root's content aside
-        let size = self
-            .output
-            .current_mode()
-            .map_or([0.0; 2], |mode| [mode.size.w as f32, mode.size.h as f32]);
+        // absolute, or the wrappers would take up places in the flow and push the root's content aside;
+        // to the main screen's far corner (a sized node clips its children)
+        let [x, y, ..] = self.screens.first().copied().unwrap_or_default();
+        let size = self.output.current_mode().map_or([0.0; 2], |mode| {
+            [x as f32 + mode.size.w as f32, y as f32 + mode.size.h as f32]
+        });
         // `layer_placements` is topmost first
         self.layer_placements
             .iter()

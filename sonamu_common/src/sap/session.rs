@@ -2,16 +2,19 @@
 
 use crate::{command::NodeUid, utils::tree::world_tree::WorldTreePath};
 use serde::{Deserialize, Deserializer, Serialize, de::IgnoredAny};
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 /// The whole tree, where focus was, and whether the treeview was pinned
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub tree: SavedTree,
-    /// Each screen's focus: the focused node's id, then its ancestors' (#158)
+    /// Each monitor's focus (by `ScreenArea::name`): the focused node's id, then its ancestors' (#158)
     #[serde(default)]
+    pub monitor_focus: BTreeMap<String, Vec<NodeUid>>,
+    /// Before monitors had names, each screen's; the first is used if `monitor_focus` is empty
+    #[serde(default, skip_serializing)]
     pub screen_focus: Vec<Vec<NodeUid>>,
-    /// Focus before #158, used if `screen_focus` is empty: a path of the tree; the root if it can't be read
+    /// Focus before #158, used if both are empty: a path of the tree; the root if it can't be read
     /// (eg saved before #83)
     #[serde(default, deserialize_with = "path_or_root", skip_serializing)]
     pub focus: WorldTreePath,

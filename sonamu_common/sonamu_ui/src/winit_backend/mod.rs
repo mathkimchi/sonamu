@@ -24,6 +24,7 @@ use wgpu::{
 };
 
 pub mod drm;
+pub mod layout;
 mod rendering;
 pub mod ui_event;
 mod winit_impls;
@@ -266,8 +267,10 @@ pub struct Gpu {
 pub type DisplayProxy = Box<dyn Fn(DisplayRequest) + Send>;
 
 /// Sent to the display by whoever runs it, through the proxy from `run_display`
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum DisplayRequest {
+    /// Where monitors go (the `displays` setting, #158)
+    SetLayout(Vec<(String, layout::Placement)>),
     /// The ui content changed
     Redraw,
     SetPointerGrab(PointerGrab),
@@ -301,9 +304,17 @@ pub enum DisplayNotification {
     RelativeMotion([f64; 2]),
     /// For a `DisplayRequest::Capture`; `None` if the frame couldn't be copied
     Captured(Option<CapturedFrame>),
-    /// The monitors' areas in the window (`[x, y, width, height]`, px), when there are several in one window.
+    /// The monitors' areas in the window, the main one first.
     /// Not sent when the window is one screen (eg in a window).
-    Screens(Vec<[u32; 4]>),
+    Screens(Vec<ScreenArea>),
+}
+/// A screen's area in the window
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenArea {
+    /// Its monitor's (`layout::names`), else eg `window-0`
+    pub name: String,
+    /// `[x, y, width, height]`, px
+    pub rect: [u32; 4],
 }
 /// A drawn frame, copied out of the display
 #[derive(Debug, Clone)]
