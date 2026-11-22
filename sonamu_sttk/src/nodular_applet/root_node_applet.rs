@@ -96,6 +96,9 @@ pub struct RootNodeApplet {
     saved_session: Option<Session>,
     /// The screen the pointer was last over, if any
     pointer_screen: Option<usize>,
+    /// While a swipe acts on the screen under the pointer (#158): the screen keys stay on, made active again
+    /// once the swipe (and its settle) ends
+    lent_from: Option<usize>,
     /// Each monitor's focus (`NodeTree::screen_focus_uids`) as last saved, kept for monitors that went away (#158)
     monitor_focus: BTreeMap<String, Vec<NodeUid>>,
     /// Every screen (#60), each with its own focus (see `NodeTree::activate_screen`).
@@ -655,6 +658,7 @@ impl RootNodeApplet {
             session_path,
             saved_session,
             pointer_screen: None,
+            lent_from: None,
             monitor_focus,
             screens: vec![Screen {
                 rect: [0, 0, 800, 600],
@@ -795,7 +799,10 @@ impl RootNodeApplet {
         if self.holder.tree.zoom_animating() {
             self.surface.damage();
         }
-        self.holder.update_wl_focus();
+        // the wl keyboard stays on the screen lent from
+        if self.lent_from.is_none() {
+            self.holder.update_wl_focus();
+        }
         self.flush_surface();
         self.send_bar_state();
     }
@@ -826,12 +833,7 @@ impl RootNodeApplet {
             return;
         }
         if let StandardEvent::UIEvent(UIEvent::Swipe { fingers, phase }) = event {
-            match fingers {
-                3 => self.handle_swipe(phase),
-                4 => self.handle_select_swipe(phase),
-                _ => {}
-            }
-            self.damage_if_tree_changed();
+            self.handle_fingers(fingers, phase);
             return;
         }
         // a key's modifiers are from before it, so an Alt release still has Alt
@@ -895,6 +897,7 @@ impl RootNodeApplet {
             StandardEvent::ScreenViews { .. } => {}
             StandardEvent::ToggleTreeview => self.toggle_treeview(),
             StandardEvent::ActivateScreen(index) => {
+                self.lent_from = None;
                 self.activate_screen(index);
                 self.surface.damage();
             }
@@ -979,6 +982,8 @@ impl RootNodeApplet {
                 self.inactive_screen_mouse(index, mouse_event);
                 return;
             }
+            // chosen, so it stays active after a swipe
+            self.lent_from = None;
             self.activate_screen(index);
         }
         // in the active screen's coords
@@ -1050,6 +1055,43 @@ impl RootNodeApplet {
         }
         mouse_event.position[0] -= f64::from(applet_area(treeview_area, size)[0]);
         self.holder.tree.screen_mouse(index, mouse_event);
+    }
+
+    /// Touchpad swipes, on the screen under the pointer
+    fn handle_fingers(&mut self, fingers: u32, phase: SwipePhase) {
+        if phase == SwipePhase::Begin {
+            self.lend_pointer_screen();
+        }
+        match fingers {
+            3 => self.handle_swipe(phase),
+            4 => self.handle_select_swipe(phase),
+            _ => {}
+        }
+        // a 3 finger one ends once it settles
+        if matches!(phase, SwipePhase::End { .. }) && self.settle.is_none() {
+            self.return_lent_screen();
+        }
+        self.damage_if_tree_changed();
+    }
+
+    /// A swipe starting over an inactive screen acts there: it's active until the swipe ends, keys staying where
+    /// they were (`lent_from`)
+    fn lend_pointer_screen(&mut self) {
+        let active = self.holder.tree.active_screen();
+        if let Some(screen) = self.pointer_screen
+            && screen != active
+            && self.lent_from.is_none()
+        {
+            self.lent_from = Some(active);
+            self.activate_screen(screen);
+        }
+    }
+
+    /// After a swipe on another screen, keys' screen is active again
+    fn return_lent_screen(&mut self) {
+        if let Some(screen) = self.lent_from.take() {
+            self.activate_screen(screen);
+        }
     }
 
     /// The pointer left the screen: its treeview clears its hover
@@ -1346,6 +1388,10 @@ impl RootNodeApplet {
         if arrived {
             self.settle = None;
             self.settling = false;
+            // unless the fingers are down again
+            if self.swipe.is_none() {
+                self.return_lent_screen();
+            }
             return TimeoutAction::Drop;
         }
         TimeoutAction::ToDuration(Self::SETTLE_FRAME)
@@ -2637,6 +2683,47 @@ mod tests {
         send(&mut event_loop, &mut root, mouse(press, 1500.0));
         pump(&mut event_loop, &mut root, 50);
         assert_eq!(root.holder.tree.active_screen(), 1);
+    }
+
+    /// A swipe over an inactive screen moves its focus; the other screen stays active (#158)
+    #[test]
+    fn swipe_acts_on_inactive_screen() {
+        let mut event_loop = EventLoop::<RootNodeApplet>::try_new().unwrap();
+        let (world, _calls) = calloop::channel::channel();
+        let (request_sender, _requests) = calloop::channel::channel();
+        let mut root = RootNodeApplet::new(
+            ProjectApplet::restorer(container(
+                Some("p"),
+                (0..3).map(|i| tab(&i.to_string(), Vec::new())).collect(),
+            )),
+            BTreeMap::from([("tab".to_string(), Box::new(TabSpawner) as AppletSpawner)]),
+            None,
+            SharedState::new(StateKind::Surface, UITree::leaf(UIElement::Nothing)),
+            request_sender,
+            &event_loop.handle(),
+            world,
+        );
+        let screens = named(&[("A", [0, 0, 800, 600]), ("B", [800, 0, 800, 600])]);
+        send(&mut event_loop, &mut root, StandardEvent::Screens(screens));
+        let inner = |i| WorldTreePath(vec![Step::Inner(i)]);
+        send(&mut event_loop, &mut root, StandardEvent::Focus(inner(0)));
+        send(&mut event_loop, &mut root, StandardEvent::ActivateScreen(1));
+        send(&mut event_loop, &mut root, StandardEvent::Focus(inner(1)));
+        send(&mut event_loop, &mut root, StandardEvent::ActivateScreen(0));
+        pump(&mut event_loop, &mut root, 200);
+        let motion = StandardEvent::UIEvent(UIEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Motion,
+            position: [1200.0, 300.0],
+            time_msec: None,
+        }));
+        send(&mut event_loop, &mut root, motion);
+        // fingers left by one tab (`swipe.distance_x`): the next one
+        swipe_through(&mut event_loop, &mut root, 3, [[-200.0, 0.0]; 3], false);
+        pump(&mut event_loop, &mut root, 1500);
+        let tree = &root.holder.tree;
+        assert_eq!(tree.active_screen(), 0);
+        assert_eq!(tree.screen_focus_path(0), inner(0));
+        assert_eq!(tree.screen_focus_path(1), inner(2));
     }
 
     /// Projects' colors reach the root's treeview rows through the projects holding them (#76)
