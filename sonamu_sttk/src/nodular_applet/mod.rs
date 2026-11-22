@@ -79,6 +79,11 @@ pub trait StandardApplet {
         Vec::new()
     }
 
+    /// With an inner world, the uids of focus there on each screen (`Treeview::screen_focus_uids`)
+    fn screen_focus_uids(&self) -> Vec<Vec<NodeUid>> {
+        Vec::new()
+    }
+
     /// Paths of its inner tree whose children are all shown at once (`Treeview::shown_at_once`)
     fn shown_at_once(&self) -> Vec<WorldTreePath> {
         Vec::new()
@@ -655,6 +660,7 @@ impl RawClientInitializer<NodeRequest> for AppletClient {
                         screen_windows: state.applet.screen_windows(),
                         screen_frames_itself: state.applet.screen_frames_itself(),
                         screen_focus: state.applet.screen_focus(),
+                        screen_focus_uids: state.applet.screen_focus_uids(),
                         shown_at_once: state.applet.shown_at_once(),
                         zoom_focus: state.applet.zoom_focus(),
                         colors: state.applet.treeview_colors(),

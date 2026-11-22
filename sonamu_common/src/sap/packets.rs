@@ -80,6 +80,9 @@ pub struct Treeview {
     pub screen_frames_itself: Vec<bool>,
     /// With `screen_windows`, `focus` on each screen (eg a project's per-screen focus)
     pub screen_focus: Vec<WorldTreePath>,
+    /// For each screen, the uids of the node focus is on in its inner world and that node's ancestors there
+    /// (eg a project's; `StandardEvent::FocusChain`)
+    pub screen_focus_uids: Vec<Vec<NodeUid>>,
     /// Paths of `tree` whose children are all shown at once: a swipe between them moves the
     /// focus with the fingers rather than the content (#141)
     pub shown_at_once: Vec<WorldTreePath>,
@@ -102,6 +105,7 @@ impl Treeview {
             screen_windows: false,
             screen_frames_itself: Vec::new(),
             screen_focus: Vec::new(),
+            screen_focus_uids: Vec::new(),
             shown_at_once: Vec::new(),
             zoom_focus: None,
             colors: Vec::new(),
@@ -243,6 +247,12 @@ pub enum StandardEvent {
     Place(Option<WorldTreePath>, SpawnPosition, DetachedTree),
     /// Focus the element at this path of the client's treeview (eg it was clicked in the root's treeview)
     Focus(WorldTreePath),
+    /// Focus, on the screen, the first of these nodes (a node's uid, then its ancestors') still in the client's
+    /// inner world, eg a restored session's (#158)
+    FocusChain {
+        screen: usize,
+        chain: Vec<NodeUid>,
+    },
     /// Collapse or expand the element at this path of the client's treeview (eg its `▾` was clicked in the root's treeview)
     ToggleCollapsed(WorldTreePath),
     /// Do this to the element at this path of the client's treeview (eg its close button was clicked in the root's treeview)

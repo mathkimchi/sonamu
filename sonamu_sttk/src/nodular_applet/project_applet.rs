@@ -17,7 +17,7 @@ use crate::{
     },
 };
 use sonamu_common::{
-    command::{self, CommandResult, NodeCall, Value, World},
+    command::{self, CommandResult, NodeCall, NodeUid, Value, World},
     sap::{
         detached::{DetachedClient, DetachedTree},
         packets::{
@@ -1140,6 +1140,9 @@ impl StandardApplet for ProjectApplet {
             // only the root gets these
             StandardEvent::Capturing(_) | StandardEvent::Screens(_) => {}
             StandardEvent::Swipe(view) => self.holder.tree.set_swipe(view),
+            StandardEvent::FocusChain { screen, chain } => {
+                self.holder.tree.focus_chain(screen, &chain);
+            }
         }
     }
 
@@ -1201,6 +1204,12 @@ impl StandardApplet for ProjectApplet {
         }
         (0..self.holder.tree.screen_count())
             .map(|screen| self.holder.tree.screen_focus_path(screen))
+            .collect()
+    }
+
+    fn screen_focus_uids(&self) -> Vec<Vec<NodeUid>> {
+        (0..self.holder.tree.screen_count())
+            .map(|screen| self.holder.tree.screen_focus_uids(screen))
             .collect()
     }
 

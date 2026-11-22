@@ -17,10 +17,15 @@ use std::{
 /// Identifies a node in any world; kept when the node moves to another world
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct NodeUid(u64);
+static NEXT_UID: AtomicU64 = AtomicU64::new(1);
 impl NodeUid {
     pub fn new() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(1);
-        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+        Self(NEXT_UID.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// New uids come after this one (eg a restored node's, #158)
+    pub fn reserve(self) {
+        NEXT_UID.fetch_max(self.0 + 1, Ordering::Relaxed);
     }
 }
 impl Default for NodeUid {

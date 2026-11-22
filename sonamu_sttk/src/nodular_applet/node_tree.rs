@@ -516,6 +516,7 @@ impl NodeTree {
             inactive: hibernated.is_some(),
             hibernated,
             half: saved.half,
+            uid: saved.id.unwrap_or_default(),
             ..Node::new(
                 main.map(|initializer| spawn_client(id, initializer)),
                 parent,
@@ -537,6 +538,7 @@ impl NodeTree {
         match saved.len() {
             1 => saved.pop().unwrap(),
             _ => SavedTree {
+                id: Some(self.uid(self.root)),
                 main: None,
                 children: saved,
                 ..SavedTree::default()
@@ -560,6 +562,7 @@ impl NodeTree {
             None => None,
         };
         vec![SavedTree {
+            id: Some(node.uid),
             main,
             children,
             half: node.half,
@@ -1294,6 +1297,67 @@ impl NodeTree {
         path
     }
 
+    /// The uids of the node the screen's focus is on and its ancestors, after those of focus inside its main
+    /// (eg a project's) if focus is inside it (#158)
+    pub fn screen_focus_uids(&self, screen: usize) -> Vec<NodeUid> {
+        let id = self.screen_focused_node(screen);
+        let inner = if screen == self.active_screen {
+            self.is_inner(id)
+        } else {
+            self.screens.get(screen).is_some_and(|shown| shown.focus.1)
+        };
+        let mut uids = match &self.nodes[id].main {
+            Some(main) if inner => main
+                .get_treeview()
+                .screen_focus_uids
+                .get(screen)
+                .cloned()
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let mut node = Some(id);
+        while let Some(id) = node {
+            uids.push(self.nodes[id].uid);
+            node = self.nodes[id].parent;
+        }
+        uids
+    }
+
+    /// Focuses, on the screen, the first node of `chain` (a node's uid, then its ancestors') in the tree;
+    /// its main is asked to focus the ones before it (#158)
+    pub fn focus_chain(&mut self, screen: usize, chain: &[NodeUid]) {
+        let Some((inner, id)) = chain
+            .iter()
+            .enumerate()
+            .find_map(|(index, &uid)| Some((&chain[..index], self.node_by_uid(uid)?)))
+        else {
+            return;
+        };
+        if screen >= self.screens.len() {
+            return;
+        }
+        let active = self.active_screen;
+        self.activate_screen(screen);
+        if !self.contains(self.view_root, id) {
+            self.view_root = self.root;
+        }
+        self.focus_node(id);
+        self.nodes[id].focus = FocusIndex::Here;
+        self.wake_focused();
+        if inner.is_empty() {
+            self.selected(id);
+        } else {
+            self.send_event(
+                id,
+                StandardEvent::FocusChain {
+                    screen,
+                    chain: inner.to_vec(),
+                },
+            );
+        }
+        self.activate_screen(active);
+    }
+
     /// Whether keys on the screen go into an applet, rather than to a selector
     pub fn screen_focus_inside(&self, screen: usize) -> bool {
         if screen == self.active_screen {
@@ -1558,6 +1622,8 @@ impl NodeTree {
         node.size = None;
         node.screen_views = None;
         self.send_initial_size(id);
+        // before what's sent next (eg the focus that woke it), so that goes to the right screen
+        self.send_screen_views();
         self.damaged = true;
     }
 

@@ -1,6 +1,6 @@
 //! What a session is saved as, to be restored on the next start (see `.claude/SESSIONS.md`)
 
-use crate::utils::tree::world_tree::WorldTreePath;
+use crate::{command::NodeUid, utils::tree::world_tree::WorldTreePath};
 use serde::{Deserialize, Deserializer, Serialize, de::IgnoredAny};
 use std::path::PathBuf;
 
@@ -8,8 +8,12 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub tree: SavedTree,
-    /// A path of the tree; the root if it can't be read (eg saved before #83)
-    #[serde(default, deserialize_with = "path_or_root")]
+    /// Each screen's focus: the focused node's id, then its ancestors' (#158)
+    #[serde(default)]
+    pub screen_focus: Vec<Vec<NodeUid>>,
+    /// Focus before #158, used if `screen_focus` is empty: a path of the tree; the root if it can't be read
+    /// (eg saved before #83)
+    #[serde(default, deserialize_with = "path_or_root", skip_serializing)]
     pub focus: WorldTreePath,
     /// The root's treeview is always shown, beside the panes
     #[serde(default)]
@@ -32,6 +36,9 @@ fn path_or_root<'de, D: Deserializer<'de>>(deserializer: D) -> Result<WorldTreeP
 /// A node, like a `DetachedTree` but saved
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedTree {
+    /// Kept by the restored node (`None`: saved before #158, or not a node, eg a file manager's document)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeUid>,
     /// `None` for containers (a `layout` key from before splits were removed is ignored)
     pub main: Option<SavedApplet>,
     #[serde(default)]
@@ -51,6 +58,23 @@ pub struct SavedTree {
     /// A project's color in the treeview (#76); only a project's inner root has one
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<sonamu_ui::color::Color>,
+}
+impl SavedTree {
+    /// New nodes don't take its ids, also those inside its applets (eg a hibernating project's)
+    pub fn reserve_ids(&self) {
+        if let Some(id) = self.id {
+            id.reserve();
+        }
+        if let Some(SavedApplet::Spawner {
+            inner: Some(inner), ..
+        }) = &self.main
+        {
+            inner.reserve_ids();
+        }
+        for child in &self.children {
+            child.reserve_ids();
+        }
+    }
 }
 
 /// How to make a node's main again
