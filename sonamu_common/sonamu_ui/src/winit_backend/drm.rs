@@ -467,8 +467,18 @@ impl DrmDisplay {
     ) -> Result<DrmOutput, String> {
         let connector = info.handle();
         let (width, height) = mode.size();
+        let monitor = Monitor {
+            connector: format!("{}-{}", info.interface().as_str(), info.interface_id()),
+            description: layout::description(
+                &edid(&self.drm_device, connector).unwrap_or_default(),
+            ),
+            size: [u32::from(width), u32::from(height)],
+        };
+        // its names for the `displays` setting
         log::info!(
-            "Showing on connector {connector:?} at {width}x{height}@{}mHz",
+            "Showing on {} \"{}\" at {width}x{height}@{}mHz",
+            monitor.connector,
+            monitor.description,
             refresh_millihertz(&mode)
         );
         let resources = self
@@ -496,14 +506,9 @@ impl DrmDisplay {
             self.formats.iter().copied(),
         )
         .map_err(|err| err.to_string())?;
-        let edid = edid(&self.drm_device, connector).unwrap_or_default();
         Ok(DrmOutput {
             connector,
-            monitor: Monitor {
-                connector: format!("{}-{}", info.interface().as_str(), info.interface_id()),
-                description: layout::description(&edid),
-                size: [u32::from(width), u32::from(height)],
-            },
+            monitor,
             mode,
             crtc,
             surface,
