@@ -16,7 +16,7 @@ use sonamu_common::{
 };
 use sonamu_ui::{
     PointerGrab,
-    display_units::{DisplayAreaPx, DisplayContainerSize, ToPx},
+    display_units::{DisplayAreaPx, DisplayContainerSize},
     ui_element::{PrimitiveScene, Style, UIElement, UITree},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, PinchPhase, UIEvent},
     winit_backend::{ScreenArea, layout::Placement},
@@ -376,33 +376,30 @@ impl AppletRunner {
         });
         self.smithay_state.screens = screens.iter().map(|screen| screen.rect).collect();
         self.screen_names = screens.into_iter().map(|screen| screen.name).collect();
-        // the wl output is only the main screen, so layer surfaces (eg dms' bar) are only there
-        let [_, _, width, height] = self.smithay_state.screens[0];
-        self.smithay_state
-            .resize_output(DisplayContainerSize::new(width, height));
+        self.smithay_state.sync_outputs(&self.screen_names);
         self.smithay_state.arrange_layers();
         self.smithay_state.resize_fullscreen();
     }
 
-    /// Tells the bar the screens' areas: the main one less the layer surfaces' exclusive zones (it has the wl output);
+    /// Tells the bar the screens' areas less their outputs' layer surfaces' exclusive zones;
     /// and the root, less the bar's row atop each
     fn send_screens(&mut self) {
-        let ([left, top], size) = self.smithay_state.content_area();
+        let content_areas = self.smithay_state.content_areas();
         let mut screens: Vec<ScreenArea> = self
             .smithay_state
             .screens
             .iter()
             .zip(&self.screen_names)
-            .map(|(&rect, name)| ScreenArea {
+            .enumerate()
+            .map(|(index, (&rect, name))| ScreenArea {
                 name: name.clone(),
-                rect,
+                rect: content_areas.get(index).copied().unwrap_or(rect),
             })
             .collect();
         // none before the first `WindowResized`
         if screens.is_empty() {
             return;
         }
-        screens[0].rect = [left.to_px(), top.to_px(), size.width, size.height];
         self.bar_client
             .send_event(StandardEvent::Screens(screens.clone()));
         let bar = self.bar_input.height;

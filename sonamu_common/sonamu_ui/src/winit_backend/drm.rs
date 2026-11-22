@@ -498,12 +498,13 @@ impl DrmDisplay {
                 primary: connected.info.handle() == main,
             })
             .collect();
-        let _ = self
-            .display_notification_queue
-            .send(DisplayNotification::Screens(screens));
+        // first, so the runner names the screens' wl outputs after their connectors
         let _ = self
             .display_notification_queue
             .send(DisplayNotification::Monitors(monitors));
+        let _ = self
+            .display_notification_queue
+            .send(DisplayNotification::Screens(screens));
         self.needs_draw = true;
     }
 

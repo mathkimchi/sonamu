@@ -313,7 +313,7 @@ pub enum DisplayNotification {
     /// The monitors' areas in the window, the main one first.
     /// Not sent when the window is one screen (eg in a window).
     Screens(Vec<ScreenArea>),
-    /// Every connected monitor, also those off, after each `Screens` (wlr-output-management)
+    /// Every connected monitor, also those off, before each `Screens` (wlr-output-management, wl output names)
     Monitors(Vec<layout::MonitorInfo>),
 }
 /// A screen's area in the window

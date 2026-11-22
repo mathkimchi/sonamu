@@ -7,6 +7,7 @@ use crate::runner::AppletRunner;
 use smithay::{
     backend::input::KeyState,
     desktop::{PopupKind, PopupManager, find_popup_root_surface},
+    output::Output,
     reexports::wayland_server::{
         Resource as _,
         protocol::{wl_output::WlOutput, wl_surface::WlSurface},
@@ -25,7 +26,7 @@ use smithay::{
     },
 };
 use sonamu_ui::{
-    display_units::{DisplayContainerSize, ToPx},
+    display_units::ToPx,
     ui_element::{Style, UITree},
     ui_event::{MouseEvent, MouseEventKind},
 };
@@ -35,7 +36,7 @@ use sonamu_ui::{
 pub(super) struct LayerPlacement {
     surface: LayerSurface,
     layer: Layer,
-    /// In logical units, in the output
+    /// In the window's logical units, in its output's screen
     rect: Rectangle<i32, Logical>,
     /// Its state when placed
     state: LayerSurfaceCachedState,
@@ -95,97 +96,88 @@ impl SmithayState {
         WlrLayerShellState::new::<AppletRunner>(display_handle)
     }
 
-    /// The area left for the root's content, in px of the window
-    pub fn content_area(&self) -> ([f64; 2], DisplayContainerSize) {
-        let usable = self.usable_area;
-        let to_px = |logical: i32| (f64::from(logical) * self.scale).round();
-        (
-            [to_px(usable.loc.x), to_px(usable.loc.y)],
-            DisplayContainerSize::new(to_px(usable.size.w).to_px(), to_px(usable.size.h).to_px()),
-        )
+    /// The area left for the root's content on each screen (`[x, y, width, height]`, window px), by `screens`
+    pub fn content_areas(&self) -> Vec<[u32; 4]> {
+        let to_px = |logical: i32| (f64::from(logical) * self.scale).round().to_px();
+        self.usable_areas
+            .iter()
+            .map(|usable| [usable.loc.x, usable.loc.y, usable.size.w, usable.size.h].map(to_px))
+            .collect()
     }
 
-    /// Places the layer surfaces and shrinks the usable area by their exclusive zones (like wlroots),
-    /// telling each surface its size. Returns whether the usable area changed.
+    /// Places the layer surfaces on their outputs and shrinks each screen's usable area by their exclusive zones
+    /// (like wlroots), telling each surface its size. Returns whether a usable area changed.
     ///
     /// TODO: one pass per layer, so a surface isn't shrunk by a later one in its own layer
     pub fn arrange_layers(&mut self) -> bool {
-        let Some(mode) = self.output.current_mode() else {
-            return false;
-        };
-        // the output is the main screen, wherever it is in the window
-        let [x, y, ..] = self.screens.first().copied().unwrap_or_default();
-        let origin =
-            Point::<f64, Physical>::from((f64::from(x), f64::from(y))).to_logical(self.scale);
-        let full = Rectangle::new(
-            origin.to_i32_round(),
-            self.to_logical(DisplayContainerSize::new(
-                mode.size.w.cast_unsigned(),
-                mode.size.h.cast_unsigned(),
-            )),
-        );
-        let mut usable = full;
+        let mut usable_areas = Vec::new();
+        // by screen, then topmost layer first
         let mut placements = Vec::new();
 
-        for layer in [Layer::Overlay, Layer::Top, Layer::Bottom, Layer::Background] {
-            for surface in &self.layer_surfaces {
-                let state = surface.with_cached_state(|state| *state);
-                if state.layer != layer {
-                    continue;
-                }
-                // `DontCare` surfaces ignore other zones
-                let bounds = if state.exclusive_zone == ExclusiveZone::DontCare {
-                    full
-                } else {
-                    usable
-                };
-                let anchor = state.anchor;
-                let margin = state.margin;
-                let (x, w) = place_axis(
-                    (bounds.loc.x, bounds.size.w),
-                    state.size.w,
-                    (
-                        anchor.contains(Anchor::LEFT),
-                        anchor.contains(Anchor::RIGHT),
-                    ),
-                    (margin.left, margin.right),
-                );
-                let (y, h) = place_axis(
-                    (bounds.loc.y, bounds.size.h),
-                    state.size.h,
-                    (
-                        anchor.contains(Anchor::TOP),
-                        anchor.contains(Anchor::BOTTOM),
-                    ),
-                    (margin.top, margin.bottom),
-                );
-
-                if let ExclusiveZone::Exclusive(zone) = state.exclusive_zone
-                    && let Some(edge) = exclusive_edge(&state)
-                {
-                    let zone = zone as i32;
-                    if edge == Anchor::TOP {
-                        let taken = (zone + margin.top).min(usable.size.h);
-                        usable.loc.y += taken;
-                        usable.size.h -= taken;
-                    } else if edge == Anchor::BOTTOM {
-                        usable.size.h -= (zone + margin.bottom).min(usable.size.h);
-                    } else if edge == Anchor::LEFT {
-                        let taken = (zone + margin.left).min(usable.size.w);
-                        usable.loc.x += taken;
-                        usable.size.w -= taken;
-                    } else {
-                        usable.size.w -= (zone + margin.right).min(usable.size.w);
+        for (index, &screen) in self.screens.iter().enumerate().take(self.outputs.len()) {
+            let full = self.screen_logical(screen);
+            let mut usable = full;
+            for layer in [Layer::Overlay, Layer::Top, Layer::Bottom, Layer::Background] {
+                for surface in &self.layer_surfaces {
+                    let state = surface.with_cached_state(|state| *state);
+                    if state.layer != layer || self.layer_screen(surface.wl_surface()) != index {
+                        continue;
                     }
-                }
+                    // `DontCare` surfaces ignore other zones
+                    let bounds = if state.exclusive_zone == ExclusiveZone::DontCare {
+                        full
+                    } else {
+                        usable
+                    };
+                    let anchor = state.anchor;
+                    let margin = state.margin;
+                    let (x, w) = place_axis(
+                        (bounds.loc.x, bounds.size.w),
+                        state.size.w,
+                        (
+                            anchor.contains(Anchor::LEFT),
+                            anchor.contains(Anchor::RIGHT),
+                        ),
+                        (margin.left, margin.right),
+                    );
+                    let (y, h) = place_axis(
+                        (bounds.loc.y, bounds.size.h),
+                        state.size.h,
+                        (
+                            anchor.contains(Anchor::TOP),
+                            anchor.contains(Anchor::BOTTOM),
+                        ),
+                        (margin.top, margin.bottom),
+                    );
 
-                placements.push(LayerPlacement {
-                    surface: surface.clone(),
-                    layer,
-                    rect: Rectangle::new(Point::from((x, y)), Size::from((w, h))),
-                    state,
-                });
+                    if let ExclusiveZone::Exclusive(zone) = state.exclusive_zone
+                        && let Some(edge) = exclusive_edge(&state)
+                    {
+                        let zone = zone as i32;
+                        if edge == Anchor::TOP {
+                            let taken = (zone + margin.top).min(usable.size.h);
+                            usable.loc.y += taken;
+                            usable.size.h -= taken;
+                        } else if edge == Anchor::BOTTOM {
+                            usable.size.h -= (zone + margin.bottom).min(usable.size.h);
+                        } else if edge == Anchor::LEFT {
+                            let taken = (zone + margin.left).min(usable.size.w);
+                            usable.loc.x += taken;
+                            usable.size.w -= taken;
+                        } else {
+                            usable.size.w -= (zone + margin.right).min(usable.size.w);
+                        }
+                    }
+
+                    placements.push(LayerPlacement {
+                        surface: surface.clone(),
+                        layer,
+                        rect: Rectangle::new(Point::from((x, y)), Size::from((w, h))),
+                        state,
+                    });
+                }
             }
+            usable_areas.push(usable);
         }
 
         for placement in &placements {
@@ -196,8 +188,8 @@ impl SmithayState {
         }
         self.layer_placements = placements;
 
-        let changed = self.usable_area != usable;
-        self.usable_area = usable;
+        let changed = self.usable_areas != usable_areas;
+        self.usable_areas = usable_areas;
         changed
     }
 
@@ -243,7 +235,7 @@ impl SmithayState {
         layers
     }
 
-    /// Where the layer surface (or floating toplevel) is in the output, if `root` is one that has been placed
+    /// Where the layer surface (or floating toplevel) is in the window, if `root` is one that has been placed
     pub(super) fn layer_rect(&self, root: &WlSurface) -> Option<Rectangle<i32, Logical>> {
         self.layer_placements
             .iter()
@@ -289,7 +281,10 @@ impl SmithayState {
         {
             return Some(hit);
         }
-        let in_content = self.usable_area.to_f64().contains(point);
+        let in_content = self
+            .usable_areas
+            .iter()
+            .any(|usable| usable.to_f64().contains(point));
         self.layer_placements.iter().find_map(|placement| {
             if in_content && matches!(placement.layer, Layer::Background | Layer::Bottom) {
                 return None;
@@ -331,6 +326,14 @@ impl SmithayState {
                     .clone()
                     .filter(|surface| surface.is_alive() && self.takes_keyboard(surface))
             })
+    }
+
+    /// The screen of the layer surface or floating toplevel `root`
+    pub(super) fn layer_or_floating_screen(&self, root: &WlSurface) -> [u32; 4] {
+        let index = self
+            .floating_screen(root)
+            .unwrap_or_else(|| self.layer_screen(root));
+        self.screens.get(index).copied().unwrap_or_default()
     }
 
     /// Whether a surface is a layer surface that has been placed
@@ -500,12 +503,15 @@ impl WlrLayerShellHandler for AppletRunner {
     fn new_layer_surface(
         &mut self,
         surface: LayerSurface,
-        _output: Option<WlOutput>,
+        output: Option<WlOutput>,
         _layer: Layer,
         _namespace: String,
     ) {
-        // there is only one output
-        self.smithay_state.output.enter(surface.wl_surface());
+        self.smithay_state.set_layer_output(
+            surface.wl_surface(),
+            output.as_ref().and_then(Output::from_resource),
+            self.pointer_position,
+        );
     }
 
     fn new_popup(&mut self, _parent: LayerSurface, popup: PopupSurface) {

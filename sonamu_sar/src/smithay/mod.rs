@@ -3,6 +3,7 @@ pub(crate) mod dmabuf;
 mod floating;
 mod layer_shell;
 mod output_management;
+mod outputs;
 
 use crate::runner::AppletRunner;
 use calloop::{LoopHandle, PostAction};
@@ -34,7 +35,7 @@ use smithay::{
         },
         tablet::TabletSeatHandler,
     },
-    output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
+    output::Output,
     reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind as PresentationFeedbackKind,
     reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
@@ -187,7 +188,8 @@ pub struct SmithayState {
     refresh_millihertz: Option<u32>,
 
     seat: Seat<AppletRunner>,
-    output: Output,
+    /// One per screen, in `screens`' order (`outputs.rs`)
+    outputs: Vec<Output>,
     /// What wl clients set `WAYLAND_DISPLAY` to, to connect here
     pub(crate) socket_name: std::ffi::OsString,
 
@@ -200,8 +202,8 @@ pub struct SmithayState {
     layer_surfaces: Vec<LayerSurface>,
     /// From the last `arrange_layers`, topmost layer first
     layer_placements: Vec<layer_shell::LayerPlacement>,
-    /// Output minus the exclusive zones, in logical units: where the root's content goes
-    usable_area: Rectangle<i32, Logical>,
+    /// Each screen minus its output's exclusive zones, in logical units, by `screens`: where the root's content goes
+    usable_areas: Vec<Rectangle<i32, Logical>>,
     /// The layer surface (not an exclusive one) or floating toplevel that a click gave the keyboard
     layer_focus: Option<WlSurface>,
     /// Floating toplevels, topmost last
@@ -248,6 +250,14 @@ impl SmithayState {
 
     /// The screen the tile is on: the one with its center (else the first)
     fn screen_of_tile(&self, surface_id: WlSurfaceId) -> [u32; 4] {
+        self.screens
+            .get(self.screen_index_of_tile(surface_id))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// The index of `screen_of_tile`
+    fn screen_index_of_tile(&self, surface_id: WlSurfaceId) -> usize {
         let center = self.tile_areas.get(&surface_id).map(
             |DisplayAreaPx([[left, top], [right, bottom]])| {
                 [(left + right) / 2, (top + bottom) / 2]
@@ -255,14 +265,12 @@ impl SmithayState {
         );
         self.screens
             .iter()
-            .copied()
-            .find(|&[x, y, width, height]| {
+            .position(|&[x, y, width, height]| {
                 center.is_some_and(|[center_x, center_y]| {
                     let [x, y, right, bottom] = [x, y, x + width, y + height].map(u32::cast_signed);
                     (x..right).contains(&center_x) && (y..bottom).contains(&center_y)
                 })
             })
-            .or_else(|| self.screens.first().copied())
             .unwrap_or_default()
     }
 
@@ -378,6 +386,13 @@ impl SmithayState {
         self.tile_areas.clear();
         self.tile_areas.extend(tile_areas);
 
+        // a tile is on its screen's output (a hidden one stays where it was)
+        for &surface_id in self.tile_areas.keys() {
+            if let Some(surface) = self.surfaces.get(surface_id) {
+                self.enter_screen(surface, self.screen_index_of_tile(surface_id));
+            }
+        }
+
         // hidden toplevels may stop rendering (eg videos in an inactive node, #136)
         for toplevel in self.xdg_shell_state.toplevel_surfaces() {
             let Some(surface_id) = self
@@ -437,16 +452,11 @@ impl SmithayState {
                 .and_then(|toplevel| toplevel.with_pending_state(|state| state.size))
                 .map(Rectangle::from_size)
         };
-        // for a layer surface's popup, relative to the layer surface
-        let output_in_layer =
-            self.layer_rect(&root)
-                .zip(self.output.current_mode())
-                .map(|(rect, mode)| {
-                    Rectangle::new(
-                        Point::default() - rect.loc,
-                        mode.size.to_f64().to_logical(self.scale).to_i32_round(),
-                    )
-                });
+        // for a layer surface's (or floating toplevel's) popup, its screen relative to it
+        let output_in_layer = self.layer_rect(&root).map(|rect| {
+            let screen = self.screen_logical(self.layer_or_floating_screen(&root));
+            Rectangle::new(screen.loc - rect.loc, screen.size)
+        });
         let Some(mut target) = output_in_tile.or(output_in_layer).or_else(tile) else {
             return;
         };
@@ -467,7 +477,8 @@ impl SmithayState {
         self.presented_frames += 1;
         let presentation = Presentation {
             frame_time: self.start_time.elapsed().as_millis() as u32,
-            output: &self.output,
+            // the main one: the protocol's sync output
+            output: self.outputs.first(),
             time: self.clock.now(),
             refresh: self.refresh_millihertz.map_or(Refresh::Unknown, |refresh| {
                 Refresh::fixed(Duration::from_nanos(1_000_000_000_000 / u64::from(refresh)))
@@ -517,37 +528,13 @@ impl SmithayState {
             .set_monitors(monitors, &self.display_handle);
     }
 
-    /// The single output is the main screen (`screens[0]`), where it is in the window
-    pub fn resize_output(&self, size: DisplayContainerSize) {
-        let mode = Mode {
-            size: (size.width as i32, size.height as i32).into(),
-            // 60 Hz when unknown
-            refresh: self.refresh_millihertz.map_or(60_000, u32::cast_signed),
-        };
-        let [x, y, ..] = self.screens.first().copied().unwrap_or_default();
-        let location = Point::<f64, Physical>::from((f64::from(x), f64::from(y)))
-            .to_logical(self.scale)
-            .to_i32_round();
-        self.output
-            .change_current_state(Some(mode), None, None, Some(location));
-        self.output.set_preferred(mode);
-        self.update_capture_constraints();
-    }
-
     /// Updates the output, and every surface's preferred scale and toplevel's size
     pub fn set_display_info(&mut self, info: DisplayInfo) {
         let old_scale = self.scale;
         self.scale = info.scale_factor;
         self.refresh_millihertz = info.refresh_millihertz;
 
-        if let Some(mode) = self.output.current_mode() {
-            self.resize_output(DisplayContainerSize::new(
-                mode.size.w.cast_unsigned(),
-                mode.size.h.cast_unsigned(),
-            ));
-        }
-        self.output
-            .change_current_state(None, None, Some(Scale::Fractional(self.scale)), None);
+        self.place_outputs();
 
         #[expect(clippy::float_cmp, reason = "any change in scale")]
         if old_scale != self.scale {
@@ -752,23 +739,6 @@ impl SmithayState {
         seat
     }
 
-    /// The one wl output; the real scale is set by `set_display_info`
-    fn new_output(display_handle: &DisplayHandle) -> Output {
-        let output = Output::new(
-            String::from("sonamu"),
-            PhysicalProperties {
-                size: (0, 0).into(),
-                subpixel: Subpixel::Unknown,
-                make: String::from("Sonamu"),
-                model: String::from("Sonamu"),
-                serial_number: String::from("Unknown"),
-            },
-        );
-        output.change_current_state(None, None, Some(Scale::Integer(1)), Some((0, 0).into()));
-        output.create_global::<AppletRunner>(display_handle);
-        output
-    }
-
     /// Clipboard tools (wl-copy) use these, else they open a window to get focus (#113)
     fn new_data_control(
         display_handle: &DisplayHandle,
@@ -807,7 +777,6 @@ impl SmithayState {
 
         let output_manager_state =
             OutputManagerState::new_with_xdg_output::<AppletRunner>(&display_handle);
-        let output = Self::new_output(&display_handle);
 
         let data_device_state = DataDeviceState::new::<AppletRunner>(&display_handle);
         let primary_selection_state = PrimarySelectionState::new::<AppletRunner>(&display_handle);
@@ -880,7 +849,7 @@ impl SmithayState {
             scale: 1.0,
             refresh_millihertz: None,
             seat,
-            output,
+            outputs: Vec::new(),
             socket_name,
             surfaces: SlotMap::with_key(),
             wl_event_queues: SecondaryMap::new(),
@@ -889,7 +858,7 @@ impl SmithayState {
             floating: Vec::new(),
             floating_drag: None,
             layer_placements: Vec::new(),
-            usable_area: Rectangle::default(),
+            usable_areas: Vec::new(),
             layer_focus: None,
             wl_target: None,
             screens: Vec::new(),
@@ -1483,7 +1452,7 @@ fn read_cursor_surface(surface: &WlSurface, scale: f64) -> Option<Cursor> {
 struct Presentation<'a> {
     /// For frame callbacks
     frame_time: u32,
-    output: &'a Output,
+    output: Option<&'a Output>,
     time: Time<Monotonic>,
     refresh: Refresh,
     /// The presented frame count
@@ -1517,9 +1486,12 @@ fn send_frames_surface_tree(surface: &WlSurface, presentation: &Presentation) {
                 .callbacks
                 .drain(..)
             {
+                let Some(output) = presentation.output else {
+                    continue;
+                };
                 // the time isn't from the hardware, so no flags
                 feedback.presented(
-                    presentation.output,
+                    output,
                     presentation.time,
                     presentation.refresh,
                     presentation.seq,
@@ -1843,7 +1815,8 @@ impl XdgShellHandler for AppletRunner {
                 .set(xdg_toplevel::WmCapabilities::Fullscreen);
         });
         surface.send_configure();
-        self.smithay_state.output.enter(surface.wl_surface());
+        // until its tile is laid out (`set_tile_areas`)
+        self.smithay_state.enter_screen(surface.wl_surface(), 0);
 
         // keyboard focus is given once Sonamu focus reaches the new tile (`StandardRequest::WlKeyboardFocus`)
 
@@ -1878,7 +1851,7 @@ impl XdgShellHandler for AppletRunner {
     }
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {
-        // there is only one output
+        // it covers its tile's screen
         self.set_fullscreen(&surface);
     }
 

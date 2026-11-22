@@ -1,4 +1,4 @@
-//! Screen capture (ext-image-copy-capture) of the one output, ie the whole Sonamu window.
+//! Screen capture (ext-image-copy-capture) of an output: its screen's part of the drawn window.
 //! Portals (xdg-desktop-portal-wlr) use this too, eg for OBS and browsers.
 
 use super::SmithayState;
@@ -27,8 +27,8 @@ pub(super) struct CaptureState {
     output_source_state: OutputCaptureSourceState,
     copy_state: ImageCopyCaptureState,
     sessions: Vec<Session>,
-    /// Waiting for the next draw
-    frames: Vec<Frame>,
+    /// Waiting for the next draw, with their output
+    frames: Vec<(Frame, WeakOutput)>,
 }
 impl CaptureState {
     pub(super) fn new(display_handle: &DisplayHandle) -> Self {
@@ -45,24 +45,35 @@ impl CaptureState {
 struct CapturedOnce;
 
 impl SmithayState {
-    /// The output's, or `None` before it has a size
-    fn capture_constraints(&self) -> Option<BufferConstraints> {
-        let size = self.output.current_mode()?.size;
+    /// The output's screen (window px), if it's still there
+    fn output_screen(&self, output: &WeakOutput) -> Option<[u32; 4]> {
+        let output = output.upgrade()?;
+        let index = self.outputs.iter().position(|shown| *shown == output)?;
+        self.screens.get(index).copied()
+    }
+
+    /// The output's, or `None` once it's gone
+    fn capture_constraints(&self, output: &WeakOutput) -> Option<BufferConstraints> {
+        let [_, _, width, height] = self.output_screen(output)?;
         Some(BufferConstraints {
-            size: (size.w, size.h).into(),
+            size: (width.cast_signed(), height.cast_signed()).into(),
             // both are B,G,R,A (or X) in bytes, like `CapturedFrame`
             shm: vec![Format::Argb8888, Format::Xrgb8888],
             dma: None,
         })
     }
 
-    /// After the output's size changed
+    /// After the outputs' sizes changed
     pub(super) fn update_capture_constraints(&self) {
-        let Some(constraints) = self.capture_constraints() else {
-            return;
-        };
         for session in &self.capture.sessions {
-            session.update_constraints(constraints.clone());
+            if let Some(constraints) = session
+                .source()
+                .user_data()
+                .get::<WeakOutput>()
+                .and_then(|output| self.capture_constraints(output))
+            {
+                session.update_constraints(constraints);
+            }
         }
     }
 
@@ -74,8 +85,12 @@ impl SmithayState {
     /// Fills every waiting frame with the drawn frame (`None`: it couldn't be copied)
     pub fn frames_captured(&mut self, captured: Option<&CapturedFrame>) {
         let presented = self.clock.now();
-        for frame in self.capture.frames.drain(..) {
-            match captured.map(|captured| copy_into(&frame, captured)) {
+        for (frame, output) in std::mem::take(&mut self.capture.frames) {
+            let Some(screen) = self.output_screen(&output) else {
+                frame.fail(CaptureFailureReason::Stopped);
+                continue;
+            };
+            match captured.map(|captured| copy_into(&frame, captured, screen)) {
                 Some(Ok(())) => frame.success(Transform::Normal, None, presented),
                 Some(Err(reason)) => frame.fail(reason),
                 None => frame.fail(CaptureFailureReason::Unknown),
@@ -84,21 +99,29 @@ impl SmithayState {
     }
 }
 
-/// Into the frame's shm buffer, at its top-left (cropped to it)
-fn copy_into(frame: &Frame, captured: &CapturedFrame) -> Result<(), CaptureFailureReason> {
+/// The screen's part of the window into the frame's shm buffer, at its top-left (cropped to it)
+fn copy_into(
+    frame: &Frame,
+    captured: &CapturedFrame,
+    [x, y, width, height]: [u32; 4],
+) -> Result<(), CaptureFailureReason> {
     with_buffer_contents_mut(&frame.buffer(), |content_ptr, length, metadata| {
         // SAFETY: same as in `SmithayState::import_buffer`
         let pool = unsafe { std::slice::from_raw_parts_mut(content_ptr, length) };
 
-        // only the output's part: with several screens, the main one, at the top left
-        let width = captured.width.min(metadata.width.cast_unsigned()) as usize;
-        let height = captured.height.min(metadata.height.cast_unsigned()) as usize;
+        let x = x as usize * 4;
+        let width = width.min(metadata.width.cast_unsigned()) as usize * 4;
+        let height = height.min(metadata.height.cast_unsigned()) as usize;
         let row_len = captured.width as usize * 4;
-        for (y, row) in captured.bgra.chunks_exact(row_len).take(height).enumerate() {
-            let start = (metadata.offset + metadata.stride * y as i32).cast_unsigned() as usize;
-            pool.get_mut(start..start + width * 4)
-                .ok_or(CaptureFailureReason::BufferConstraints)?
-                .copy_from_slice(&row[..width * 4]);
+        let rows = captured.bgra.chunks_exact(row_len).skip(y as usize);
+        for (index, row) in rows.take(height).enumerate() {
+            let start = (metadata.offset + metadata.stride * index as i32).cast_unsigned() as usize;
+            let (Some(to), Some(from)) =
+                (pool.get_mut(start..start + width), row.get(x..x + width))
+            else {
+                return Err(CaptureFailureReason::BufferConstraints);
+            };
+            to.copy_from_slice(from);
         }
         Ok(())
     })
@@ -122,10 +145,10 @@ impl ImageCopyCaptureHandler for AppletRunner {
         &mut self.smithay_state.capture.copy_state
     }
 
-    /// Only outputs can be captured, and there is only the one
+    /// Only outputs can be captured
     fn capture_constraints(&mut self, source: &ImageCaptureSource) -> Option<BufferConstraints> {
-        source.user_data().get::<WeakOutput>()?;
-        self.smithay_state.capture_constraints()
+        self.smithay_state
+            .capture_constraints(source.user_data().get::<WeakOutput>()?)
     }
 
     fn new_session(&mut self, session: Session) {
@@ -137,7 +160,11 @@ impl ImageCopyCaptureHandler for AppletRunner {
     }
 
     fn frame(&mut self, session: &SessionRef, frame: Frame) {
-        self.smithay_state.capture.frames.push(frame);
+        let Some(output) = session.source().user_data().get::<WeakOutput>().cloned() else {
+            frame.fail(CaptureFailureReason::Unknown);
+            return;
+        };
+        self.smithay_state.capture.frames.push((frame, output));
         if session.user_data().get::<CapturedOnce>().is_none() {
             session.user_data().insert_if_missing(|| CapturedOnce);
             self.needs_redraw = true;
@@ -148,7 +175,7 @@ impl ImageCopyCaptureHandler for AppletRunner {
         self.smithay_state
             .capture
             .frames
-            .retain(|waiting| *waiting != frame);
+            .retain(|(waiting, _)| *waiting != frame);
     }
 
     fn session_destroyed(&mut self, session: SessionRef) {

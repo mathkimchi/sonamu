@@ -65,6 +65,14 @@ impl SmithayState {
         ))
     }
 
+    /// The index of the floating toplevel's screen, if `root` is one
+    pub(super) fn floating_screen(&self, root: &WlSurface) -> Option<usize> {
+        self.floating
+            .iter()
+            .find(|floating| floating.toplevel.wl_surface() == root)
+            .map(|floating| floating.screen)
+    }
+
     /// Its surfaces (with popups), placed in the output
     pub(super) fn floating_layers(&self, root: &WlSurface) -> Vec<Layer> {
         let Some(rect) = self.floating_rect(root) else {
@@ -112,16 +120,9 @@ impl SmithayState {
 impl AppletRunner {
     /// Floats the newly committed toplevel over the screen under the pointer, and gives it the keyboard
     pub(super) fn float(&mut self, toplevel: ToplevelSurface) {
-        let [px, py] = self.pointer_position;
         let state = &mut self.smithay_state;
-        let screen = state
-            .screens
-            .iter()
-            .position(|&[x, y, width, height]| {
-                (f64::from(x)..f64::from(x + width)).contains(&px)
-                    && (f64::from(y)..f64::from(y + height)).contains(&py)
-            })
-            .unwrap_or_default();
+        let screen = state.screen_at(self.pointer_position).unwrap_or_default();
+        state.enter_screen(toplevel.wl_surface(), screen);
         // its own size, not a tile's
         toplevel.with_pending_state(|state| {
             state.size = None;
