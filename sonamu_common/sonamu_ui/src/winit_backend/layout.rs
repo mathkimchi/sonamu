@@ -21,8 +21,11 @@ pub struct Placement {
     pub primary: bool,
 }
 
-/// `"Make Model Serial"` from an EDID, `Unknown` for what it lacks. The make is the 3-letter PNP id (eg `DEL`);
-/// the model and serial are the EDID's text, else its numbers.
+/// Monitor vendors by PNP id (hwdata's `pnp.ids`: `DEL\tDell Inc.` lines, sorted)
+const PNP_IDS: &str = include_str!("../../../../assets/pnp.ids");
+
+/// `"Make Model Serial"` from an EDID like libdisplay-info (so like niri), `Unknown` for what it lacks:
+/// the vendor's name (else its PNP id), the EDID's name and serial text, else their numbers in hex.
 #[must_use]
 pub fn description(edid: &[u8]) -> String {
     const HEADER: [u8; 8] = [0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0];
@@ -55,6 +58,7 @@ pub fn description(edid: &[u8]) -> String {
                 _ => None,
             })
             .collect::<Option<String>>()
+            .map(|id| vendor(&id).map_or(id, str::to_string))
     });
     let model = text(0xFC).or_else(|| {
         let code = edid.get(10..12)?;
@@ -62,7 +66,7 @@ pub fn description(edid: &[u8]) -> String {
     });
     let serial = text(0xFF).or_else(|| {
         let serial = u32::from_le_bytes(edid.get(12..16)?.try_into().ok()?);
-        (serial != 0).then(|| serial.to_string())
+        (serial != 0).then(|| format!("0x{serial:08X}"))
     });
     [make, model, serial]
         .map(|part| {
@@ -70,6 +74,13 @@ pub fn description(edid: &[u8]) -> String {
                 .unwrap_or_else(|| "Unknown".to_string())
         })
         .join(" ")
+}
+
+/// The vendor's name for a PNP id (eg `DEL`)
+fn vendor(id: &str) -> Option<&'static str> {
+    PNP_IDS
+        .lines()
+        .find_map(|line| line.strip_prefix(id)?.strip_prefix('\t'))
 }
 
 /// Each monitor's name: its description, or its connector if another monitor has the same description
@@ -231,10 +242,10 @@ mod tests {
         for descriptor in 1..4 {
             edid[54 + 18 * descriptor + 3] = 0x10;
         }
-        assert_eq!(description(&edid), "DEL DELL U2720Q Unknown");
+        assert_eq!(description(&edid), "Dell Inc. DELL U2720Q Unknown");
         edid[12..16].copy_from_slice(&1234_u32.to_le_bytes());
         edid[54 + 3] = 0x10;
-        assert_eq!(description(&edid), "DEL 0xA0B1 1234");
+        assert_eq!(description(&edid), "Dell Inc. 0xA0B1 0x000004D2");
         assert_eq!(description(&[]), "Unknown Unknown Unknown");
     }
 
