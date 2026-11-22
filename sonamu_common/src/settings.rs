@@ -484,7 +484,11 @@ pub struct Display {
 }
 impl From<Display> for sonamu_ui::winit_backend::layout::Placement {
     fn from(Display { position, primary }: Display) -> Self {
-        Self { position, primary }
+        Self {
+            position,
+            primary,
+            off: false,
+        }
     }
 }
 

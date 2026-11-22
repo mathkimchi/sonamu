@@ -2,6 +2,7 @@ mod capture;
 pub(crate) mod dmabuf;
 mod floating;
 mod layer_shell;
+mod output_management;
 
 use crate::runner::AppletRunner;
 use calloop::{LoopHandle, PostAction};
@@ -168,6 +169,8 @@ pub struct SmithayState {
     _relative_pointer_state: RelativePointerManagerState,
     _pointer_gestures_state: PointerGesturesState,
     capture: capture::CaptureState,
+    /// wlr-output-management (#158)
+    pub(crate) output_management: output_management::OutputManagementState,
     dmabuf: dmabuf::DmabufImport,
     /// For waiting on clients' GPU work before applying their commits
     event_handle: LoopHandle<'static, AppletRunner>,
@@ -505,6 +508,15 @@ impl SmithayState {
             })
     }
 
+    /// Every connected monitor (`DisplayNotification::Monitors`), for wlr-output-management clients
+    pub(crate) fn set_monitors(
+        &mut self,
+        monitors: Vec<sonamu_ui::winit_backend::layout::MonitorInfo>,
+    ) {
+        self.output_management
+            .set_monitors(monitors, &self.display_handle);
+    }
+
     /// The single output is the main screen (`screens[0]`), where it is in the window
     pub fn resize_output(&self, size: DisplayContainerSize) {
         let mode = Mode {
@@ -757,6 +769,28 @@ impl SmithayState {
         output
     }
 
+    /// Clipboard tools (wl-copy) use these, else they open a window to get focus (#113)
+    fn new_data_control(
+        display_handle: &DisplayHandle,
+        primary_selection_state: &PrimarySelectionState,
+    ) -> (
+        ext_data_control::DataControlState,
+        wlr_data_control::DataControlState,
+    ) {
+        (
+            ext_data_control::DataControlState::new::<AppletRunner, _>(
+                display_handle,
+                Some(primary_selection_state),
+                |_| true,
+            ),
+            wlr_data_control::DataControlState::new::<AppletRunner, _>(
+                display_handle,
+                Some(primary_selection_state),
+                |_| true,
+            ),
+        )
+    }
+
     pub fn new(event_handle: &LoopHandle<'static, AppletRunner>) -> Self {
         let start_time = std::time::Instant::now();
 
@@ -777,17 +811,8 @@ impl SmithayState {
 
         let data_device_state = DataDeviceState::new::<AppletRunner>(&display_handle);
         let primary_selection_state = PrimarySelectionState::new::<AppletRunner>(&display_handle);
-        // clipboard tools (wl-copy) use these, else they open a window to get focus (#113)
-        let ext_data_control_state = ext_data_control::DataControlState::new::<AppletRunner, _>(
-            &display_handle,
-            Some(&primary_selection_state),
-            |_| true,
-        );
-        let wlr_data_control_state = wlr_data_control::DataControlState::new::<AppletRunner, _>(
-            &display_handle,
-            Some(&primary_selection_state),
-            |_| true,
-        );
+        let (ext_data_control_state, wlr_data_control_state) =
+            Self::new_data_control(&display_handle, &primary_selection_state);
         let xdg_decoration_state = XdgDecorationState::new::<AppletRunner>(&display_handle);
         let idle_inhibit_state = IdleInhibitManagerState::new::<AppletRunner>(&display_handle);
         // smithay applies the viewport to the surface view, which rendering uses
@@ -806,6 +831,7 @@ impl SmithayState {
         // pinches (#152) go to the surface under the pointer
         let pointer_gestures_state = PointerGesturesState::new::<AppletRunner>(&display_handle);
         let capture = capture::CaptureState::new(&display_handle);
+        let output_management = output_management::OutputManagementState::new(&display_handle);
         let clock = Clock::<Monotonic>::new();
         let presentation_state =
             PresentationState::new::<AppletRunner>(&display_handle, clock.id() as u32);
@@ -844,6 +870,7 @@ impl SmithayState {
             _relative_pointer_state: relative_pointer_state,
             _pointer_gestures_state: pointer_gestures_state,
             capture,
+            output_management,
             dmabuf: dmabuf::DmabufImport::default(),
             event_handle: event_handle.clone(),
             pointer_focus: None,

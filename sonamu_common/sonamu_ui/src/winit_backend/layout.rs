@@ -6,28 +6,52 @@
 pub struct Monitor {
     /// Eg `DP-1`
     pub connector: String,
-    /// `"Make Model Serial"` from its EDID (`Unknown` for missing parts)
-    pub description: String,
+    /// Make, model and serial from its EDID (`identity`)
+    pub identity: [String; 3],
     /// `[width, height]`, px
     pub size: [u32; 2],
 }
+impl Monitor {
+    /// `"Make Model Serial"`
+    #[must_use]
+    pub fn description(&self) -> String {
+        self.identity.join(" ")
+    }
+}
 
-/// A monitor's entry in the `displays` setting
+/// Where a monitor goes: its entry in the `displays` setting, or what a client set (wlr-output-management)
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Placement {
     /// Its top left, px; `None`: to the right of the others
     pub position: Option<[i32; 2]>,
     /// The main screen: the wl output (layer surfaces, capture). The first monitor if none is.
     pub primary: bool,
+    /// Not shown (unless every monitor is)
+    pub off: bool,
+}
+
+/// A connected monitor, as the display shows it (`DisplayNotification::Monitors`)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MonitorInfo {
+    pub monitor: Monitor,
+    /// Its name (`names`)
+    pub name: String,
+    /// In mm, `[0, 0]` if unknown
+    pub physical_size: [u32; 2],
+    pub refresh_millihertz: u32,
+    /// Its top left in the scene, px; `None`: off
+    pub position: Option<[u32; 2]>,
+    /// The main screen
+    pub primary: bool,
 }
 
 /// Monitor vendors by PNP id (hwdata's `pnp.ids`: `DEL\tDell Inc.` lines, sorted)
 const PNP_IDS: &str = include_str!("../../../../assets/pnp.ids");
 
-/// `"Make Model Serial"` from an EDID like libdisplay-info (so like niri), `Unknown` for what it lacks:
+/// Make, model and serial from an EDID like libdisplay-info (so like niri), `Unknown` for what it lacks:
 /// the vendor's name (else its PNP id), the EDID's name and serial text, else their numbers in hex.
 #[must_use]
-pub fn description(edid: &[u8]) -> String {
+pub fn identity(edid: &[u8]) -> [String; 3] {
     const HEADER: [u8; 8] = [0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0];
     let edid = edid
         .get(..128)
@@ -68,12 +92,10 @@ pub fn description(edid: &[u8]) -> String {
         let serial = u32::from_le_bytes(edid.get(12..16)?.try_into().ok()?);
         (serial != 0).then(|| format!("0x{serial:08X}"))
     });
-    [make, model, serial]
-        .map(|part| {
-            part.filter(|part| !part.is_empty())
-                .unwrap_or_else(|| "Unknown".to_string())
-        })
-        .join(" ")
+    [make, model, serial].map(|part| {
+        part.filter(|part| !part.is_empty())
+            .unwrap_or_else(|| "Unknown".to_string())
+    })
 }
 
 /// The vendor's name for a PNP id (eg `DEL`)
@@ -91,21 +113,21 @@ pub fn names(monitors: &[Monitor]) -> Vec<String> {
         .map(|monitor| {
             let shared = monitors
                 .iter()
-                .filter(|other| other.description == monitor.description)
+                .filter(|other| other.identity == monitor.identity)
                 .count()
                 > 1;
             if shared {
                 monitor.connector.clone()
             } else {
-                monitor.description.clone()
+                monitor.description()
             }
         })
         .collect()
 }
 
-/// The monitors (indices into `monitors`), primary first, then in their order, and each one's top left:
-/// placed by `layout` (keys matched without case by name, else connector), the rest to the right of the others.
-/// Moved so the top left is `[0, 0]`.
+/// The monitors shown (indices into `monitors`), primary first, then in their order, and each one's top left:
+/// placed by `layout` (keys matched without case by name, else connector; the first match), the rest to the
+/// right of the others. Moved so the top left is `[0, 0]`. Off ones are left out, unless all are.
 #[must_use]
 pub fn arrange(monitors: &[Monitor], layout: &[(String, Placement)]) -> Vec<(usize, [u32; 2])> {
     let names = names(monitors);
@@ -121,12 +143,25 @@ pub fn arrange(monitors: &[Monitor], layout: &[(String, Placement)]) -> Vec<(usi
             })
             .unwrap_or_default()
     };
-    let primary = (0..monitors.len())
+    let mut shown: Vec<usize> = (0..monitors.len())
+        .filter(|&index| !placement(index).off)
+        .collect();
+    if shown.is_empty() {
+        shown = (0..monitors.len()).collect();
+    }
+    let primary = shown
+        .iter()
+        .copied()
         .find(|&index| placement(index).primary)
-        .unwrap_or(0);
-    let order: Vec<usize> = std::iter::once(primary)
-        .chain((0..monitors.len()).filter(|&index| index != primary))
-        .take(monitors.len())
+        .or(shown.first().copied());
+    let order: Vec<usize> = primary
+        .into_iter()
+        .chain(
+            shown
+                .iter()
+                .copied()
+                .filter(|&index| Some(index) != primary),
+        )
         .collect();
 
     let rect = |index: usize, [x, y]: [i32; 2]| {
@@ -170,9 +205,10 @@ mod tests {
     use super::*;
 
     fn monitor(connector: &str, description: &str, size: [u32; 2]) -> Monitor {
+        let mut parts = description.splitn(3, ' ').map(str::to_string);
         Monitor {
             connector: connector.to_string(),
-            description: description.to_string(),
+            identity: [(); 3].map(|()| parts.next().unwrap_or_default()),
             size,
         }
     }
@@ -180,7 +216,7 @@ mod tests {
     fn at(position: [i32; 2]) -> Placement {
         Placement {
             position: Some(position),
-            primary: false,
+            ..Placement::default()
         }
     }
 
@@ -209,19 +245,19 @@ mod tests {
     #[test]
     fn primary_first_and_overlap_moved_right() {
         let monitors = [
-            monitor("eDP-1", "A", [1000, 800]),
-            monitor("DP-1", "B", [1000, 800]),
-            monitor("DP-2", "C", [500, 500]),
+            monitor("eDP-1", "A a 1", [1000, 800]),
+            monitor("DP-1", "B b 2", [1000, 800]),
+            monitor("DP-2", "C c 3", [500, 500]),
         ];
         let layout = [
             (
-                "B".to_string(),
+                "B b 2".to_string(),
                 Placement {
-                    position: Some([0, 0]),
                     primary: true,
+                    ..at([0, 0])
                 },
             ),
-            ("A".to_string(), at([500, 0])),
+            ("A a 1".to_string(), at([500, 0])),
         ];
         assert_eq!(
             arrange(&monitors, &layout),
@@ -242,11 +278,38 @@ mod tests {
         for descriptor in 1..4 {
             edid[54 + 18 * descriptor + 3] = 0x10;
         }
+        let description = |edid: &[u8]| identity(edid).join(" ");
         assert_eq!(description(&edid), "Dell Inc. DELL U2720Q Unknown");
         edid[12..16].copy_from_slice(&1234_u32.to_le_bytes());
         edid[54 + 3] = 0x10;
         assert_eq!(description(&edid), "Dell Inc. 0xA0B1 0x000004D2");
         assert_eq!(description(&[]), "Unknown Unknown Unknown");
+    }
+
+    #[test]
+    fn off_left_out_unless_all_are() {
+        let monitors = [
+            monitor("eDP-1", "A B C", [1000, 800]),
+            monitor("DP-1", "D E F", [1000, 800]),
+        ];
+        let off = Placement {
+            off: true,
+            ..Placement::default()
+        };
+        // the primary is off: the next one is the main screen
+        let layout = [
+            (
+                "eDP-1".to_string(),
+                Placement {
+                    primary: true,
+                    ..off
+                },
+            ),
+            ("DP-1".to_string(), at([500, 500])),
+        ];
+        assert_eq!(arrange(&monitors, &layout), [(1, [0, 0])]);
+        let all_off = [("eDP-1".to_string(), off), ("DP-1".to_string(), off)];
+        assert_eq!(arrange(&monitors, &all_off), [(0, [0, 0]), (1, [1000, 0])]);
     }
 
     #[test]

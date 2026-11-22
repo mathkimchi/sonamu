@@ -19,7 +19,7 @@ use sonamu_ui::{
     display_units::{DisplayAreaPx, DisplayContainerSize, ToPx},
     ui_element::{PrimitiveScene, Style, UIElement, UITree},
     ui_event::{KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, PinchPhase, UIEvent},
-    winit_backend::ScreenArea,
+    winit_backend::{ScreenArea, layout::Placement},
 };
 
 /// The Singularity Applet Runner (SAR) is kind of just a wrapper around the Singularity UI.
@@ -48,6 +48,8 @@ pub struct AppletRunner {
     pub(crate) display_screens: Option<Vec<ScreenArea>>,
     /// `SmithayState::screens`' names
     screen_names: Vec<String>,
+    /// Setting `displays` as last sent to the display
+    displays: Option<Vec<(String, Placement)>>,
     /// Set by damage; the redraw happens once per event loop iteration
     pub(crate) needs_redraw: bool,
     /// The setting `wallpaper` (`battery_wallpaper` on battery), drawn under everything
@@ -112,6 +114,7 @@ impl AppletRunner {
             },
             display_screens: None,
             screen_names: Vec::new(),
+            displays: None,
             needs_redraw: true,
             wallpaper: Wallpaper::new(),
             on_battery: false,
@@ -270,13 +273,25 @@ impl AppletRunner {
             .unwrap();
     }
 
-    /// Tells the display where the monitors go (setting `displays`)
-    fn sync_displays(&self) {
-        let layout = sonamu_common::settings::get()
+    /// Tells the display where the monitors go: as wlr-output-management clients set, else setting `displays`.
+    /// A `displays` change drops the clients' (like niri).
+    pub(crate) fn sync_displays(&mut self) {
+        let displays: Vec<(String, Placement)> = sonamu_common::settings::get()
             .displays
             .iter()
             .map(|(name, &display)| (name.clone(), display.into()))
             .collect();
+        let management = &mut self.smithay_state.output_management;
+        if self.displays.as_ref().is_some_and(|old| *old != displays) {
+            management.overrides.clear();
+        }
+        let layout = management
+            .overrides
+            .iter()
+            .chain(&displays)
+            .cloned()
+            .collect();
+        self.displays = Some(displays);
         self.ui_handle.set_display_layout(layout);
     }
 

@@ -13,7 +13,7 @@ use crate::{
     winit_backend::{
         CapturedFrame, DisplayInfo, DisplayNotification, DisplayProxy, DisplayRequest, Gpu,
         PointerGrab, ScreenArea, UIDisplay, WgpuData,
-        layout::{self, Monitor, Placement},
+        layout::{self, Monitor, MonitorInfo, Placement},
     },
 };
 use calloop::{
@@ -71,6 +71,13 @@ struct CursorImage {
     size: [u32; 2],
     /// In screen px
     hotspot: [u32; 2],
+}
+
+/// A connected monitor, shown or not
+struct Connected {
+    info: connector::Info,
+    mode: Mode,
+    monitor: Monitor,
 }
 
 /// A monitor, showing its part of the scene
@@ -135,6 +142,8 @@ struct DrmDisplay {
     /// Before the devices, since the surfaces must be dropped first.
     /// The main one first, then in connector order (`layout::arrange`).
     outputs: Vec<DrmOutput>,
+    /// Every connected monitor, also those off
+    connected: Vec<Connected>,
     /// Where they go (`DisplayRequest::SetLayout`)
     layout: Vec<(String, Placement)>,
     /// Draws into every output's buffers
@@ -300,6 +309,7 @@ impl DrmDisplay {
             loop_signal: event_loop.get_signal(),
             loop_handle: handle,
             outputs: Vec::new(),
+            connected: Vec::new(),
             layout: Vec::new(),
             renderer: WgpuData::offscreen(
                 dmabuf::WGPU_FORMAT,
@@ -385,26 +395,62 @@ impl DrmDisplay {
             log::warn!("Can't list the monitors: {err}");
             Vec::new()
         });
+        self.connected = connected
+            .into_iter()
+            .map(|(info, mode)| {
+                let (width, height) = mode.size();
+                let monitor = Monitor {
+                    connector: format!("{}-{}", info.interface().as_str(), info.interface_id()),
+                    identity: layout::identity(
+                        &edid(&self.drm_device, info.handle()).unwrap_or_default(),
+                    ),
+                    size: [u32::from(width), u32::from(height)],
+                };
+                Connected {
+                    info,
+                    mode,
+                    monitor,
+                }
+            })
+            .collect();
+        self.arrange();
+    }
+
+    /// Shows the monitors that aren't off, placed by `layout`, the main one first, and tells the runner
+    fn arrange(&mut self) {
+        let monitors: Vec<Monitor> = self
+            .connected
+            .iter()
+            .map(|connected| connected.monitor.clone())
+            .collect();
+        let names = layout::names(&monitors);
+        let arranged = layout::arrange(&monitors, &self.layout);
         let mut old = std::mem::take(&mut self.outputs);
-        // gone ones first, so a monitor with a new mode gets a new surface (and its CRTC is free)
+        // gone and off ones first, so a monitor with a new mode gets a new surface (and its CRTC is free)
         old.retain(|output| {
-            connected
-                .iter()
-                .any(|(info, mode)| (info.handle(), *mode) == (output.connector, output.mode))
+            arranged.iter().any(|&(index, _)| {
+                let connected = &self.connected[index];
+                (connected.info.handle(), connected.mode) == (output.connector, output.mode)
+            })
         });
-        for (info, mode) in connected {
-            let output = if let Some(index) = old
+        let mut size = DisplayContainerSize::new(0, 0);
+        let mut screens = Vec::new();
+        let mut positions = vec![None; monitors.len()];
+        for (index, origin @ [x, y]) in arranged {
+            let Connected { info, mode, .. } = &self.connected[index];
+            let mut output = if let Some(old_index) = old
                 .iter()
                 .position(|output| output.connector == info.handle())
             {
-                old.swap_remove(index)
+                old.swap_remove(old_index)
             } else {
                 let used = old
                     .iter()
                     .chain(&self.outputs)
                     .map(|output| output.crtc)
                     .collect::<Vec<_>>();
-                match self.new_output(&info, mode, &used) {
+                let (info, mode, monitor) = (info.clone(), *mode, monitors[index].clone());
+                match self.new_output(&info, mode, monitor, &used) {
                     Ok(output) => output,
                     Err(err) => {
                         log::error!("Can't show on {:?}: {err}", info.handle());
@@ -412,33 +458,10 @@ impl DrmDisplay {
                     }
                 }
             };
-            self.outputs.push(output);
-        }
-        self.arrange();
-    }
-
-    /// Places the monitors by `layout`, the main one first, and tells the runner
-    fn arrange(&mut self) {
-        if self.outputs.is_empty() {
-            return;
-        }
-        let monitors: Vec<Monitor> = self
-            .outputs
-            .iter()
-            .map(|output| output.monitor.clone())
-            .collect();
-        let names = layout::names(&monitors);
-        let mut outputs: Vec<Option<DrmOutput>> = std::mem::take(&mut self.outputs)
-            .into_iter()
-            .map(Some)
-            .collect();
-        let mut size = DisplayContainerSize::new(0, 0);
-        let mut screens = Vec::new();
-        for (index, origin @ [x, y]) in layout::arrange(&monitors, &self.layout) {
-            let mut output = outputs[index].take().unwrap();
             let [width, height] = output.monitor.size;
             output.origin = origin;
             output.dirty = true;
+            positions[index] = Some(origin);
             screens.push(ScreenArea {
                 name: names[index].clone(),
                 rect: [x, y, width, height],
@@ -447,14 +470,36 @@ impl DrmDisplay {
                 DisplayContainerSize::new(size.width.max(x + width), size.height.max(y + height));
             self.outputs.push(output);
         }
+        if self.outputs.is_empty() {
+            return;
+        }
         if size != self.size {
             self.size = size;
             self.pointer = self.clamp_to_screen(self.pointer);
             self.send(UIEvent::WindowResized(size));
         }
+        let main = self.outputs[0].connector;
+        let monitors = self
+            .connected
+            .iter()
+            .zip(monitors)
+            .zip(names)
+            .zip(positions)
+            .map(|(((connected, monitor), name), position)| MonitorInfo {
+                monitor,
+                name,
+                physical_size: connected.info.size().map_or([0; 2], |(w, h)| [w, h]),
+                refresh_millihertz: refresh_millihertz(&connected.mode),
+                position,
+                primary: connected.info.handle() == main,
+            })
+            .collect();
         let _ = self
             .display_notification_queue
             .send(DisplayNotification::Screens(screens));
+        let _ = self
+            .display_notification_queue
+            .send(DisplayNotification::Monitors(monitors));
         self.needs_draw = true;
     }
 
@@ -463,22 +508,16 @@ impl DrmDisplay {
         &mut self,
         info: &connector::Info,
         mode: Mode,
+        monitor: Monitor,
         used: &[crtc::Handle],
     ) -> Result<DrmOutput, String> {
         let connector = info.handle();
         let (width, height) = mode.size();
-        let monitor = Monitor {
-            connector: format!("{}-{}", info.interface().as_str(), info.interface_id()),
-            description: layout::description(
-                &edid(&self.drm_device, connector).unwrap_or_default(),
-            ),
-            size: [u32::from(width), u32::from(height)],
-        };
         // its names for the `displays` setting
         log::info!(
             "Showing on {} \"{}\" at {width}x{height}@{}mHz",
             monitor.connector,
-            monitor.description,
+            monitor.description(),
             refresh_millihertz(&mode)
         );
         let resources = self

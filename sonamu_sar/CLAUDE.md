@@ -11,6 +11,7 @@ Runner-only unless noted; the tree doesn't know about these.
 - Event times are CLOCK_MONOTONIC ms (`now_input_time`; libinput's own for its events): Firefox's pan gestures rely on it. Touchpad scroll stop → `wl_pointer.axis_stop`.
 - IME text and relative motion are `DisplayNotification`s, not `UIEvent`s (`UIEvent` must stay `Copy`).
 - Main screen (`screens[0]`) = the wl output, anywhere in the window (#158): layer placements and the usable area are in window logical coords, offset by its origin (`arrange_layers`).
+- wlr-output-management (#158, `smithay/output_management.rs`, eg wdisplays, kanshi): heads from `DisplayNotification::Monitors` (DRM only), one mode each. Clients turn monitors on/off and move them for this run (`OutputManagementState::overrides`, sent before setting `displays`; a `displays` change drops them, like niri); mode/scale/transform/adaptive sync changes fail (#164, #165); overlapping or all-off configurations fail.
 - Fullscreen (#121, `SmithayState::fullscreen`): covers its screen (overlay layers above), gets the mouse, until it stops or focus leaves its tile (`focus_wl_keyboard`).
 - Floating (#148, `smithay/floating.rs`): toplevels with a parent or min == max size. Centered on the pointer's screen, over layers, focused like a layer surface (`layer_focus`). Super+left drag moves (`floating_drag_mouse`, `super_held`).
 - Pinch (#152, DRM): to the wl pointer focus (`AppletRunner::pinch`, `zwp_pointer_gestures_v1`); with none, to the root as `UIEvent::Pinch` (`NodeTree::zoom_pinch`). Swipes/holds aren't forwarded.
