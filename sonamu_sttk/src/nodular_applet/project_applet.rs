@@ -1140,6 +1140,9 @@ impl StandardApplet for ProjectApplet {
             // only the root gets these
             StandardEvent::Capturing(_) | StandardEvent::Screens(_) => {}
             StandardEvent::Swipe(view) => self.holder.tree.set_swipe(view),
+            StandardEvent::ScreenMouse(screen, event) => {
+                self.holder.tree.screen_mouse(screen, event);
+            }
             StandardEvent::FocusChain { screen, chain } => {
                 self.holder.tree.focus_chain(screen, &chain);
             }

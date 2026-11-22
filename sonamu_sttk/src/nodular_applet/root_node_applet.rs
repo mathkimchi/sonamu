@@ -8,7 +8,10 @@ use crate::{
         project_applet::ProjectApplet,
         swipe::{Settle, Strip, Swipe},
         traversal::{self, Traversal},
-        treeview::{TreeviewAction, TreeviewPointer, TreeviewRow, focused_row, treeview_rows},
+        treeview::{
+            TreeviewAction, TreeviewPointer, TreeviewResponse, TreeviewRow, focused_row,
+            treeview_rows,
+        },
     },
     session,
     standard_keybinds::standard_keybind_request,
@@ -91,6 +94,8 @@ pub struct RootNodeApplet {
     session_path: Option<PathBuf>,
     /// The last one written, so unchanged ones aren't written again
     saved_session: Option<Session>,
+    /// The screen the pointer was last over, if any
+    pointer_screen: Option<usize>,
     /// Each monitor's focus (`NodeTree::screen_focus_uids`) as last saved, kept for monitors that went away (#158)
     monitor_focus: BTreeMap<String, Vec<NodeUid>>,
     /// Every screen (#60), each with its own focus (see `NodeTree::activate_screen`).
@@ -649,6 +654,7 @@ impl RootNodeApplet {
             applet_area: [0, 800],
             session_path,
             saved_session,
+            pointer_screen: None,
             monitor_focus,
             screens: vec![Screen {
                 rect: [0, 0, 800, 600],
@@ -907,7 +913,8 @@ impl RootNodeApplet {
             // the root's node isn't in a world
             StandardEvent::Command { .. }
             | StandardEvent::NodeUid(_)
-            | StandardEvent::FocusChain { .. } => {}
+            | StandardEvent::FocusChain { .. }
+            | StandardEvent::ScreenMouse(..) => {}
             StandardEvent::UIEvent(_)
             | StandardEvent::FocusChanged(..)
             | StandardEvent::Highlighted(..) => {
@@ -946,20 +953,30 @@ impl RootNodeApplet {
     }
 
     fn handle_mouse(&mut self, mut mouse_event: MouseEvent) {
-        // another screen becomes active when clicked (not during a drag); until then it ignores the pointer
         let [pointer_x, pointer_y] = mouse_event.position;
+        let under = self.screens.iter().position(|screen| {
+            let [x, y, width, height] = screen.rect.map(f64::from);
+            (x..x + width).contains(&pointer_x) && (y..y + height).contains(&pointer_y)
+        });
+        // the screen it left clears its treeview's hover
+        if let Some(left) = self.pointer_screen
+            && Some(left) != under
+        {
+            self.treeview_mouse(left, &mouse_event);
+        }
+        self.pointer_screen = under;
+        // another screen becomes active when clicked (not during a drag); until then the pointer acts there
+        // without it (#158)
         if !self.treeview_pointer.is_pressed()
             && !self.holder.tree.has_pointer_grab()
-            && let Some(index) = self.screens.iter().position(|screen| {
-                let [x, y, width, height] = screen.rect.map(f64::from);
-                (x..x + width).contains(&pointer_x) && (y..y + height).contains(&pointer_y)
-            })
+            && let Some(index) = under
             && index != self.holder.tree.active_screen()
         {
             if !matches!(
                 mouse_event.kind,
                 MouseEventKind::Button { pressed: true, .. }
             ) {
+                self.inactive_screen_mouse(index, mouse_event);
                 return;
             }
             self.activate_screen(index);
@@ -979,57 +996,14 @@ impl RootNodeApplet {
             return;
         }
         let settings = settings::get();
-        let treeview_area = self.treeview_area(&settings);
-        // a hidden treeview has no rows to hit
-        let (rows, general) = if treeview_area.is_some() {
-            view_rows(
-                &self.holder.tree,
-                self.view_path.as_ref(),
-                self.holder.tree.active_screen(),
-            )
-        } else {
-            (Vec::new(), WorldTreePath::root())
-        };
-        // in the treeview's coords, inside its frame
-        let ([x, y, width, height], border) = treeview_area.map_or(([0; 4], 0), |(area, place)| {
-            treeview_frame(&settings, area, place)
-        });
-        let [x, y, width, height] = [x, y, width, height].map(f64::from);
-        let [pointer_x, pointer_y] = mouse_event.position;
-        let in_treeview = treeview_area.is_some()
-            && (x..x + width).contains(&pointer_x)
-            && (y..y + height).contains(&pointer_y);
-        let mut treeview_event = mouse_event;
-        treeview_event.position = [
-            pointer_x - x - f64::from(border),
-            pointer_y - y - f64::from(border),
-        ];
-        // the pin button is off (#150)
-        // let inner_width = (width - f64::from(2 * border)).max(0.0);
-        // if in_treeview
-        //     && !self.treeview_pointer.is_pressed()
-        //     && on_pin_button(treeview_event.position, inner_width)
-        //     && matches!(
-        //         mouse_event.kind,
-        //         MouseEventKind::Button {
-        //             button: BTN_LEFT,
-        //             pressed: true
-        //         }
-        //     )
-        // {
-        //     self.treeview_pinned = !self.treeview_pinned;
-        //     self.surface.damage();
-        //     self.update_treeview_visibility();
-        //     return;
-        // }
-        let response = self.treeview_pointer.handle_mouse(
-            &treeview_event,
-            in_treeview,
-            &rows,
-            &general,
-            [width, height].map(|length| (length - f64::from(2 * border)).max(0.0) as f32),
+        let response = treeview_mouse(
+            &self.holder.tree,
+            &settings,
+            self.treeview_area(&settings),
+            (self.holder.tree.active_screen(), self.view_path.as_ref()),
+            &mut self.treeview_pointer,
+            &mouse_event,
         );
-
         if response.damaged {
             self.surface.damage();
         }
@@ -1046,6 +1020,75 @@ impl RootNodeApplet {
             .tree
             .handle_event(StandardEvent::UIEvent(UIEvent::Mouse(mouse_event)));
         self.holder.do_zoom_action();
+    }
+
+    /// A pointer event over an inactive screen (not a press, which activates it): to its treeview and panes,
+    /// keys staying on the active screen (#158)
+    fn inactive_screen_mouse(&mut self, index: usize, mut mouse_event: MouseEvent) {
+        let settings = settings::get();
+        let [x, y, ..] = self.screens[index].rect;
+        mouse_event.position[0] -= f64::from(x);
+        mouse_event.position[1] -= f64::from(y);
+        let size = content_size(&settings, self.screens[index].rect);
+        let pinned = self.treeview_pinned;
+        let treeview_area = treeview_area(&settings, size, pinned, pinned);
+        let screen = &mut self.screens[index];
+        let response = treeview_mouse(
+            &self.holder.tree,
+            &settings,
+            treeview_area,
+            (index, screen.view_path.as_ref()),
+            &mut screen.treeview_pointer,
+            &mouse_event,
+        );
+        if response.damaged {
+            self.surface.damage();
+        }
+        // its actions come from presses, which activate the screen first
+        if response.consumed {
+            return;
+        }
+        mouse_event.position[0] -= f64::from(applet_area(treeview_area, size)[0]);
+        self.holder.tree.screen_mouse(index, mouse_event);
+    }
+
+    /// The pointer left the screen: its treeview clears its hover
+    fn treeview_mouse(&mut self, index: usize, mouse_event: &MouseEvent) {
+        let settings = settings::get();
+        let outside = MouseEvent {
+            kind: MouseEventKind::Motion,
+            position: [-1.0; 2],
+            ..*mouse_event
+        };
+        let active = index == self.holder.tree.active_screen();
+        let size = match self.screens.get(index) {
+            Some(screen) if !active => content_size(&settings, screen.rect),
+            Some(_) => self.latest_size,
+            None => return,
+        };
+        let (shown, pinned) = if active {
+            (self.treeview_shown, self.treeview_pinned)
+        } else {
+            (self.treeview_pinned, self.treeview_pinned)
+        };
+        let area = treeview_area(&settings, size, shown, pinned);
+        let (view_path, pointer) = if active {
+            (self.view_path.as_ref(), &mut self.treeview_pointer)
+        } else {
+            let screen = &mut self.screens[index];
+            (screen.view_path.as_ref(), &mut screen.treeview_pointer)
+        };
+        let response = treeview_mouse(
+            &self.holder.tree,
+            &settings,
+            area,
+            (index, view_path),
+            pointer,
+            &outside,
+        );
+        if response.damaged {
+            self.surface.damage();
+        }
     }
 
     /// The status bar's arrow
@@ -1628,6 +1671,62 @@ fn uncolored_rows(
 }
 
 /// The treeview's rows, and where its menu adds things when opened on no row (the view root)
+/// The screen's treeview's take on a pointer event in the screen's coords (`area`: where the treeview is, if shown)
+fn treeview_mouse(
+    tree: &NodeTree,
+    settings: &Settings,
+    area: Option<([u32; 4], TreeviewPlace)>,
+    (screen, view_path): (usize, Option<&WorldTreePath>),
+    pointer: &mut TreeviewPointer,
+    mouse_event: &MouseEvent,
+) -> TreeviewResponse {
+    // a hidden treeview has no rows to hit
+    let (rows, general) = if area.is_some() {
+        view_rows(tree, view_path, screen)
+    } else {
+        (Vec::new(), WorldTreePath::root())
+    };
+    // in the treeview's coords, inside its frame
+    let ([x, y, width, height], border) = area.map_or(([0; 4], 0), |(area, place)| {
+        treeview_frame(settings, area, place)
+    });
+    let [x, y, width, height] = [x, y, width, height].map(f64::from);
+    let [pointer_x, pointer_y] = mouse_event.position;
+    let in_treeview = area.is_some()
+        && (x..x + width).contains(&pointer_x)
+        && (y..y + height).contains(&pointer_y);
+    let mut treeview_event = *mouse_event;
+    treeview_event.position = [
+        pointer_x - x - f64::from(border),
+        pointer_y - y - f64::from(border),
+    ];
+    // the pin button is off (#150)
+    // let inner_width = (width - f64::from(2 * border)).max(0.0);
+    // if in_treeview
+    //     && !self.treeview_pointer.is_pressed()
+    //     && on_pin_button(treeview_event.position, inner_width)
+    //     && matches!(
+    //         mouse_event.kind,
+    //         MouseEventKind::Button {
+    //             button: BTN_LEFT,
+    //             pressed: true
+    //         }
+    //     )
+    // {
+    //     self.treeview_pinned = !self.treeview_pinned;
+    //     self.surface.damage();
+    //     self.update_treeview_visibility();
+    //     return;
+    // }
+    pointer.handle_mouse(
+        &treeview_event,
+        in_treeview,
+        &rows,
+        &general,
+        [width, height].map(|length| (length - f64::from(2 * border)).max(0.0) as f32),
+    )
+}
+
 fn view_rows(
     tree: &NodeTree,
     view_path: Option<&WorldTreePath>,
@@ -1944,9 +2043,15 @@ mod tests {
         sizes: [Option<DisplayContainerSize>; 2],
         flips: u32,
     }
+    /// Tabs that got a pointer event, by name
+    static POINTED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
     impl StandardApplet for Tab {
         /// A wl client sized like this crashes or is flooded with configures and dropped, closing its tab
         fn handle_standard_event(&mut self, event: StandardEvent) {
+            if let StandardEvent::UIEvent(UIEvent::Mouse(_)) = event {
+                POINTED.lock().unwrap().push(self.name.clone());
+            }
             if let StandardEvent::UIEvent(UIEvent::WindowResized(size)) = event {
                 // no bigger than a screen, nor collapsed
                 assert!(
@@ -2470,6 +2575,68 @@ mod tests {
         let swapped = focus(&root);
         assert_eq!(swapped[0], after[1]);
         assert_eq!(swapped[1].0, after[0].0);
+    }
+
+    /// The pointer over an inactive screen reaches what it shows there, inside a project too, without making it
+    /// active; a press does (#158)
+    #[test]
+    fn pointer_acts_on_inactive_screen() {
+        let mut event_loop = EventLoop::<RootNodeApplet>::try_new().unwrap();
+        let (world, _calls) = calloop::channel::channel();
+        let (request_sender, _requests) = calloop::channel::channel();
+        let mut root = RootNodeApplet::new(
+            ProjectApplet::restorer(container(
+                Some("p"),
+                vec![tab("pointed 0", Vec::new()), tab("pointed 1", Vec::new())],
+            )),
+            BTreeMap::from([("tab".to_string(), Box::new(TabSpawner) as AppletSpawner)]),
+            None,
+            SharedState::new(StateKind::Surface, UITree::leaf(UIElement::Nothing)),
+            request_sender,
+            &event_loop.handle(),
+            world,
+        );
+        let screens = named(&[("A", [0, 0, 800, 600]), ("B", [800, 0, 800, 600])]);
+        send(&mut event_loop, &mut root, StandardEvent::Screens(screens));
+        let inner = |i| WorldTreePath(vec![Step::Inner(i)]);
+        send(&mut event_loop, &mut root, StandardEvent::Focus(inner(0)));
+        send(&mut event_loop, &mut root, StandardEvent::ActivateScreen(1));
+        send(&mut event_loop, &mut root, StandardEvent::Focus(inner(1)));
+        send(&mut event_loop, &mut root, StandardEvent::ActivateScreen(0));
+        pump(&mut event_loop, &mut root, 200);
+        let pointed = || {
+            let mut pointed = POINTED.lock().unwrap();
+            let names: Vec<String> = pointed
+                .drain(..)
+                .filter(|name| name.starts_with("pointed"))
+                .collect();
+            names
+        };
+        pointed();
+
+        let mouse = |kind, x| {
+            StandardEvent::UIEvent(UIEvent::Mouse(MouseEvent {
+                kind,
+                position: [x, 300.0],
+                time_msec: None,
+            }))
+        };
+        send(
+            &mut event_loop,
+            &mut root,
+            mouse(MouseEventKind::Motion, 1500.0),
+        );
+        pump(&mut event_loop, &mut root, 50);
+        assert!(pointed().contains(&"pointed 1".to_string()));
+        assert_eq!(root.holder.tree.active_screen(), 0);
+
+        let press = MouseEventKind::Button {
+            button: ui::BTN_LEFT,
+            pressed: true,
+        };
+        send(&mut event_loop, &mut root, mouse(press, 1500.0));
+        pump(&mut event_loop, &mut root, 50);
+        assert_eq!(root.holder.tree.active_screen(), 1);
     }
 
     /// Projects' colors reach the root's treeview rows through the projects holding them (#76)

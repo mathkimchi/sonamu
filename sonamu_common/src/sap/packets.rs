@@ -248,6 +248,9 @@ pub enum StandardEvent {
     Place(Option<WorldTreePath>, SpawnPosition, DetachedTree),
     /// Focus the element at this path of the client's treeview (eg it was clicked in the root's treeview)
     Focus(WorldTreePath),
+    /// A pointer event (not a press) on an inactive screen, for a client showing each screen a window
+    /// (`Treeview::screen_windows`, eg a project); others get it as a plain `UIEvent::Mouse` (#158)
+    ScreenMouse(usize, MouseEvent),
     /// Focus, on the screen, the first of these nodes (a node's uid, then its ancestors') still in the client's
     /// inner world, eg a restored session's (#158)
     FocusChain {

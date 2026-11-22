@@ -1882,6 +1882,37 @@ impl NodeTree {
         );
     }
 
+    /// A pointer event (not a press) on a screen, in its coords: to the pane under it, like `handle_mouse` but
+    /// focusing nothing (#158). A main showing each screen a window (eg a project) is told the screen.
+    pub fn screen_mouse(&mut self, screen: usize, mut mouse_event: MouseEvent) {
+        if screen == self.active_screen {
+            self.handle_mouse(mouse_event);
+            return;
+        }
+        let Some(&pane) = self.screens.get(screen).and_then(|shown| {
+            shown
+                .panes
+                .iter()
+                .find(|pane| pane.contains(mouse_event.position))
+        }) else {
+            return;
+        };
+        mouse_event.position[0] -= f64::from(pane.rect[0]) + f64::from(pane.border);
+        mouse_event.position[1] -= f64::from(pane.rect[1]) + f64::from(pane.border);
+        let Some(main) = self
+            .nodes
+            .get(pane.node)
+            .and_then(|node| node.main.as_ref())
+        else {
+            return;
+        };
+        main.send_event(if main.get_treeview().screen_windows {
+            StandardEvent::ScreenMouse(screen, mouse_event)
+        } else {
+            StandardEvent::UIEvent(UIEvent::Mouse(mouse_event))
+        });
+    }
+
     /// The node `id` shows, following the children `focus` is under
     /// (eg another screen's focus, which the nodes' own focus doesn't point to)
     fn displayed_node_toward(&self, mut id: NodeId, focus: NodeId) -> NodeId {
