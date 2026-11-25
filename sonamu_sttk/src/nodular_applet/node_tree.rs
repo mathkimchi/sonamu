@@ -1713,6 +1713,7 @@ impl NodeTree {
                 .iter()
                 .map(|&child| self.nodes[child].uid)
                 .collect(),
+            group: None,
         });
     }
 
@@ -4163,6 +4164,7 @@ mod tests {
             ancestors: Vec::new(),
             prev,
             children,
+            group: None,
         }
     }
 

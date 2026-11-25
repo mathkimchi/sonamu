@@ -15,7 +15,9 @@ use std::{
 };
 
 /// Identifies a node in any world; kept when the node moves to another world
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct NodeUid(u64);
 static NEXT_UID: AtomicU64 = AtomicU64::new(1);
 impl NodeUid {

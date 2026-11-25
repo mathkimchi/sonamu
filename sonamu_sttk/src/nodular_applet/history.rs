@@ -27,6 +27,9 @@ pub struct Closed {
     pub prev: Option<NodeUid>,
     /// Its children, which its parent adopted
     pub children: Vec<NodeUid>,
+    /// Closed together (Close with children); restored together
+    #[serde(default)]
+    pub group: Option<u64>,
 }
 
 struct History {
@@ -35,6 +38,8 @@ struct History {
     /// Being restored: taken by the world of the node it goes under
     pending: BTreeMap<u64, Closed>,
     next_id: u64,
+    /// Nodes about to be closed together to their group (not saved)
+    grouping: BTreeMap<NodeUid, u64>,
     /// Since it was last saved
     changed: bool,
 }
@@ -43,11 +48,22 @@ static HISTORY: Mutex<History> = Mutex::new(History {
     entries: Vec::new(),
     pending: BTreeMap::new(),
     next_id: 1,
+    grouping: BTreeMap::new(),
     changed: false,
 });
 
 fn history() -> MutexGuard<'static, History> {
     HISTORY.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Makes the closes of these nodes one group
+pub fn group(uids: impl IntoIterator<Item = NodeUid>) {
+    let mut history = history();
+    let group = history.next_id;
+    history.next_id += 1;
+    history
+        .grouping
+        .extend(uids.into_iter().map(|uid| (uid, group)));
 }
 
 /// Remembers the closed node, unless the mode is `none`; the oldest go past `limit`
@@ -57,6 +73,7 @@ pub fn record(mut closed: Closed) {
         return;
     }
     let mut history = history();
+    closed.group = closed.tree.id.and_then(|uid| history.grouping.remove(&uid));
     closed.id = history.next_id;
     history.next_id += 1;
     history.entries.push(closed);
@@ -65,11 +82,26 @@ pub fn record(mut closed: Closed) {
     history.changed = true;
 }
 
-/// The newest entry, removed
-pub fn pop_last() -> Option<Closed> {
+/// The newest entry and the rest of its group, removed; newest first (the order to restore in)
+pub fn pop_newest() -> Vec<Closed> {
     let mut history = history();
     history.changed = true;
-    history.entries.pop()
+    take_newest(&mut history.entries)
+}
+
+fn take_newest(entries: &mut Vec<Closed>) -> Vec<Closed> {
+    let Some(newest) = entries.pop() else {
+        return Vec::new();
+    };
+    let mut taken = vec![newest];
+    if let Some(group) = taken[0].group {
+        let (same, rest): (Vec<_>, Vec<_>) = std::mem::take(entries)
+            .into_iter()
+            .partition(|entry| entry.group == Some(group));
+        *entries = rest;
+        taken.extend(same.into_iter().rev());
+    }
+    taken
 }
 
 /// Holds a popped entry until its world `take`s it

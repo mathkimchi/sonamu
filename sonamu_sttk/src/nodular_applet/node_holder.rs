@@ -255,7 +255,9 @@ impl NodeHolder {
         match action {
             NodeAction::Close => self.request_close(id),
             NodeAction::CloseWithChildren => {
-                for id in self.tree.subtree(id) {
+                let subtree = self.tree.subtree(id);
+                history::group(subtree.iter().map(|&id| self.tree.uid(id)));
+                for id in subtree {
                     // a node without a main closes right away, so a later one may be gone
                     if self.tree.contains_node(id) {
                         self.request_close(id);

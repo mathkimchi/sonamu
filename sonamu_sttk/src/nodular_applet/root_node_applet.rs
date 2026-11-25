@@ -519,23 +519,22 @@ impl RootNodeApplet {
         history::complete_ancestors(tree.uid(tree.root()), || tree.save());
     }
 
-    /// Restores the newest closed node under its nearest ancestor that's still there, else the root; that node's
+    /// Restores the newest closed node (with its group) under its nearest ancestor that's still there, else the root; that node's
     /// world does it (also this one, on its own thread's next turn)
     fn restore_closed(&mut self) {
         self.complete_history();
-        let Some(entry) = history::pop_last() else {
-            return;
-        };
-        let tree = &self.holder.tree;
-        let target = entry
-            .ancestors
-            .iter()
-            .copied()
-            .find(|&uid| command::is_alive(uid))
-            .unwrap_or_else(|| tree.uid(tree.root()));
-        let id = entry.id as f64;
-        history::hold(entry);
-        command::send(target, command::RESTORE_CLOSED, vec![Value::Number(id)]);
+        for entry in history::pop_newest() {
+            let tree = &self.holder.tree;
+            let target = entry
+                .ancestors
+                .iter()
+                .copied()
+                .find(|&uid| command::is_alive(uid))
+                .unwrap_or_else(|| tree.uid(tree.root()));
+            let id = entry.id as f64;
+            history::hold(entry);
+            command::send(target, command::RESTORE_CLOSED, vec![Value::Number(id)]);
+        }
     }
 
     /// Shows `sonamu_script`'s last message if it's new, until `ECHO_TIME` passes
