@@ -1668,15 +1668,22 @@ impl RootNodeApplet {
         pointer: &mut HistoryPointer,
     ) -> UITree {
         let settings = settings::get();
-        let ([x, y, width, height], border) = history_frame(&settings, area, place, pointer.keys);
+        let ([x, y, width, height], border) = history_frame(&settings, area, place);
         let inner = [width, height].map(|length| length.saturating_sub(2 * border) as f32);
+        let framed = treeview_frame(&settings, area, place).1 > 0;
         ui::frame(
             if pointer.keys {
                 settings.border.focused
-            } else {
+            } else if framed {
                 settings.border.treeview
+            } else {
+                ui::panel_bg(&settings.palette)
             },
-            if border > 0 { settings.radius } else { 0.0 },
+            if framed || pointer.keys {
+                settings.radius
+            } else {
+                0.0
+            },
             border as f32,
             Style::absolute([x as f32, y as f32], [width as f32, height as f32]),
             vec![pointer.view(&settings, inner)],
@@ -1738,7 +1745,7 @@ fn history_mouse(
     mouse_event: &MouseEvent,
 ) -> HistoryResponse {
     let ([x, y, width, height], border) = area.map_or(([0; 4], 0), |(area, place)| {
-        history_frame(settings, area, place, pointer.keys)
+        history_frame(settings, area, place)
     });
     let [x, y, width, height] = [x, y, width, height].map(f64::from);
     let [pointer_x, pointer_y] = mouse_event.position;
@@ -1880,15 +1887,11 @@ fn treeview_frame(
     }
 }
 
-/// The history view's frame: the treeview's, but with the keyboard it always has a border (inside the column)
-fn history_frame(
-    settings: &Settings,
-    area: [u32; 4],
-    place: TreeviewPlace,
-    keys: bool,
-) -> ([u32; 4], u32) {
+/// The history view's frame in `area` and its border width: the treeview's, but at least 1 px, so the frame
+/// shows while it has the keys without moving its rows (an unframed one's is in the panel's color meanwhile)
+fn history_frame(settings: &Settings, area: [u32; 4], place: TreeviewPlace) -> ([u32; 4], u32) {
     let (rect, border) = treeview_frame(settings, area, place);
-    (rect, if keys { border.max(1) } else { border })
+    (rect, border.max(1))
 }
 
 /// The treeview's rows: the view root's subtree (`view_path`, else the `NodeTree`'s),
