@@ -36,7 +36,8 @@
       {"mods": ["logo", "shift"], "key": "n", "command": "spawn_browser_sibling"},
       {"mods": ["logo"], "key": "w", "command": "close"},
       {"mods": ["logo"], "key": "p", "command": "wrap_project"},
-      {"mods": ["logo"], "key": "f", "command": "toggle_half"}
+      {"mods": ["logo"], "key": "f", "command": "toggle_half"},
+      {"mods": ["logo"], "key": "r", "command": "restore_closed"}
     ],
     "Tree": [
       {"mods": ["alt", "shift"], "key": "w", "command": "swap_sibling", "args": [-1]},
