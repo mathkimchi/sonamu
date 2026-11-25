@@ -130,7 +130,16 @@ fn shown(height: f32) -> usize {
 impl HistoryPointer {
     /// A key with the keyboard: Up/Down move the selection, Enter restores it, Delete removes it
     pub fn key(&mut self, symbol: Option<KeySymbol>, delete: bool) -> Option<HistoryAction> {
-        let entries = rows(&history::entries());
+        self.key_in(&rows(&history::entries()), symbol, delete)
+    }
+
+    /// `key` over the shown `entries`
+    fn key_in(
+        &mut self,
+        entries: &[(u64, String)],
+        symbol: Option<KeySymbol>,
+        delete: bool,
+    ) -> Option<HistoryAction> {
         let last = entries.len().saturating_sub(1);
         self.selected = self.selected.min(last);
         let id = entries.get(self.selected).map(|&(id, _)| id);
