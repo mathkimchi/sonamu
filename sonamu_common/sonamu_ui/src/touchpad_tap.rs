@@ -1,6 +1,6 @@
 //! Tapping the touchpad to click (#170): libinput detects taps; this decides which become clicks
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -9,7 +9,7 @@ pub enum Tap {
     None,
     /// Each tap clicks
     Single,
-    /// A tap only clicks right after another tap (within [`TWICE_WINDOW_MS`]), so a lone tap does nothing.
+    /// A tap only clicks right after another tap (within [`window_ms`]), so a lone tap does nothing.
     /// Tap twice then drag drags, three taps double click
     Twice,
 }
@@ -30,8 +30,17 @@ pub fn mode() -> Tap {
     }
 }
 
-/// For [`Tap::Twice`], from a tap's release to the next tap's press
-pub const TWICE_WINDOW_MS: u32 = 300;
+/// For [`Tap::Twice`], from a tap's release to the next tap's press; set from the settings (`double_click`)
+static WINDOW_MS: AtomicU32 = AtomicU32::new(400);
+
+pub fn set_window_ms(ms: u32) {
+    WINDOW_MS.store(ms, Ordering::Relaxed);
+}
+
+#[must_use]
+pub fn window_ms() -> u32 {
+    WINDOW_MS.load(Ordering::Relaxed)
+}
 
 /// Drops the button events of taps that shouldn't click
 #[derive(Debug, Default)]
@@ -47,6 +56,7 @@ impl TapFilter {
     pub fn pass(
         &mut self,
         mode: Tap,
+        window_ms: u32,
         tap: bool,
         button: u32,
         pressed: bool,
@@ -67,7 +77,7 @@ impl TapFilter {
             Tap::Single => true,
             Tap::Twice => self
                 .last_tap
-                .is_some_and(|last| time_msec.wrapping_sub(last) <= TWICE_WINDOW_MS),
+                .is_some_and(|last| time_msec.wrapping_sub(last) <= window_ms),
         };
         self.held.push((button, pass));
         pass
@@ -80,13 +90,16 @@ mod tests {
 
     const LEFT: u32 = 0x110;
     const RIGHT: u32 = 0x111;
+    const WINDOW: u32 = 400;
 
     /// Feeds (tap, button, pressed, time) events, returning which were passed on
     fn run(mode: Tap, events: &[(bool, u32, bool, u32)]) -> Vec<bool> {
         let mut filter = TapFilter::default();
         events
             .iter()
-            .map(|&(tap, button, pressed, time)| filter.pass(mode, tap, button, pressed, time))
+            .map(|&(tap, button, pressed, time)| {
+                filter.pass(mode, WINDOW, tap, button, pressed, time)
+            })
             .collect()
     }
 
@@ -160,7 +173,7 @@ mod tests {
         let taps = [
             (true, LEFT, true, 0),
             (false, LEFT, false, 100),
-            (true, LEFT, true, 100 + TWICE_WINDOW_MS + 1),
+            (true, LEFT, true, 100 + WINDOW + 1),
         ];
         assert_eq!(run(Tap::Twice, &taps), [false, false, false]);
     }

@@ -54,6 +54,13 @@
       "description": "Smaller copies of windows and images, so they look smooth when drawn small (eg the zoom-out view); a bit\nmore GPU work each time a window updates",
       "type": "boolean"
     },
+    "double_click": {
+      "description": "Two clicks within this are a double click, in seconds; also the most between taps for `touchpad_tap: twice`",
+      "type": "number",
+      "format": "float",
+      "minimum": 0.1,
+      "maximum": 2
+    },
     "treeview": {
       "$ref": "#/$defs/TreeviewSettings"
     },

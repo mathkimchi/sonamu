@@ -434,7 +434,7 @@ impl TreeviewPointer {
         row.filter(|row| row.path == press.path).map(|row| {
             let target = row.path.clone();
             let double = last_click
-                .is_some_and(|(path, time)| path == target && time.elapsed() < ui::DOUBLE_CLICK);
+                .is_some_and(|(path, time)| path == target && time.elapsed() < ui::double_click());
             if !press.on_close && !press.on_triangle && !double {
                 self.last_click = Some((target.clone(), Instant::now()));
             }

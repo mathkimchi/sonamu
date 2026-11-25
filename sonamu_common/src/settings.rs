@@ -77,6 +77,9 @@ pub struct Settings {
     /// Smaller copies of windows and images, so they look smooth when drawn small (eg the zoom-out view); a bit
     /// more GPU work each time a window updates
     pub mipmaps: bool,
+    /// Two clicks within this are a double click, in seconds; also the most between taps for `touchpad_tap: twice`
+    #[schemars(range(min = 0.1, max = 2))]
+    pub double_click: f32,
     pub treeview: TreeviewSettings,
     /// When the buffer line (a prompt at the bottom, like vim's command line: the agent, `!` Luau, `$` shell) shows
     pub buffer_line: BufferLine,
@@ -123,6 +126,12 @@ impl Settings {
             Some(battery) if on_battery => battery,
             _ => &self.wallpaper,
         }
+    }
+
+    /// `double_click` (clamped to its range, as loading doesn't)
+    #[must_use]
+    pub fn double_click(&self) -> Duration {
+        Duration::from_secs_f32(self.double_click.clamp(0.1, 2.0))
     }
 
     /// `gap` and `border.width`, rounded to whole px
@@ -887,6 +896,7 @@ fn reload_from(dir: &Path, reloading: bool) -> Option<Vec<PathBuf>> {
             sonamu_ui::ui_element::set_font_size(settings.font_size);
             sonamu_ui::mipmaps::set_enabled(settings.mipmaps);
             sonamu_ui::touchpad_tap::set_mode(settings.touchpad_tap.into());
+            sonamu_ui::touchpad_tap::set_window_ms(settings.double_click().as_millis() as u32);
             ALPHA.store(settings.alpha(), Ordering::Relaxed);
             if let Err(err) = crate::alacritty_theme::write(&settings) {
                 log::warn!("Could not write Alacritty's theme: {err}");

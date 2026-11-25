@@ -895,7 +895,7 @@ impl SettingsEditorApplet {
     fn double_clicked(&mut self, section: usize) -> bool {
         let double = self
             .title_click
-            .is_some_and(|(last, time)| last == section && time.elapsed() < ui::DOUBLE_CLICK);
+            .is_some_and(|(last, time)| last == section && time.elapsed() < ui::double_click());
         self.title_click = (!double).then(|| (section, Instant::now()));
         double
     }

@@ -971,10 +971,14 @@ impl DrmDisplay {
                     && device.config_tap_finger_count() > 0
                     && !physical_button_down(&self.device_fds, &device);
                 let time = event.time().millis();
-                if self
-                    .tap_filter
-                    .pass(touchpad_tap::mode(), tap, button, pressed, time)
-                {
+                if self.tap_filter.pass(
+                    touchpad_tap::mode(),
+                    touchpad_tap::window_ms(),
+                    tap,
+                    button,
+                    pressed,
+                    time,
+                ) {
                     self.send_mouse(MouseEventKind::Button { button, pressed }, time);
                 }
             }
