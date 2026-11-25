@@ -2965,4 +2965,40 @@ mod tests {
             ))
         );
     }
+
+    #[test]
+    fn side_areas_share_the_column() {
+        let mut settings = Settings::default();
+        settings.treeview.width = 20;
+        settings.treeview.side = TreeviewSide::Left;
+        let size = DisplayContainerSize::new(1000, 500);
+        let column = [0, 0, 200, 500];
+        let pinned = Some(SideView::History);
+
+        let areas = side_areas(&settings, size, pinned, false);
+        assert_eq!(areas.tree, None);
+        assert_eq!(
+            areas.history,
+            Some((column, TreeviewPlace::Column(TreeviewSide::Left)))
+        );
+        assert_eq!(applet_area(&settings, size, pinned), [200, 800]);
+
+        settings.treeview.floating = TreeviewFloating::Side;
+        let areas = side_areas(&settings, size, pinned, true);
+        assert_eq!(
+            areas.tree,
+            Some((column, TreeviewPlace::Column(TreeviewSide::Left)))
+        );
+        assert_eq!(areas.history, None);
+
+        settings.treeview.floating = TreeviewFloating::Center;
+        let areas = side_areas(&settings, size, pinned, true);
+        assert!(matches!(areas.tree, Some((_, TreeviewPlace::Floating))));
+        assert_eq!(
+            areas.history,
+            Some((column, TreeviewPlace::Column(TreeviewSide::Left)))
+        );
+
+        assert_eq!(applet_area(&settings, size, None), [0, 1000]);
+    }
 }

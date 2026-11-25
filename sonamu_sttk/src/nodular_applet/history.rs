@@ -340,4 +340,21 @@ mod tests {
         assert_eq!(ids(&take_newest(&mut entries)), [2]);
         assert!(take_newest(&mut entries).is_empty());
     }
+
+    /// An older entry is taken with its group, newest first; others keep their order
+    #[test]
+    fn take_at_takes_an_older_group() {
+        let mut entries = vec![
+            entry(1, Some(9)),
+            entry(2, None),
+            entry(3, Some(9)),
+            entry(4, Some(7)),
+            entry(5, None),
+        ];
+        let ids = |entries: &[Closed]| entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
+        assert_eq!(ids(&take_at(&mut entries, 0)), [3, 1]);
+        assert_eq!(ids(&entries), [2, 4, 5]);
+        assert_eq!(ids(&take_at(&mut entries, 1)), [4]);
+        assert_eq!(ids(&entries), [2, 5]);
+    }
 }
