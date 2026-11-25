@@ -266,4 +266,31 @@ mod tests {
         );
         assert_eq!(uid_ancestors(&tree, other), None);
     }
+
+    fn entry(id: u64, group: Option<u64>) -> Closed {
+        Closed {
+            id,
+            tree: SavedTree::default(),
+            ancestors: Vec::new(),
+            prev: None,
+            children: Vec::new(),
+            group,
+        }
+    }
+
+    /// A group comes out together, newest first; others stay
+    #[test]
+    fn take_newest_takes_the_group() {
+        let mut entries = vec![
+            entry(1, Some(9)),
+            entry(2, None),
+            entry(3, Some(9)),
+            entry(4, Some(9)),
+        ];
+        let ids = |entries: &[Closed]| entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
+        assert_eq!(ids(&take_newest(&mut entries)), [4, 3, 1]);
+        assert_eq!(ids(&entries), [2]);
+        assert_eq!(ids(&take_newest(&mut entries)), [2]);
+        assert!(take_newest(&mut entries).is_empty());
+    }
 }
