@@ -152,7 +152,7 @@ struct Screen {
 }
 
 /// Where the treeview is
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TreeviewPlace {
     /// Pinned beside the panes
     Column(TreeviewSide),
@@ -2756,5 +2756,44 @@ mod tests {
         let rows = view_tree_rows(&root.holder.tree, None, 0, false);
         // the root's tree is a project too, so `a`'s color crossed one; `b` is inside `a`, hibernated
         assert_eq!(rows[1].color, Some(red));
+    }
+
+    #[test]
+    fn treeview_area_follows_side_and_floating() {
+        let mut settings = Settings::default();
+        settings.treeview.width = 20;
+        let size = DisplayContainerSize::new(1000, 500);
+        assert_eq!(treeview_area(&settings, size, false, true), None);
+
+        settings.treeview.side = TreeviewSide::Left;
+        assert_eq!(
+            treeview_area(&settings, size, true, true),
+            Some(([0, 0, 200, 500], TreeviewPlace::Column(TreeviewSide::Left)))
+        );
+        settings.treeview.side = TreeviewSide::Right;
+        assert_eq!(
+            treeview_area(&settings, size, true, true),
+            Some((
+                [800, 0, 200, 500],
+                TreeviewPlace::Column(TreeviewSide::Right)
+            ))
+        );
+
+        settings.treeview.floating = TreeviewFloating::Center;
+        settings.treeview.floating_size = [40, 70];
+        assert_eq!(
+            treeview_area(&settings, size, true, false),
+            Some(([300, 75, 400, 350], TreeviewPlace::Floating))
+        );
+
+        settings.treeview.floating = TreeviewFloating::Side;
+        let (gap, _) = settings.gap_and_border_px();
+        assert_eq!(
+            treeview_area(&settings, size, true, false),
+            Some((
+                [800 + gap, gap, 200 - 2 * gap, 500 - 2 * gap],
+                TreeviewPlace::Floating
+            ))
+        );
     }
 }
