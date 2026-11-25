@@ -201,3 +201,37 @@ fn write(path: &Path, entries: &[Closed]) -> io::Result<()> {
     fs::write(&temporary, serde_json::to_string_pretty(entries)?)?;
     fs::rename(temporary, path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sonamu_common::sap::session::SavedApplet;
+
+    fn node(id: NodeUid, main: Option<SavedApplet>, children: Vec<SavedTree>) -> SavedTree {
+        SavedTree {
+            id: Some(id),
+            main,
+            children,
+            ..SavedTree::default()
+        }
+    }
+
+    /// Ancestors go through a spawner's inner tree too, nearest first
+    #[test]
+    fn uid_ancestors_goes_through_inner() {
+        let [root, project, inner_root, leaf, other] = [(); 5].map(|()| NodeUid::new());
+        let inner = node(inner_root, None, vec![node(leaf, None, Vec::new())]);
+        let spawner = SavedApplet::Spawner {
+            name: "project".to_string(),
+            args: Vec::new(),
+            inner: Some(Box::new(inner)),
+        };
+        let tree = node(root, None, vec![node(project, Some(spawner), Vec::new())]);
+        assert_eq!(uid_ancestors(&tree, root), Some(Vec::new()));
+        assert_eq!(
+            uid_ancestors(&tree, leaf),
+            Some(vec![inner_root, project, root])
+        );
+        assert_eq!(uid_ancestors(&tree, other), None);
+    }
+}

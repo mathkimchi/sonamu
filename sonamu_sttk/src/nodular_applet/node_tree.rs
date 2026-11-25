@@ -4129,6 +4129,136 @@ mod tests {
         }
     }
 
+    fn new_tree(saved: SavedTree) -> NodeTree {
+        let event_loop = calloop::EventLoop::<()>::try_new().unwrap();
+        let (spawn_client, attach_client) = client_spawners(
+            &event_loop.handle(),
+            Arc::new(RwLock::new(BTreeMap::new())),
+            |(), _, _| {},
+        );
+        let (world, _calls) = calloop::channel::channel();
+        NodeTree::restore(saved, spawn_client, attach_client, world)
+    }
+
+    /// A `tab` with a known uid
+    fn tab_uid(uid: NodeUid, children: Vec<SavedTree>) -> SavedTree {
+        SavedTree {
+            id: Some(uid),
+            ..tab(children)
+        }
+    }
+
+    fn child_uids(tree: &NodeTree, id: NodeId) -> Vec<NodeUid> {
+        tree.nodes[id]
+            .children
+            .iter()
+            .map(|&child| tree.nodes[child].uid)
+            .collect()
+    }
+
+    fn closed(uid: NodeUid, prev: Option<NodeUid>, children: Vec<NodeUid>) -> Closed {
+        Closed {
+            id: 0,
+            tree: tab_uid(uid, Vec::new()),
+            ancestors: Vec::new(),
+            prev,
+            children,
+        }
+    }
+
+    /// Root with `tabs` as children (known uids); returns the tree and uids
+    fn flat(count: usize) -> (NodeTree, Vec<NodeUid>) {
+        let uids: Vec<NodeUid> = (0..count).map(|_| NodeUid::new()).collect();
+        let saved = SavedTree {
+            children: uids.iter().map(|&uid| tab_uid(uid, Vec::new())).collect(),
+            ..SavedTree::default()
+        };
+        (new_tree(saved), uids)
+    }
+
+    fn node_with_uid(tree: &NodeTree, uid: NodeUid) -> NodeId {
+        tree.nodes
+            .iter()
+            .find(|(_, node)| node.uid == uid)
+            .unwrap()
+            .0
+    }
+
+    /// A restored node goes right after its previous sibling, keeping its uid (#162)
+    #[test]
+    fn restore_closed_goes_after_prev() {
+        let (mut tree, uids) = flat(3);
+        let root = tree.root();
+        let b = tree.nodes[root].children[1];
+        assert!(tree.close(b));
+        assert_eq!(child_uids(&tree, root), [uids[0], uids[2]]);
+        let id = tree.restore_closed(root, closed(uids[1], Some(uids[0]), Vec::new()));
+        assert_eq!(child_uids(&tree, root), uids);
+        assert_eq!(tree.nodes[id].uid, uids[1]);
+    }
+
+    /// A first child stays first even if siblings were added before it meanwhile
+    #[test]
+    fn restore_closed_first_child_stays_first() {
+        let (mut tree, uids) = flat(2);
+        let root = tree.root();
+        let a = tree.nodes[root].children[0];
+        assert!(tree.close(a));
+        let front = NodeUid::new();
+        tree.restore_closed(root, closed(front, None, Vec::new()));
+        tree.restore_closed(root, closed(uids[0], None, Vec::new()));
+        assert_eq!(child_uids(&tree, root), [uids[0], front, uids[1]]);
+    }
+
+    /// With the previous sibling gone, it goes last
+    #[test]
+    fn restore_closed_prev_gone_goes_last() {
+        let (mut tree, uids) = flat(3);
+        let root = tree.root();
+        let a = tree.nodes[root].children[0];
+        assert!(tree.close(a));
+        tree.restore_closed(root, closed(NodeUid::new(), Some(uids[0]), Vec::new()));
+        let id = node_with_uid(&tree, uids[2]);
+        assert!(tree.close(id));
+        let restored = NodeUid::new();
+        tree.restore_closed(root, closed(restored, Some(uids[2]), Vec::new()));
+        assert_eq!(child_uids(&tree, root).last(), Some(&restored));
+    }
+
+    /// The run of siblings after it that were its children are adopted again, in order
+    #[test]
+    fn restore_closed_adopts_run_after_it() {
+        let [x, p, c1, c2, c3, s1] = [(); 6].map(|()| NodeUid::new());
+        let saved = SavedTree {
+            children: [x, c3, c1, s1, c2]
+                .map(|uid| tab_uid(uid, Vec::new()))
+                .to_vec(),
+            ..SavedTree::default()
+        };
+        let mut tree = new_tree(saved);
+        let root = tree.root();
+        let id = tree.restore_closed(root, closed(p, Some(x), vec![c1, c2, c3]));
+        assert_eq!(child_uids(&tree, root), [x, p, s1, c2]);
+        assert_eq!(child_uids(&tree, id), [c3, c1]);
+        let adopted = tree.nodes[id].children[0];
+        assert_eq!(tree.nodes[adopted].parent, Some(id));
+    }
+
+    /// Nothing is adopted when the sibling after it wasn't its child
+    #[test]
+    fn restore_closed_adopts_nothing_when_next_isnt_former_child() {
+        let [x, p, s, c] = [(); 4].map(|()| NodeUid::new());
+        let saved = SavedTree {
+            children: [x, s, c].map(|uid| tab_uid(uid, Vec::new())).to_vec(),
+            ..SavedTree::default()
+        };
+        let mut tree = new_tree(saved);
+        let root = tree.root();
+        let id = tree.restore_closed(root, closed(p, Some(x), vec![c]));
+        assert_eq!(child_uids(&tree, root), [x, p, s, c]);
+        assert_eq!(child_uids(&tree, id), []);
+    }
+
     /// Where `node`'s pane is drawn in the zoom-out view now
     fn zoom_x(tree: &NodeTree, size: DisplayContainerSize, node: NodeId) -> i32 {
         let layout = tree.zoom_layout(size, 1.0).unwrap();
