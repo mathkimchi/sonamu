@@ -167,6 +167,10 @@ pub const KEYBIND_COMMANDS: &[CommandSpec] = &[
         args: ArgKind::None,
     },
     CommandSpec {
+        name: "restore_closed",
+        args: ArgKind::None,
+    },
+    CommandSpec {
         name: "wrap_project",
         args: ArgKind::None,
     },

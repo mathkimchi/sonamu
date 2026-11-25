@@ -4,7 +4,7 @@
 use crate::{
     nodular_applet::{
         AppletClient, AppletSpawnerRegistry, NodeRequest, NodularAppletInitializer,
-        WrapInitializer,
+        WrapInitializer, history,
         node_tree::{AttachClient, NodeId, NodeTree, SpawnClient},
         project_applet::ProjectApplet,
     },
@@ -543,6 +543,16 @@ impl NodeHolder {
                 Ok((Value::Nil, None))
             }
             "focus" => request(self, NodeRequest::FocusSelf),
+            // hidden: only the root's keybind sends it (a history entry's id), not in `NODE_COMMANDS`
+            command::RESTORE_CLOSED => (|| {
+                let entry = history::take((command::number_arg(args, 0)? as i64).cast_unsigned())
+                    .ok_or("that closed node was already restored")?;
+                let restored = self.tree.restore_closed(id, entry);
+                Ok((
+                    Value::Nil,
+                    self.handle_node_request(restored, NodeRequest::FocusSelf),
+                ))
+            })(),
             "add_child" => (|| {
                 let applet = command::string_arg(args, 0)?;
                 let applet_args = command::strings_arg(args, 1)?;

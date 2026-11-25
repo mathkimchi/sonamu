@@ -1,7 +1,9 @@
 use crate::{
     creatable_applet::CreatableNodularApplet,
     nodular_applet::{
-        NodeRequest, NodularAppletInitializer, swipe,
+        NodeRequest, NodularAppletInitializer,
+        history::{self, Closed},
+        swipe,
         traversal::Traversal,
         treeview::{Menu, MenuEvent, MenuItem, node_items},
     },
@@ -1676,6 +1678,84 @@ impl NodeTree {
             .is_some_and(|node| node.main.is_some() && matches!(node.focus, FocusIndex::Here))
     }
 
+    /// Remembers the node, if its main saves, to restore it (`restore_closed`).
+    /// Its ancestors end at this tree's root (the root completes them, `history::complete_ancestors`).
+    fn record_closed(&self, id: NodeId) {
+        let node = &self.nodes[id];
+        let Some(saved) = node
+            .main
+            .as_ref()
+            .and_then(|main| main.get_treeview().saved)
+        else {
+            return;
+        };
+        let parent = node.parent.unwrap();
+        let siblings = &self.nodes[parent].children;
+        let index = siblings.iter().position(|&child| child == id).unwrap();
+        let ancestors =
+            std::iter::successors(Some(parent), |&ancestor| self.nodes[ancestor].parent)
+                .map(|ancestor| self.nodes[ancestor].uid)
+                .collect();
+        history::record(Closed {
+            id: 0,
+            tree: SavedTree {
+                id: Some(node.uid),
+                main: Some(saved),
+                half: node.half,
+                ..SavedTree::default()
+            },
+            ancestors,
+            prev: index
+                .checked_sub(1)
+                .map(|prev| self.nodes[siblings[prev]].uid),
+            children: node
+                .children
+                .iter()
+                .map(|&child| self.nodes[child].uid)
+                .collect(),
+        });
+    }
+
+    /// Puts a closed node back under `parent` (hibernating, with its uid): after its previous sibling if that's
+    /// still a child, else first if it was, else last. Its former children right after it become its children again.
+    pub fn restore_closed(&mut self, parent: NodeId, entry: Closed) -> NodeId {
+        let siblings = &self.nodes[parent].children;
+        let index = match entry.prev {
+            None => 0,
+            Some(prev) => siblings
+                .iter()
+                .position(|&child| self.nodes[child].uid == prev)
+                .map_or(siblings.len(), |position| position + 1),
+        };
+        let id = self.restore_subtree(Some(parent), entry.tree);
+        let run = self.nodes[parent].children[index..]
+            .iter()
+            .take_while(|&&child| entry.children.contains(&self.nodes[child].uid))
+            .count();
+        let parent_node = &mut self.nodes[parent];
+        let adopted: Vec<NodeId> = parent_node.children[index..index + run].to_vec();
+        parent_node.children.splice(index..index + run, [id]);
+        let mut own_focus = FocusIndex::Here;
+        parent_node.focus = match parent_node.focus {
+            FocusIndex::Child(focused) if focused >= index + run => {
+                FocusIndex::Child(focused + 1 - run)
+            }
+            FocusIndex::Child(focused) if focused >= index => {
+                own_focus = FocusIndex::Child(focused - index);
+                FocusIndex::Child(index)
+            }
+            focus => focus,
+        };
+        for &child in &adopted {
+            self.nodes[child].parent = Some(id);
+        }
+        self.nodes[id].children = adopted;
+        self.nodes[id].focus = own_focus;
+        sonamu_script::emit("open", vec![Value::Node(self.nodes[id].uid)]);
+        self.damaged = true;
+        id
+    }
+
     /// Closes the node; its parent adopts its children in its place.
     /// If the focused child closed, the parent becomes focused.
     ///
@@ -1692,6 +1772,7 @@ impl NodeTree {
         if self.view_root == id {
             self.view_root = parent_id;
         }
+        self.record_closed(id);
         let closed = self.nodes.remove(id).unwrap();
         command::unregister(closed.uid);
         sonamu_script::emit("close", vec![Value::Node(closed.uid)]);

@@ -172,6 +172,14 @@ pub fn register(uid: NodeUid, world: World) {
         .insert(uid, world);
 }
 
+/// Whether the node is registered in some world
+pub fn is_alive(uid: NodeUid) -> bool {
+    WORLDS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .contains_key(&uid)
+}
+
 pub fn unregister(uid: NodeUid) {
     WORLDS
         .lock()
@@ -349,6 +357,10 @@ pub fn number_arg(args: &[Value], index: usize) -> Result<f64, String> {
     }
 }
 
+/// Node command of a keybind (not in `NODE_COMMANDS`, so not in scripts): restores the closed node whose
+/// history id is the argument, under the node
+pub const RESTORE_CLOSED: &str = "restore_closed";
+
 /// The node commands every node has (`Node` methods in scripts); an applet's can't use these names
 pub const NODE_COMMANDS: [&str; 13] = [
     "close",
@@ -370,7 +382,8 @@ pub const NODE_COMMANDS: [&str; 13] = [
 pub fn node_effect(name: &str) -> Option<Effect> {
     Some(match name {
         "parent" | "children" | "type" | "title" => Effect::Read,
-        "focus" | "add_child" | "swap_sibling" | "toggle_half" | "wrap_project" => Effect::Modify,
+        "focus" | "add_child" | "swap_sibling" | "toggle_half" | "wrap_project"
+        | RESTORE_CLOSED => Effect::Modify,
         "close" | "quit" => Effect::Destructive,
         "spawn" | "spawn_sibling" => Effect::Spawn,
         _ => return None,

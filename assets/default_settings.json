@@ -37,6 +37,7 @@
     "damping_ratio": 1.0
   },
   "zoom_out": { "child_previews": true, "view": "free" },
+  "history": { "mode": "full", "limit": 100 },
   "notifications": { "timeout": 5.0 },
   "keybinds": {
     "Global": [
@@ -50,6 +51,7 @@
       {"mods": ["logo"], "key": "n", "command": "spawn_browser"},
       {"mods": ["logo", "shift"], "key": "n", "command": "spawn_browser_sibling"},
       {"mods": ["logo"], "key": "w", "command": "close"},
+      {"mods": ["logo"], "key": "r", "command": "restore_closed"},
       {"mods": ["logo"], "key": "p", "command": "wrap_project"},
       {"mods": ["logo"], "key": "f", "command": "toggle_half"}
     ],

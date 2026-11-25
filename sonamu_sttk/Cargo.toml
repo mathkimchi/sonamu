@@ -11,6 +11,7 @@ sonamu_common = { path = "../sonamu_common" }
 sonamu_script = { workspace = true }
 sonamu_ui = { workspace = true }
 
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 calloop = { workspace = true }

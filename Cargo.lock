@@ -3660,6 +3660,7 @@ dependencies = [
  "log",
  "regex",
  "resvg",
+ "serde",
  "serde_json",
  "slotmap",
  "sonamu_common",

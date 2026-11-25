@@ -121,6 +121,7 @@ fn describe(action: &Action) -> String {
     match (command, text(0)) {
         ("quit", _) => "quit".to_owned(),
         ("close", _) => "close current tab".to_owned(),
+        ("restore_closed", _) => "restore the last closed tab".to_owned(),
         ("wrap_project", _) => "wrap current tab in a project".to_owned(),
         ("toggle_half", _) => "toggle half-view".to_owned(),
         ("spawn", Some(program)) => format!("spawn {program}"),

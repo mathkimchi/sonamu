@@ -2,7 +2,7 @@ use crate::{
     command_hub::repl::{self, Repl},
     man_page::ManPageApplet,
     nodular_applet::{
-        AppletSpawner, NodeRequest, NodularAppletInitializer,
+        AppletSpawner, NodeRequest, NodularAppletInitializer, history,
         node_holder::{NodeHolder, client_spawners},
         node_tree::{AttachClient, NodeId, NodeTree, SpawnClient},
         project_applet::ProjectApplet,
@@ -487,6 +487,8 @@ impl RootNodeApplet {
 
     /// Writes the session if it changed since the last write
     fn save_session(&mut self) {
+        self.complete_history();
+        history::save();
         if self.session_path.is_none() {
             return;
         }
@@ -509,6 +511,31 @@ impl RootNodeApplet {
             Ok(()) => self.saved_session = Some(session),
             Err(err) => log::warn!("Couldn't save the session to {}: {err}", path.display()),
         }
+    }
+
+    /// Lets the history's ancestors reach the root across projects
+    fn complete_history(&self) {
+        let tree = &self.holder.tree;
+        history::complete_ancestors(tree.uid(tree.root()), || tree.save());
+    }
+
+    /// Restores the newest closed node under its nearest ancestor that's still there, else the root; that node's
+    /// world does it (also this one, on its own thread's next turn)
+    fn restore_closed(&mut self) {
+        self.complete_history();
+        let Some(entry) = history::pop_last() else {
+            return;
+        };
+        let tree = &self.holder.tree;
+        let target = entry
+            .ancestors
+            .iter()
+            .copied()
+            .find(|&uid| command::is_alive(uid))
+            .unwrap_or_else(|| tree.uid(tree.root()));
+        let id = entry.id as f64;
+        history::hold(entry);
+        command::send(target, command::RESTORE_CLOSED, vec![Value::Number(id)]);
     }
 
     /// Shows `sonamu_script`'s last message if it's new, until `ECHO_TIME` passes
@@ -623,6 +650,7 @@ impl RootNodeApplet {
             },
         );
         let saved_session = session_path.as_deref().and_then(session::load);
+        history::load();
         let tree = match &saved_session {
             Some(saved) => restore_tree(saved, spawn_client, attach_client, world),
             None => NodeTree::new(root_initializer, spawn_client, attach_client, world),
@@ -828,6 +856,7 @@ impl RootNodeApplet {
                 self.set_view_root(&parent);
             }
             RootKeybind::Swipe { vertical, forward } => self.swipe_key(vertical, forward),
+            RootKeybind::RestoreClosed => self.restore_closed(),
         }
     }
 
@@ -1810,6 +1839,8 @@ enum RootKeybind {
     ViewRoot,
     /// The focus's parent as the view root
     ViewParent,
+    /// Restores the newest closed node (#162)
+    RestoreClosed,
     /// Like a 3 finger swipe, by one row
     Swipe {
         vertical: bool,
@@ -1817,7 +1848,7 @@ enum RootKeybind {
     },
 }
 impl RootKeybind {
-    /// From the keybinds (setting `keybinds`): `help`, `view_root`, `view_parent`, `swipe` and a direction
+    /// From the keybinds (setting `keybinds`): `help`, `view_root`, `view_parent`, `restore_closed`, `swipe` and a direction
     fn of(ui_event: &UIEvent) -> Option<Self> {
         let &UIEvent::Key { modifiers, .. } = ui_event else {
             return None;
@@ -1827,6 +1858,7 @@ impl RootKeybind {
             "help" => Self::Help,
             "view_root" => Self::ViewRoot,
             "view_parent" => Self::ViewParent,
+            "restore_closed" => Self::RestoreClosed,
             "swipe" => {
                 let (vertical, forward) = match args.first()?.as_str()? {
                     "left" => (false, false),

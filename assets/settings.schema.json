@@ -79,6 +79,10 @@
       "description": "The zoom-out view (#145)",
       "$ref": "#/$defs/ZoomOutSettings"
     },
+    "history": {
+      "description": "Restoring closed nodes (#162)",
+      "$ref": "#/$defs/HistorySettings"
+    },
     "notifications": {
       "description": "Desktop notifications, shown by the status bar (#150)",
       "$ref": "#/$defs/NotificationSettings"
@@ -462,6 +466,41 @@
           "description": "2 finger scrolls move it freely; clicks and arrows still move its center, but it stays put",
           "type": "string",
           "const": "free"
+        }
+      ]
+    },
+    "HistorySettings": {
+      "description": "The history of closed nodes (#162)",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/HistoryMode"
+        },
+        "limit": {
+          "description": "How many closed nodes it keeps; the oldest go first",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      }
+    },
+    "HistoryMode": {
+      "description": "Whether closed nodes are remembered",
+      "oneOf": [
+        {
+          "description": "Also across restarts (`history.json` beside the session)",
+          "type": "string",
+          "const": "full"
+        },
+        {
+          "description": "Until Sonamu quits",
+          "type": "string",
+          "const": "session"
+        },
+        {
+          "description": "Closed nodes are forgotten",
+          "type": "string",
+          "const": "none"
         }
       ]
     },

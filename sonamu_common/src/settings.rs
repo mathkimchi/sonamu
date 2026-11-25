@@ -88,6 +88,8 @@ pub struct Settings {
     pub swipe: SwipeSettings,
     /// The zoom-out view (#145)
     pub zoom_out: ZoomOutSettings,
+    /// Restoring closed nodes (#162)
+    pub history: HistorySettings,
     /// Desktop notifications, shown by the status bar (#150)
     pub notifications: NotificationSettings,
     /// Global shortcuts in named groups (shown as help sections): Sonamu commands or shell commands. Given, it
@@ -538,6 +540,27 @@ pub struct ZoomOutSettings {
     pub child_previews: bool,
     /// Whether the view floats freely (default), or keeps its center in the middle
     pub view: ZoomOutView,
+}
+
+/// The history of closed nodes (#162)
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[schemars(transform = optional_fields)]
+pub struct HistorySettings {
+    pub mode: HistoryMode,
+    /// How many closed nodes it keeps; the oldest go first
+    pub limit: usize,
+}
+
+/// Whether closed nodes are remembered
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryMode {
+    /// Also across restarts (`history.json` beside the session)
+    Full,
+    /// Until Sonamu quits
+    Session,
+    /// Closed nodes are forgotten
+    None,
 }
 
 /// How the zoom-out view moves
