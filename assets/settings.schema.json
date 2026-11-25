@@ -75,6 +75,10 @@
     "swipe": {
       "$ref": "#/$defs/SwipeSettings"
     },
+    "touchpad_tap": {
+      "description": "Tapping the touchpad to click (#170)",
+      "$ref": "#/$defs/TouchpadTap"
+    },
     "zoom_out": {
       "description": "The zoom-out view (#145)",
       "$ref": "#/$defs/ZoomOutSettings"
@@ -439,6 +443,26 @@
           "maximum": 2
         }
       }
+    },
+    "TouchpadTap": {
+      "description": "Tapping the touchpad to click (#170)",
+      "oneOf": [
+        {
+          "description": "Taps don't click",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "Each tap clicks",
+          "type": "string",
+          "const": "single"
+        },
+        {
+          "description": "A tap clicks only right after another, so a lone tap does nothing: tap twice to click, tap twice then\ndrag to drag, two finger taps right click",
+          "type": "string",
+          "const": "twice"
+        }
+      ]
     },
     "ZoomOutSettings": {
       "description": "The zoom-out view (#145); pinches scale it",

@@ -3,6 +3,7 @@ pub mod display_units;
 pub mod dmabuf;
 pub mod mipmaps;
 pub mod task_logger;
+pub mod touchpad_tap;
 pub mod ui_element;
 
 #[cfg(feature = "winit_backend")]

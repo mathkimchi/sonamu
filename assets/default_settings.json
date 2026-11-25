@@ -29,6 +29,7 @@
     "floating": "center",
     "floating_size": [40, 70]
   },
+  "touchpad_tap": "none",
   "swipe": {
     "distance_x": 600.0,
     "distance_y": 1200.0,

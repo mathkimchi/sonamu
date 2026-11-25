@@ -6,6 +6,7 @@
 use crate::{
     display_units::{DisplayAreaPx, DisplayContainerSize, ToPx},
     dmabuf,
+    touchpad_tap::{self, TapFilter},
     ui_element::{Cursor, CursorIcon, PrimitiveScene, RoundRect, UIPrimitiveElement},
     ui_event::{
         KeyModifiers, KeySymbol, MouseEvent, MouseEventKind, PinchPhase, SwipePhase, UIEvent,
@@ -42,14 +43,22 @@ use smithay::{
     input::keyboard::{Keycode, Keysym, xkb},
     reexports::{
         drm::control::{Device as _, Mode, ModeTypeFlags, connector, crtc},
-        input::{DeviceCapability, Libinput},
-        rustix::fs::OFlags,
+        input::{self as libinput, DeviceCapability, Libinput, LibinputInterface},
+        rustix::{
+            fs::OFlags,
+            io::dup,
+            ioctl::{Getter, ioctl, opcode},
+        },
     },
     utils::DeviceFd,
 };
 use sonamu_sync::TrackedEncapsulatedLock;
 use std::{
+    cell::RefCell,
     collections::HashMap,
+    os::fd::{AsRawFd as _, OwnedFd, RawFd},
+    path::Path,
+    rc::Rc,
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
@@ -64,6 +73,64 @@ const SCROLL_PER_NOTCH: f64 = 15.0;
 const NATURAL_SCROLL: bool = true;
 /// Size of the fallback box, when the cursor theme has no image
 const CURSOR_SIZE: [u32; 2] = [12, 18];
+
+/// Input devices libinput opened, by sysname (eg `event5`): the fd libinput got and a copy of it, to ask the kernel
+/// which buttons are down (an ioctl, so it doesn't take libinput's events)
+type DeviceFds = Rc<RefCell<HashMap<String, (RawFd, OwnedFd)>>>;
+
+/// Opens devices for libinput through the session, keeping [`DeviceFds`]
+struct RecordingInterface {
+    session: LibinputSessionInterface<LibSeatSession>,
+    fds: DeviceFds,
+}
+
+impl RecordingInterface {
+    fn new(session: &LibSeatSession, fds: &DeviceFds) -> Self {
+        Self {
+            session: LibinputSessionInterface::from(session.clone()),
+            fds: fds.clone(),
+        }
+    }
+}
+
+impl LibinputInterface for RecordingInterface {
+    fn open_restricted(&mut self, path: &Path, flags: i32) -> Result<OwnedFd, i32> {
+        let fd = self.session.open_restricted(path, flags)?;
+        if let (Some(name), Ok(copy)) = (path.file_name(), dup(&fd)) {
+            self.fds
+                .borrow_mut()
+                .insert(name.to_string_lossy().into_owned(), (fd.as_raw_fd(), copy));
+        }
+        Ok(fd)
+    }
+
+    fn close_restricted(&mut self, fd: OwnedFd) {
+        self.fds
+            .borrow_mut()
+            .retain(|_, &mut (raw, _)| raw != fd.as_raw_fd());
+        self.session.close_restricted(fd);
+    }
+}
+
+/// Whether a physical mouse button (left, right or middle) of the device is down now
+fn physical_button_down(fds: &DeviceFds, device: &libinput::Device) -> bool {
+    /// `EVIOCGKEY`: a bit per key code, up to `KEY_MAX` (0x2ff)
+    const EVIOCGKEY: u32 = opcode::read::<[u8; 0x60]>(b'E', 0x18);
+    /// `BTN_LEFT`, `BTN_RIGHT`, `BTN_MIDDLE`
+    const BUTTONS: [usize; 3] = [0x110, 0x111, 0x112];
+    let fds = fds.borrow();
+    let Some((_, fd)) = fds.get(device.sysname()) else {
+        // can't tell: as if pressed, so the button event is passed on
+        return true;
+    };
+    // SAFETY: EVIOCGKEY writes this many bytes of key bits
+    let Ok(keys) = (unsafe { ioctl(fd, Getter::<EVIOCGKEY, [u8; 0x60]>::new()) }) else {
+        return true;
+    };
+    BUTTONS
+        .iter()
+        .any(|&code| keys[code / 8] & (1 << (code % 8)) != 0)
+}
 
 /// A cursor uploaded to the GPU
 struct CursorImage {
@@ -180,6 +247,8 @@ struct DrmDisplay {
     formats: Vec<Format>,
     session: LibSeatSession,
     libinput: Libinput,
+    device_fds: DeviceFds,
+    tap_filter: TapFilter,
 }
 
 /// Like `UIDisplay::run_display`, but on the monitor directly. Returns when the display is closed.
@@ -269,7 +338,8 @@ impl DrmDisplay {
         let formats = scanout_formats(gpu)?;
         let keymap = default_keymap()?;
 
-        let mut libinput = Libinput::new_with_udev(LibinputSessionInterface::from(session.clone()));
+        let device_fds = DeviceFds::default();
+        let mut libinput = Libinput::new_with_udev(RecordingInterface::new(&session, &device_fds));
         libinput
             .udev_assign_seat(&seat)
             .map_err(|()| "can't assign libinput to the seat")?;
@@ -341,6 +411,8 @@ impl DrmDisplay {
             formats,
             session,
             libinput,
+            device_fds,
+            tap_filter: TapFilter::default(),
         };
         display.update_outputs();
         let Some(first) = display.outputs.first() else {
@@ -862,6 +934,11 @@ impl DrmDisplay {
                 {
                     let _ = device.config_scroll_set_natural_scroll_enabled(NATURAL_SCROLL);
                 }
+                // taps always reach `tap_filter`, which applies the setting (so it needs no device reconfiguring)
+                if device.config_tap_finger_count() > 0 {
+                    let _ = device.config_tap_set_enabled(true);
+                    let _ = device.config_tap_set_drag_enabled(true);
+                }
             }
             InputEvent::Keyboard { event } => {
                 self.handle_key(event.key_code(), event.state() == KeyState::Pressed);
@@ -886,13 +963,21 @@ impl DrmDisplay {
                 self.needs_draw = true;
                 self.send_mouse(MouseEventKind::Motion, event.time().millis());
             }
-            InputEvent::PointerButton { event } => self.send_mouse(
-                MouseEventKind::Button {
-                    button: event.button_code(),
-                    pressed: event.state() == ButtonState::Pressed,
-                },
-                event.time().millis(),
-            ),
+            InputEvent::PointerButton { event } => {
+                let button = event.button_code();
+                let pressed = event.state() == ButtonState::Pressed;
+                let device = event.device();
+                let tap = pressed
+                    && device.config_tap_finger_count() > 0
+                    && !physical_button_down(&self.device_fds, &device);
+                let time = event.time().millis();
+                if self
+                    .tap_filter
+                    .pass(touchpad_tap::mode(), tap, button, pressed, time)
+                {
+                    self.send_mouse(MouseEventKind::Button { button, pressed }, time);
+                }
+            }
             InputEvent::PointerAxis { event } => {
                 let axis_delta = |axis| {
                     // wheels give notches, touchpads give px

@@ -86,6 +86,8 @@ pub struct Settings {
     /// The agent's system prompt
     pub agent_prompt: String,
     pub swipe: SwipeSettings,
+    /// Tapping the touchpad to click (#170)
+    pub touchpad_tap: TouchpadTap,
     /// The zoom-out view (#145)
     pub zoom_out: ZoomOutSettings,
     /// Restoring closed nodes (#162)
@@ -523,6 +525,29 @@ pub struct SwipeSettings {
     pub damping_ratio: f32,
 }
 
+/// Tapping the touchpad to click (#170)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TouchpadTap {
+    /// Taps don't click
+    None,
+    /// Each tap clicks
+    Single,
+    /// A tap clicks only right after another, so a lone tap does nothing: tap twice to click, tap twice then
+    /// drag to drag, two finger taps right click
+    Twice,
+}
+
+impl From<TouchpadTap> for sonamu_ui::touchpad_tap::Tap {
+    fn from(tap: TouchpadTap) -> Self {
+        match tap {
+            TouchpadTap::None => Self::None,
+            TouchpadTap::Single => Self::Single,
+            TouchpadTap::Twice => Self::Twice,
+        }
+    }
+}
+
 /// Desktop notifications (#150)
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[schemars(transform = optional_fields)]
@@ -861,6 +886,7 @@ fn reload_from(dir: &Path, reloading: bool) -> Option<Vec<PathBuf>> {
             // read by sonamu_ui itself (eg char grid sizes), which can't see the settings
             sonamu_ui::ui_element::set_font_size(settings.font_size);
             sonamu_ui::mipmaps::set_enabled(settings.mipmaps);
+            sonamu_ui::touchpad_tap::set_mode(settings.touchpad_tap.into());
             ALPHA.store(settings.alpha(), Ordering::Relaxed);
             if let Err(err) = crate::alacritty_theme::write(&settings) {
                 log::warn!("Could not write Alacritty's theme: {err}");
