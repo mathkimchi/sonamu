@@ -3,6 +3,7 @@ use crate::{
     nodular_applet::{
         NodeRequest, NodularAppletInitializer,
         history::{self, Closed},
+        project_applet::ProjectApplet,
         swipe,
         traversal::Traversal,
         treeview::{Menu, MenuEvent, MenuItem, node_items},
@@ -460,10 +461,21 @@ impl NodeTree {
         parent: Option<NodeId>,
         initializer: NodularAppletInitializer,
     ) -> NodeId {
+        self.insert_node_with_uid(parent, None, initializer)
+    }
+
+    /// Like `insert_node`, the node keeping `uid` if given
+    fn insert_node_with_uid(
+        &mut self,
+        parent: Option<NodeId>,
+        uid: Option<NodeUid>,
+        initializer: NodularAppletInitializer,
+    ) -> NodeId {
         let spawn_client = &self.spawn_client;
-        let id = self
-            .nodes
-            .insert_with_key(|id| Node::new(Some(spawn_client(id, initializer)), parent));
+        let id = self.nodes.insert_with_key(|id| Node {
+            uid: uid.unwrap_or_default(),
+            ..Node::new(Some(spawn_client(id, initializer)), parent)
+        });
         self.register(id);
         self.send_initial_size(id);
         sonamu_script::emit("open", vec![Value::Node(self.nodes[id].uid)]);
@@ -914,6 +926,7 @@ impl NodeTree {
             return;
         };
         let parent = node.parent;
+        self.record_dissolved(id, &tree);
         let was_focused = self.focused_node() == id;
         let new = self.attach_subtree(parent, tree);
         self.replace_child(parent, id, new);
@@ -1681,14 +1694,60 @@ impl NodeTree {
     /// Remembers the node, if its main saves, to restore it (`restore_closed`).
     /// Its ancestors end at this tree's root (the root completes them, `history::complete_ancestors`).
     fn record_closed(&self, id: NodeId) {
-        let node = &self.nodes[id];
-        let Some(saved) = node
+        let Some(saved) = self.nodes[id]
             .main
             .as_ref()
             .and_then(|main| main.get_treeview().saved)
         else {
             return;
         };
+        self.record(id, saved, Vec::new());
+    }
+
+    /// Remembers a project about to dissolve into `contents` (`unwrap`), to wrap them back in on restore
+    fn record_dissolved(&self, id: NodeId, contents: &DetachedTree) {
+        let node = &self.nodes[id];
+        if node.parent.is_none() {
+            return;
+        }
+        let Some(SavedApplet::Spawner {
+            name,
+            args,
+            inner: Some(inner),
+        }) = node
+            .main
+            .as_ref()
+            .and_then(|main| main.get_treeview().saved)
+        else {
+            return;
+        };
+        if name != ProjectApplet::SPAWNER {
+            return;
+        }
+        let inner = SavedTree {
+            id: inner.id,
+            label: inner.label,
+            icon: inner.icon,
+            color: inner.color,
+            directory: inner.directory,
+            ..SavedTree::default()
+        };
+        let main = SavedApplet::Spawner {
+            name,
+            args,
+            inner: Some(Box::new(inner)),
+        };
+        let uids = contents
+            .children
+            .iter()
+            .filter_map(|child| child.uid)
+            .collect();
+        self.record(id, main, uids);
+    }
+
+    /// Records the node (not its children) as closed: its ancestors, previous sibling and children's uids
+    fn record(&self, id: NodeId, main: SavedApplet, contents: Vec<NodeUid>) {
+        let node = &self.nodes[id];
         let parent = node.parent.unwrap();
         let siblings = &self.nodes[parent].children;
         let index = siblings.iter().position(|&child| child == id).unwrap();
@@ -1700,7 +1759,7 @@ impl NodeTree {
             id: 0,
             tree: SavedTree {
                 id: Some(node.uid),
-                main: Some(saved),
+                main: Some(main),
                 half: node.half,
                 ..SavedTree::default()
             },
@@ -1713,6 +1772,7 @@ impl NodeTree {
                 .iter()
                 .map(|&child| self.nodes[child].uid)
                 .collect(),
+            contents,
             group: None,
         });
     }
@@ -1728,7 +1788,13 @@ impl NodeTree {
                 .position(|&child| self.nodes[child].uid == prev)
                 .map_or(siblings.len(), |position| position + 1),
         };
-        let id = self.restore_subtree(Some(parent), entry.tree);
+        let id = if entry.contents.is_empty() {
+            let id = self.restore_subtree(Some(parent), entry.tree);
+            sonamu_script::emit("open", vec![Value::Node(self.nodes[id].uid)]);
+            id
+        } else {
+            self.rewrap_closed(parent, index, entry.tree, &entry.contents)
+        };
         let run = self.nodes[parent].children[index..]
             .iter()
             .take_while(|&&child| entry.children.contains(&self.nodes[child].uid))
@@ -1752,8 +1818,67 @@ impl NodeTree {
         }
         self.nodes[id].children = adopted;
         self.nodes[id].focus = own_focus;
-        sonamu_script::emit("open", vec![Value::Node(self.nodes[id].uid)]);
         self.damaged = true;
+        id
+    }
+
+    /// Makes the dissolved project again (live, with its uid) around the run of `parent`'s children from `index`
+    /// that are its `contents`, which leave `parent` (not added to its children)
+    fn rewrap_closed(
+        &mut self,
+        parent: NodeId,
+        index: usize,
+        tree: SavedTree,
+        contents: &[NodeUid],
+    ) -> NodeId {
+        let Some(SavedApplet::Spawner {
+            inner: Some(inner), ..
+        }) = &tree.main
+        else {
+            return self.restore_subtree(Some(parent), tree);
+        };
+        let inner = (**inner).clone();
+        let run = self.nodes[parent].children[index..]
+            .iter()
+            .take_while(|&&child| contents.contains(&self.nodes[child].uid))
+            .count();
+        let taken: Vec<NodeId> = self.nodes[parent]
+            .children
+            .drain(index..index + run)
+            .collect();
+        let had_view_root = taken
+            .iter()
+            .any(|&child| self.contains(child, self.view_root));
+        let parent_node = &mut self.nodes[parent];
+        // the restored node is focused next
+        parent_node.focus = match parent_node.focus {
+            FocusIndex::Child(focused) if focused >= index + run => {
+                FocusIndex::Child(focused - run)
+            }
+            FocusIndex::Child(focused) if focused >= index => FocusIndex::Here,
+            focus => focus,
+        };
+        let children = taken
+            .into_iter()
+            .map(|child| self.detach_subtree(child))
+            .collect();
+        let contents = DetachedTree {
+            main: None,
+            uid: inner.id,
+            children,
+            wl_surface: None,
+            hibernated: None,
+            awaiting: None,
+        };
+        let id = self.insert_node_with_uid(
+            Some(parent),
+            tree.id,
+            ProjectApplet::rewrapper(contents, inner),
+        );
+        self.nodes[id].half = tree.half;
+        if had_view_root {
+            self.view_root = id;
+        }
         id
     }
 
@@ -4164,6 +4289,7 @@ mod tests {
             ancestors: Vec::new(),
             prev,
             children,
+            contents: Vec::new(),
             group: None,
         }
     }

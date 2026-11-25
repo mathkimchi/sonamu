@@ -27,6 +27,9 @@ pub struct Closed {
     pub prev: Option<NodeUid>,
     /// Its children, which its parent adopted
     pub children: Vec<NodeUid>,
+    /// A dissolved project's contents (its inner root's children), to wrap back in
+    #[serde(default)]
+    pub contents: Vec<NodeUid>,
     /// Closed together (Close with children); restored together
     #[serde(default)]
     pub group: Option<u64>,
@@ -274,6 +277,7 @@ mod tests {
             ancestors: Vec::new(),
             prev: None,
             children: Vec::new(),
+            contents: Vec::new(),
             group,
         }
     }

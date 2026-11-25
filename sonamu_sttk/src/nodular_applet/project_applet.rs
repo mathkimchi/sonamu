@@ -233,6 +233,20 @@ impl ProjectApplet {
         })
     }
 
+    /// Makes a project again around placed contents (`NodeTree::restore_closed`), with the look saved in `inner`
+    pub fn rewrapper(contents: DetachedTree, mut inner: SavedTree) -> NodularAppletInitializer {
+        NodularAppletInitializer::holding_children(move |hook| {
+            let mut project = Self::with_tree(hook, |spawn_client, attach_client, world| {
+                NodeTree::from_detached(contents, spawn_client, attach_client, world)
+            });
+            project.name = inner.label.take().unwrap_or_else(|| LABEL.to_string());
+            project.icon = inner.icon.take();
+            project.color = inner.color.take();
+            project.holder.directory = inner.directory.take();
+            Box::new(project) as Box<dyn StandardApplet>
+        })
+    }
+
     /// Its spawner's name in the registry
     pub const SPAWNER: &str = "project";
 
