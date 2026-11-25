@@ -317,3 +317,41 @@ impl HistoryPointer {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entries() -> Vec<(u64, String)> {
+        vec![(7, "a".into()), (8, "b".into()), (9, "c".into())]
+    }
+
+    #[test]
+    fn down_and_up_clamp_at_the_ends() {
+        let entries = entries();
+        let mut pointer = HistoryPointer::default();
+        pointer.key_in(&entries, Some(KeySymbol::ArrowKeyUp), false);
+        assert_eq!(pointer.selected, 0);
+        for _ in 0..5 {
+            pointer.key_in(&entries, Some(KeySymbol::ArrowKeyDown), false);
+        }
+        assert_eq!(pointer.selected, 2);
+        pointer.key_in(&entries, Some(KeySymbol::ArrowKeyUp), false);
+        assert_eq!(pointer.selected, 1);
+    }
+
+    #[test]
+    fn enter_restores_and_delete_removes_the_selected() {
+        let entries = entries();
+        let mut pointer = HistoryPointer::default();
+        pointer.key_in(&entries, Some(KeySymbol::ArrowKeyDown), false);
+        assert!(matches!(
+            pointer.key_in(&entries, Some(KeySymbol::Enter), false),
+            Some(HistoryAction::Restore(8))
+        ));
+        assert!(matches!(
+            pointer.key_in(&entries, None, true),
+            Some(HistoryAction::Remove(8))
+        ));
+    }
+}
