@@ -202,4 +202,37 @@ mod tests {
         ];
         assert_eq!(run(Tap::Smart, &taps), [false, false, false]);
     }
+
+    /// Moves at `moves`, then a tap touching at 1000; whether its press was passed on
+    fn tap_after_moves(moves: &[u32]) -> bool {
+        let mut filter = TapFilter::default();
+        for &time in moves {
+            filter.moved(time);
+        }
+        filter.pass(Tap::Smart, WINDOW, true, LEFT, true, 1000)
+    }
+
+    #[test]
+    fn smart_clicks_right_after_moving() {
+        assert!(tap_after_moves(&[700, 800]));
+    }
+
+    #[test]
+    fn smart_ignores_taps_long_after_moving() {
+        assert!(!tap_after_moves(&[100, 1000 - WINDOW - 1]));
+    }
+
+    #[test]
+    fn smart_ignores_the_taps_own_motion() {
+        // jitter while the finger was down, which libinput reports before the tap's press
+        assert!(!tap_after_moves(&[1000, 1050]));
+    }
+
+    #[test]
+    fn smart_forgets_old_motions() {
+        let mut filter = TapFilter::default();
+        filter.moved(0);
+        filter.moved(MAX_WINDOW_MS + 1);
+        assert_eq!(filter.motions, [MAX_WINDOW_MS + 1]);
+    }
 }
