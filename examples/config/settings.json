@@ -18,7 +18,7 @@
     "width": 15,
     "floating_size": [50, 70]
   },
-  "touchpad_tap": "twice",
+  "touchpad_tap": "smart",
   "swipe": {
     "distance_x": 600.0,
     "distance_y": 1200.0,

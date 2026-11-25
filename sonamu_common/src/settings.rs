@@ -77,7 +77,7 @@ pub struct Settings {
     /// Smaller copies of windows and images, so they look smooth when drawn small (eg the zoom-out view); a bit
     /// more GPU work each time a window updates
     pub mipmaps: bool,
-    /// Two clicks within this are a double click, in seconds; also the most between taps for `touchpad_tap: twice`
+    /// Two clicks within this are a double click, in seconds; also the most before a tap for `touchpad_tap: smart`
     #[schemars(range(min = 0.1, max = 2))]
     pub double_click: f32,
     pub treeview: TreeviewSettings,
@@ -542,9 +542,9 @@ pub enum TouchpadTap {
     None,
     /// Each tap clicks
     Single,
-    /// A tap clicks only right after another, so a lone tap does nothing: tap twice to click, tap twice then
-    /// drag to drag, two finger taps right click
-    Twice,
+    /// A tap clicks only right after moving the cursor or another tap, so stray taps (eg while typing) do
+    /// nothing. Move, tap, then touch and move again to drag; two finger taps right click
+    Smart,
 }
 
 impl From<TouchpadTap> for sonamu_ui::touchpad_tap::Tap {
@@ -552,7 +552,7 @@ impl From<TouchpadTap> for sonamu_ui::touchpad_tap::Tap {
         match tap {
             TouchpadTap::None => Self::None,
             TouchpadTap::Single => Self::Single,
-            TouchpadTap::Twice => Self::Twice,
+            TouchpadTap::Smart => Self::Smart,
         }
     }
 }

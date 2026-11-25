@@ -55,7 +55,7 @@
       "type": "boolean"
     },
     "double_click": {
-      "description": "Two clicks within this are a double click, in seconds; also the most between taps for `touchpad_tap: twice`",
+      "description": "Two clicks within this are a double click, in seconds; also the most before a tap for `touchpad_tap: smart`",
       "type": "number",
       "format": "float",
       "minimum": 0.1,
@@ -465,9 +465,9 @@
           "const": "single"
         },
         {
-          "description": "A tap clicks only right after another, so a lone tap does nothing: tap twice to click, tap twice then\ndrag to drag, two finger taps right click",
+          "description": "A tap clicks only right after moving the cursor or another tap, so stray taps (eg while typing) do\nnothing. Move, tap, then touch and move again to drag; two finger taps right click",
           "type": "string",
-          "const": "twice"
+          "const": "smart"
         }
       ]
     },

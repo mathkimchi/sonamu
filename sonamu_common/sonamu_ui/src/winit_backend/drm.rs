@@ -944,6 +944,9 @@ impl DrmDisplay {
                 self.handle_key(event.key_code(), event.state() == KeyState::Pressed);
             }
             InputEvent::PointerMotion { event } => {
+                if event.device().config_tap_finger_count() > 0 {
+                    self.tap_filter.moved(event.time().millis());
+                }
                 let delta = event.delta_unaccel();
                 let _ = self
                     .display_notification_queue

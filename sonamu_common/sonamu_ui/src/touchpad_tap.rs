@@ -1,6 +1,9 @@
 //! Tapping the touchpad to click (#170): libinput detects taps; this decides which become clicks
 
-use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use std::{
+    collections::VecDeque,
+    sync::atomic::{AtomicU8, AtomicU32, Ordering},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -9,9 +12,9 @@ pub enum Tap {
     None,
     /// Each tap clicks
     Single,
-    /// A tap only clicks right after another tap (within [`window_ms`]), so a lone tap does nothing.
-    /// Tap twice then drag drags, three taps double click
-    Twice,
+    /// A tap only clicks right after moving the cursor or another tap (within [`window_ms`]), so stray taps
+    /// (eg while typing) do nothing. Move, tap, then touch and move drags (libinput's tap-and-drag)
+    Smart,
 }
 
 /// Set from the settings (`touchpad_tap`)
@@ -26,11 +29,11 @@ pub fn mode() -> Tap {
     match MODE.load(Ordering::Relaxed) {
         0 => Tap::None,
         1 => Tap::Single,
-        _ => Tap::Twice,
+        _ => Tap::Smart,
     }
 }
 
-/// For [`Tap::Twice`], from a tap's release to the next tap's press; set from the settings (`double_click`)
+/// For [`Tap::Smart`], from moving or a tap's release to the next tap's press; set from the settings (`double_click`)
 static WINDOW_MS: AtomicU32 = AtomicU32::new(400);
 
 pub fn set_window_ms(ms: u32) {
@@ -42,6 +45,9 @@ pub fn window_ms() -> u32 {
     WINDOW_MS.load(Ordering::Relaxed)
 }
 
+/// The most `window_ms` can be (`double_click`'s range), so older motions are forgotten
+const MAX_WINDOW_MS: u32 = 2000;
+
 /// Drops the button events of taps that shouldn't click
 #[derive(Debug, Default)]
 pub struct TapFilter {
@@ -49,9 +55,24 @@ pub struct TapFilter {
     held: Vec<(u32, bool)>,
     /// When the last tap was released
     last_tap: Option<u32>,
+    /// When the touchpad moved the cursor lately, oldest first. A tap's press is timed when its finger touched,
+    /// but comes after the finger lifts (and after any motion it made itself), so motions after it are kept apart
+    motions: VecDeque<u32>,
 }
 
 impl TapFilter {
+    /// The touchpad moved the cursor
+    pub fn moved(&mut self, time_msec: u32) {
+        self.motions.push_back(time_msec);
+        while self
+            .motions
+            .front()
+            .is_some_and(|&old| time_msec.wrapping_sub(old) > MAX_WINDOW_MS)
+        {
+            self.motions.pop_front();
+        }
+    }
+
     /// Whether to pass on a button event. `tap`: the press came from a tap, not a physical button
     pub fn pass(
         &mut self,
@@ -75,9 +96,13 @@ impl TapFilter {
         let pass = match mode {
             Tap::None => false,
             Tap::Single => true,
-            Tap::Twice => self
-                .last_tap
-                .is_some_and(|last| time_msec.wrapping_sub(last) <= window_ms),
+            Tap::Smart => {
+                // 0 or wrapped: at or after the press
+                let just_before =
+                    |&time: &u32| (1..=window_ms).contains(&time_msec.wrapping_sub(time));
+                self.last_tap.as_ref().is_some_and(just_before)
+                    || self.motions.iter().any(just_before)
+            }
         };
         self.held.push((button, pass));
         pass
@@ -108,41 +133,41 @@ mod tests {
         let tap = [(true, LEFT, true, 0), (false, LEFT, false, 180)];
         assert_eq!(run(Tap::None, &tap), [false, false]);
         assert_eq!(run(Tap::Single, &tap), [true, true]);
-        assert_eq!(run(Tap::Twice, &tap), [false, false]);
+        assert_eq!(run(Tap::Smart, &tap), [false, false]);
     }
 
     #[test]
     fn physical_clicks_always_pass() {
         let click = [(false, LEFT, true, 0), (false, LEFT, false, 50)];
-        for mode in [Tap::None, Tap::Single, Tap::Twice] {
+        for mode in [Tap::None, Tap::Single, Tap::Smart] {
             assert_eq!(run(mode, &click), [true, true]);
         }
     }
 
     #[test]
-    fn twice_clicks_on_the_second_tap() {
+    fn smart_clicks_on_the_second_tap() {
         let taps = [
             (true, LEFT, true, 0),
             (false, LEFT, false, 100),
             (true, LEFT, true, 200),
             (false, LEFT, false, 300),
         ];
-        assert_eq!(run(Tap::Twice, &taps), [false, false, true, true]);
+        assert_eq!(run(Tap::Smart, &taps), [false, false, true, true]);
     }
 
     #[test]
-    fn twice_then_drag_holds_the_second_press() {
+    fn smart_then_drag_holds_the_second_press() {
         let taps = [
             (true, LEFT, true, 0),
             (false, LEFT, false, 100),
             (true, LEFT, true, 200),
             (false, LEFT, false, 2000),
         ];
-        assert_eq!(run(Tap::Twice, &taps), [false, false, true, true]);
+        assert_eq!(run(Tap::Smart, &taps), [false, false, true, true]);
     }
 
     #[test]
-    fn twice_three_taps_double_click() {
+    fn smart_three_taps_double_click() {
         let taps = [
             (true, LEFT, true, 0),
             (false, LEFT, false, 100),
@@ -152,29 +177,29 @@ mod tests {
             (false, LEFT, false, 500),
         ];
         assert_eq!(
-            run(Tap::Twice, &taps),
+            run(Tap::Smart, &taps),
             [false, false, true, true, true, true]
         );
     }
 
     #[test]
-    fn twice_right_clicks_after_any_tap() {
+    fn smart_right_clicks_after_any_tap() {
         let taps = [
             (true, LEFT, true, 0),
             (false, LEFT, false, 100),
             (true, RIGHT, true, 200),
             (false, RIGHT, false, 300),
         ];
-        assert_eq!(run(Tap::Twice, &taps), [false, false, true, true]);
+        assert_eq!(run(Tap::Smart, &taps), [false, false, true, true]);
     }
 
     #[test]
-    fn twice_slow_taps_dont_click() {
+    fn smart_slow_taps_dont_click() {
         let taps = [
             (true, LEFT, true, 0),
             (false, LEFT, false, 100),
             (true, LEFT, true, 100 + WINDOW + 1),
         ];
-        assert_eq!(run(Tap::Twice, &taps), [false, false, false]);
+        assert_eq!(run(Tap::Smart, &taps), [false, false, false]);
     }
 }
