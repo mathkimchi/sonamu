@@ -18,5 +18,5 @@
   - `startup`: run once at start (`run_startup`).
   - `displays` (#158): `{"<Make Model Serial> or <connector>": {position: [x, y], primary, ddc}}`, like niri (`sonamu_ui::winit_backend::layout`); the runner sends it to the DRM backend (`DisplayRequest::SetLayout`).
   - Alacritty theme (`alacritty_theme`): each load writes `opacity`, `font_size` (as pt, ×0.75) and `palette.bg`/`fg` to `$XDG_STATE_HOME/sonamu/alacritty.toml` (only if changed; renamed into place). Alacritty's config imports it (`general.import`) and live reloads.
-  - `treeview.side`/`floating*` are parsed but unused since the status bar (#150).
+  - `treeview` (#161): pinned column on `side` (`width` %); unpinned (Alt held after Alt+traversal) floats per `floating`: `center` (`floating_size` %) or `side` (column's place, gap around).
 - Gap: a settings program's background child holding stdout blocks reading after it exits.

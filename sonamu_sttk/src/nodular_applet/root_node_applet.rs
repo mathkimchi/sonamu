@@ -33,7 +33,7 @@ use sonamu_common::{
         session::Session,
         shared_state::{SharedState, StatePublisher},
     },
-    settings::{self, BufferLine, ERROR, Palette, Settings, TreeviewSide},
+    settings::{self, BufferLine, ERROR, Palette, Settings, TreeviewFloating, TreeviewSide},
     utils::tree::{
         tree_node_path::TreeNodePath,
         world_tree::{Step, WorldTree, WorldTreePath},
@@ -1554,54 +1554,37 @@ fn treeview_area(
     shown: bool,
     pinned: bool,
 ) -> Option<([u32; 4], TreeviewPlace)> {
-    // the left column, shown by the status bar's arrow (`pinned`); right side and centered floating are off (#150)
+    // pinned by the status bar's arrow; else floating while Alt is held after an Alt+traversal key
     if !shown {
         return None;
     }
+    let side = settings.treeview.side;
     let column = width * settings.treeview.width.min(100) / 100;
+    let column_x = match side {
+        TreeviewSide::Left => 0,
+        TreeviewSide::Right => width - column,
+    };
     if pinned {
-        return Some((
-            [0, 0, column, height],
-            TreeviewPlace::Column(TreeviewSide::Left),
-        ));
+        return Some(([column_x, 0, column, height], TreeviewPlace::Column(side)));
     }
-    // while Alt is held after an Alt+traversal key: over the panes in the column's place, the gap all around
-    let (gap, _) = settings.gap_and_border_px();
-    Some((
-        [
-            gap,
-            gap,
-            column.saturating_sub(2 * gap),
-            height.saturating_sub(2 * gap),
-        ],
-        TreeviewPlace::Floating,
-    ))
-    // let side = settings.treeview.side;
-    // let column_x = match side {
-    //     TreeviewSide::Left => 0,
-    //     TreeviewSide::Right => width - column,
-    // };
-    // if pinned {
-    //     return Some(([column_x, 0, column, height], TreeviewPlace::Column(side)));
-    // }
-    // let area = match settings.treeview.floating {
-    //     TreeviewFloating::Center => {
-    //         let [w, h] = settings.treeview.floating_size;
-    //         let [w, h] = [width * w.min(100) / 100, height * h.min(100) / 100];
-    //         [(width - w) / 2, (height - h) / 2, w, h]
-    //     }
-    //     // in the column's place, with the gap all around
-    //     TreeviewFloating::Side => {
-    //         let (gap, _) = settings.gap_and_border_px();
-    //         [
-    //             column_x + gap,
-    //             gap,
-    //             column.saturating_sub(2 * gap),
-    //             height.saturating_sub(2 * gap),
-    //         ]
-    //     }
-    // };
-    // Some((area, TreeviewPlace::Floating))
+    let area = match settings.treeview.floating {
+        TreeviewFloating::Center => {
+            let [w, h] = settings.treeview.floating_size;
+            let [w, h] = [width * w.min(100) / 100, height * h.min(100) / 100];
+            [(width - w) / 2, (height - h) / 2, w, h]
+        }
+        // in the column's place, with the gap all around
+        TreeviewFloating::Side => {
+            let (gap, _) = settings.gap_and_border_px();
+            [
+                column_x + gap,
+                gap,
+                column.saturating_sub(2 * gap),
+                height.saturating_sub(2 * gap),
+            ]
+        }
+    };
+    Some((area, TreeviewPlace::Floating))
 }
 
 /// The applets' area's left edge and width on a screen of `size`: beside a treeview column, else everything
