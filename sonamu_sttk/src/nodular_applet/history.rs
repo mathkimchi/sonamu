@@ -45,6 +45,14 @@ struct History {
     grouping: BTreeMap<NodeUid, u64>,
     /// Since it was last saved
     changed: bool,
+    /// Bumped on every change (`revision`)
+    revision: u64,
+}
+impl History {
+    fn touch(&mut self) {
+        self.changed = true;
+        self.revision += 1;
+    }
 }
 
 static HISTORY: Mutex<History> = Mutex::new(History {
@@ -53,6 +61,7 @@ static HISTORY: Mutex<History> = Mutex::new(History {
     next_id: 1,
     grouping: BTreeMap::new(),
     changed: false,
+    revision: 0,
 });
 
 fn history() -> MutexGuard<'static, History> {
@@ -82,13 +91,13 @@ pub fn record(mut closed: Closed) {
     history.entries.push(closed);
     let excess = history.entries.len().saturating_sub(settings.limit);
     history.entries.drain(..excess);
-    history.changed = true;
+    history.touch();
 }
 
 /// The newest entry and the rest of its group, removed; newest first (the order to restore in)
 pub fn pop_newest() -> Vec<Closed> {
     let mut history = history();
-    history.changed = true;
+    history.touch();
     take_newest(&mut history.entries)
 }
 
@@ -117,6 +126,11 @@ pub fn take(id: u64) -> Option<Closed> {
     history().pending.remove(&id)
 }
 
+/// Changes with every change of the entries, to tell when to redraw
+pub fn revision() -> u64 {
+    history().revision
+}
+
 pub fn entries() -> Vec<Closed> {
     history().entries.clone()
 }
@@ -139,6 +153,7 @@ pub fn complete_ancestors(root: NodeUid, tree: impl FnOnce() -> SavedTree) {
         }
         entry.ancestors.extend(above);
         history.changed = true;
+        history.revision += 1;
     }
 }
 
@@ -208,6 +223,7 @@ pub fn load() {
         .map_or(1, |max| max + 1);
     history.entries = entries;
     history.changed = false;
+    history.revision += 1;
 }
 
 /// Writes the file (`path`) if the mode is `full` and the history changed, atomically (through a temporary file)

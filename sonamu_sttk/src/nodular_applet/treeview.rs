@@ -20,7 +20,7 @@ use sonamu_ui::{
     ui_event::{MouseEvent, MouseEventKind},
 };
 
-const TOP_PAD: f32 = 8.0;
+pub(super) const TOP_PAD: f32 = 8.0;
 const MARKER_WIDTH: f32 = 6.0;
 /// The clickable width of a row's `▾`/`▸`, from the start of its label
 fn triangle_width() -> f32 {

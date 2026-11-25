@@ -44,7 +44,8 @@
       {"mods": ["alt", "shift"], "key": "s", "command": "swap_sibling", "args": [1]},
       {"mods": ["alt"], "key": "p", "command": "pluck_place"},
       {"mods": ["logo"], "key": "v", "command": "view_root"},
-      {"mods": ["alt"], "key": "r", "command": "view_parent"}
+      {"mods": ["alt"], "key": "r", "command": "view_parent"},
+      {"mods": ["logo"], "key": "h", "command": "history"}
     ],
     "Traversal": [
       {"mods": ["alt"], "key": "tab", "command": "traverse", "args": ["next"]},

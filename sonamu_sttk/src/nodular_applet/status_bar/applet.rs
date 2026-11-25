@@ -154,7 +154,7 @@ impl StatusBarApplet {
 
     fn bar_state(&self) -> BarState {
         BarState {
-            treeview_shown: self.state.treeview_shown,
+            pinned: self.state.pinned,
         }
     }
 
@@ -199,8 +199,8 @@ impl StatusBarApplet {
             self.surface.damage();
         }
         match response.action {
-            Some(BarAction::ToggleTreeview) => {
-                let _ = self.request_sender.send(BarRequest::ToggleTreeview);
+            Some(BarAction::Pin(view)) => {
+                let _ = self.request_sender.send(BarRequest::PinSideView(view));
             }
             Some(BarAction::SetBrightness(level)) => {
                 let _ = self.request_sender.send(BarRequest::SetBrightness(level));

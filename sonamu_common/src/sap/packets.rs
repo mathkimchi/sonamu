@@ -1,6 +1,9 @@
 use crate::{
     command::{CommandResult, NodeUid, Value},
-    sap::{detached::DetachedTree, session::SavedApplet},
+    sap::{
+        detached::DetachedTree,
+        session::{SavedApplet, SideView},
+    },
     settings::Settings,
     utils::tree::world_tree::{WorldTree, WorldTreePath},
 };
@@ -170,7 +173,7 @@ pub enum StandardRequest {
 /// What the status bar shows of the root
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BarState {
-    pub treeview_shown: bool,
+    pub pinned: Option<SideView>,
     /// The screen with the keyboard: popups show there
     pub active_screen: usize,
 }
@@ -186,8 +189,8 @@ pub enum BarRequest {
     Standard(StandardRequest),
     /// Its input region, when it changes
     Input(BarInput),
-    /// The bar's arrow was clicked: passed to the root as `StandardEvent::ToggleTreeview`
-    ToggleTreeview,
+    /// The bar's arrow chose the side view to pin (`None`: unpin): passed to the root as `StandardEvent::PinSideView`
+    PinSideView(Option<SideView>),
     /// A screen's bar was pressed, so it's active: passed to the root as `StandardEvent::ActivateScreen`
     ActivateScreen(usize),
     /// Open an applet (eg the hub's Settings row): passed to the root as `StandardEvent::Open`
@@ -296,8 +299,8 @@ pub enum StandardEvent {
     Swipe(Option<SwipeView>),
     /// Its node's uid (`AppletContext::uid`), when the node is made or moves into a world
     NodeUid(NodeUid),
-    /// The status bar's arrow was clicked. Only the root gets these.
-    ToggleTreeview,
+    /// The status bar's arrow chose the side view to pin (`None`: unpin). Only the root gets these.
+    PinSideView(Option<SideView>),
     /// Make this screen active (keys, treeview), eg its status bar was pressed. Only the root gets these.
     ActivateScreen(usize),
     /// The root's state, for the status bar (from `StandardRequest::BarState`). Only the bar gets these.

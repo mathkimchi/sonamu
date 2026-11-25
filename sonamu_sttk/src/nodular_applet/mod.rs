@@ -28,6 +28,7 @@ use std::{
 };
 
 pub mod history;
+mod history_view;
 pub mod node_holder;
 pub mod node_tree;
 pub mod project_applet;

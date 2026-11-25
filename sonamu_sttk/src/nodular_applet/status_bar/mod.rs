@@ -11,6 +11,7 @@ mod launcher;
 mod notification_list;
 mod notifications;
 mod resources;
+mod side_view_menu;
 mod system;
 mod tray;
 mod widgets;
@@ -21,7 +22,10 @@ use controls::Controls;
 use icons::Icons;
 use launcher::Launcher;
 use notifications::{CloseReason, Notifications};
-use sonamu_common::settings::{Palette, Settings};
+use sonamu_common::{
+    sap::session::SideView,
+    settings::{Palette, Settings},
+};
 use sonamu_ui::{
     color::Color,
     display_units::ToPx,
@@ -162,7 +166,8 @@ const LEFT_OUT: [Segment; 6] = [
 /// What a click on the bar does, for the root
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BarAction {
-    ToggleTreeview,
+    /// The arrow chose a side view to pin, or none
+    Pin(Option<SideView>),
     /// The hub's Settings row: open the settings editor
     OpenSettings,
     /// The hub's slider: the main screen's brightness (#158)
@@ -171,7 +176,7 @@ pub enum BarAction {
 
 /// What the root tells the bar
 pub struct BarState {
-    pub treeview_shown: bool,
+    pub pinned: Option<SideView>,
 }
 
 /// A segment's popup
@@ -189,6 +194,8 @@ enum Popup {
     Notifications(ScrollList),
     /// `StatusBar::launcher`'s
     Launcher,
+    /// The arrow's menu of side views, with the pinned one marked
+    SideViews(Option<SideView>),
 }
 impl Popup {
     fn segment(self) -> Segment {
@@ -199,6 +206,7 @@ impl Popup {
             Self::TrayMenu(_) => Segment::Tray,
             Self::Notifications(_) => Segment::Bell,
             Self::Launcher => Segment::Launcher,
+            Self::SideViews(_) => Segment::Tree,
         }
     }
 }
@@ -364,7 +372,10 @@ impl StatusBar {
                 .map(|&segment| {
                     let spans = match segment {
                         Segment::Tree => {
-                            vec![(if state.treeview_shown { "▾" } else { "▴" }.to_string(), fg)]
+                            vec![(
+                                if state.pinned.is_some() { "▾" } else { "▴" }.to_string(),
+                                fg,
+                            )]
                         }
                         Segment::Launcher => vec![(launcher::ICON.to_string(), fg)],
                         Segment::Time if short => vec![(Self::short_time(), fg)],
@@ -666,6 +677,7 @@ impl StatusBar {
                 list,
                 hover,
             ),
+            Popup::SideViews(pinned) => side_view_menu::draw(settings, pinned, hover),
         }
     }
 
@@ -680,6 +692,7 @@ impl StatusBar {
             Popup::Launcher => Launcher::size(),
             Popup::Hub(open, _) => hub::size(&self.controls.state.lock().unwrap(), open),
             Popup::TrayMenu(_) => tray::menu_size(self.tray.menu.lock().unwrap().as_ref()),
+            Popup::SideViews(_) => side_view_menu::size(),
         }
     }
 
@@ -736,7 +749,7 @@ impl StatusBar {
             .flatten();
         let hover_changed = hovered != self.hovered;
         self.hovered = hovered;
-        let mut response = self.mouse(&placed, event, width);
+        let mut response = self.mouse(state, &placed, event, width);
         // after: the popup may have changed
         let cell = self.popup.and_then(|popup| {
             let [ax, ay, aw, ah] = self.popup_area(popup, &placed, width).map(f64::from);
@@ -756,7 +769,13 @@ impl StatusBar {
         response
     }
 
-    fn mouse(&mut self, placed: &[Placed], event: &MouseEvent, width: f32) -> BarResponse {
+    fn mouse(
+        &mut self,
+        state: &BarState,
+        placed: &[Placed],
+        event: &MouseEvent,
+        width: f32,
+    ) -> BarResponse {
         let [x, y] = event.position;
         let on_bar = y < f64::from(height());
         if let MouseEventKind::Scroll { delta, v120, .. } = event.kind {
@@ -823,14 +842,22 @@ impl StatusBar {
             self.click_tray(button, x - f64::from(left));
             return response;
         }
-        // other buttons only on the tray
+        let open = |popup: Popup| (was.map(Popup::segment) != Some(segment)).then_some(popup);
+        if segment == Segment::Tree && button == BTN_RIGHT {
+            self.set_popup(open(Popup::SideViews(state.pinned)));
+            return response;
+        }
+        // other buttons only on the tray and the arrow
         if button != BTN_LEFT {
             return response;
         }
         // clicking a segment again closes its popup
-        let open = |popup: Popup| (was.map(Popup::segment) != Some(segment)).then_some(popup);
         match segment {
-            Segment::Tree => response.action = Some(BarAction::ToggleTreeview),
+            Segment::Tree => {
+                response.action = Some(BarAction::Pin(
+                    state.pinned.map_or(Some(SideView::Tree), |_| None),
+                ));
+            }
             Segment::Time => self.set_popup(open(Popup::Calendar(Local::now().date_naive()))),
             Segment::Resources => {
                 self.set_popup(open(Popup::Resources(
@@ -1055,6 +1082,14 @@ impl StatusBar {
                     return false;
                 };
                 self.apply_hub_click(click);
+                return true;
+            }
+            Popup::SideViews(_) => {
+                let Some(view) = side_view_menu::click(cell) else {
+                    return false;
+                };
+                self.action = Some(BarAction::Pin(Some(view)));
+                self.set_popup(None);
                 return true;
             }
             Popup::Launcher => {

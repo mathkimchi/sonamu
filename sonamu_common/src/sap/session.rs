@@ -4,7 +4,7 @@ use crate::{command::NodeUid, utils::tree::world_tree::WorldTreePath};
 use serde::{Deserialize, Deserializer, Serialize, de::IgnoredAny};
 use std::{collections::BTreeMap, path::PathBuf};
 
-/// The whole tree, where focus was, and whether the treeview was pinned
+/// The whole tree, where focus was, and the pinned side view
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub tree: SavedTree,
@@ -21,9 +21,27 @@ pub struct Session {
     /// (eg saved before #83)
     #[serde(default, deserialize_with = "path_or_root", skip_serializing)]
     pub focus: WorldTreePath,
-    /// The root's treeview is always shown, beside the panes
-    #[serde(default)]
+    /// The view always shown beside the panes
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side_view: Option<SideView>,
+    /// Before `side_view`: whether the treeview was pinned. Only read (`pinned`).
+    #[serde(default, skip_serializing)]
     pub treeview_pinned: bool,
+}
+impl Session {
+    /// The pinned side view, also from a session saved before `side_view`
+    pub fn pinned(&self) -> Option<SideView> {
+        self.side_view
+            .or(self.treeview_pinned.then_some(SideView::Tree))
+    }
+}
+
+/// What the root's side column can show, pinned (#162)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SideView {
+    Tree,
+    History,
 }
 
 fn path_or_root<'de, D: Deserializer<'de>>(deserializer: D) -> Result<WorldTreePath, D::Error> {

@@ -2,7 +2,7 @@ use crate::{
     command_hub::repl::{self, Repl},
     man_page::ManPageApplet,
     nodular_applet::{
-        AppletSpawner, NodeRequest, NodularAppletInitializer, history,
+        AppletSpawner, NodeRequest, NodularAppletInitializer, history, history_view,
         node_holder::{NodeHolder, client_spawners},
         node_tree::{AttachClient, NodeId, NodeTree, SpawnClient},
         project_applet::ProjectApplet,
@@ -30,7 +30,7 @@ use sonamu_common::{
             Treeview,
         },
         raw_client_initializer::RawClientInitializer,
-        session::Session,
+        session::{Session, SideView},
         shared_state::{SharedState, StatePublisher},
     },
     settings::{self, BufferLine, ERROR, Palette, Settings, TreeviewFloating, TreeviewSide},
@@ -74,14 +74,17 @@ pub struct RootNodeApplet {
     /// The last treeview drop and the node it was on.
     /// A drop can come before its drag's pluck finishes, which can shift the paths.
     last_drop: Option<(WorldTreePath, NodeId)>,
-    /// Pinned, or Alt held after an Alt+traversal key (see `update_treeview_visibility`)
+    /// The treeview is shown: pinned, or Alt held after an Alt+traversal key (see `update_treeview_visibility`)
     treeview_shown: bool,
     /// An Alt+traversal key moved the selector and Alt is still held
     alt_traversal: bool,
     /// Focus when a key capture started (`check_capture`)
     capture_focus: Option<WorldTreePath>,
-    /// Always shown, beside the panes; toggled by its pin button and saved in the session
-    treeview_pinned: bool,
+    /// The view always shown in the column beside the panes (set by the status bar's arrow, Super+H; saved in the
+    /// session; a clean session starts with the tree)
+    pinned: Option<SideView>,
+    /// `history::revision` when last drawn
+    history_revision: u64,
     /// The view root when it is a row inside an applet (double click, right click › Set as view root, Alt+R);
     /// `None`: the `NodeTree`'s view root. Moves out with focus (see `update_view_path`).
     view_path: Option<WorldTreePath>,
@@ -248,20 +251,14 @@ impl RootNodeApplet {
             .min(max_buffer_scroll(lines.len(), last));
     }
 
-    /// Where the treeview is drawn (`[x, y, width, height]`, frame included), and how;
-    /// `None` while hidden
-    fn treeview_area(&self, settings: &Settings) -> Option<([u32; 4], TreeviewPlace)> {
-        treeview_area(
-            settings,
-            self.latest_size,
-            self.treeview_shown,
-            self.treeview_pinned,
-        )
+    /// Where the treeview and the history are drawn on the active screen (`side_areas`)
+    fn side_areas(&self, settings: &Settings) -> SideAreas {
+        side_areas(settings, self.latest_size, self.pinned, self.treeview_shown)
     }
 
-    /// The applets' area's left edge and width: beside a treeview column, else everything
+    /// The applets' area's left edge and width: beside the pinned column, else everything
     fn applet_area(&self, settings: &Settings) -> [u32; 2] {
-        applet_area(self.treeview_area(settings), self.latest_size)
+        applet_area(settings, self.latest_size, self.pinned)
     }
 
     fn inner_applet_size(&self) -> DisplayContainerSize {
@@ -275,7 +272,12 @@ impl RootNodeApplet {
     /// (also when the treeview settings or pinning did)
     fn update_treeview_visibility(&mut self) {
         let settings = settings::get();
-        let shown = self.treeview_pinned
+        let revision = history::revision();
+        if revision != self.history_revision {
+            self.history_revision = revision;
+            self.surface.damage();
+        }
+        let shown = self.pinned == Some(SideView::Tree)
             || self.alt_traversal
             // eg a drag or menu that started there
             || self.treeview_pointer.is_pressed();
@@ -309,7 +311,7 @@ impl RootNodeApplet {
     fn flush_surface(&mut self) {
         let settings = settings::get();
         let shown = self.treeview_shown;
-        let pinned = self.treeview_pinned;
+        let pinned = self.pinned;
         let quit_asked = self.quit_asked.is_some();
         let buffer_mode = self.buffer_mode;
         let buffer_scroll = self.buffer_scroll;
@@ -334,16 +336,23 @@ impl RootNodeApplet {
                     let (shown, view_path, treeview_pointer) = if index == active {
                         (shown, &*view_path, &mut *treeview_pointer)
                     } else {
-                        (pinned, &screen.view_path, &mut screen.treeview_pointer)
+                        (
+                            pinned == Some(SideView::Tree),
+                            &screen.view_path,
+                            &mut screen.treeview_pointer,
+                        )
                     };
-                    let treeview_area = treeview_area(&settings, size, shown, pinned);
+                    let areas = side_areas(&settings, size, pinned, shown);
                     let [left, width] =
-                        applet_area(treeview_area, size).map(|length| length as f32);
+                        applet_area(&settings, size, pinned).map(|length| length as f32);
                     let mut content = vec![UITree::new_container_styled(
                         Style::absolute([left, 0.0], [width, size.height as f32]),
                         vec![holder.tree.get_screen_window(index)],
                     )];
-                    if let Some(area) = treeview_area {
+                    if let Some(area) = areas.history {
+                        content.push(Self::get_history(&area));
+                    }
+                    if let Some(area) = areas.tree {
                         content.push(Self::get_treeview(
                             &holder.tree,
                             index,
@@ -469,12 +478,10 @@ impl RootNodeApplet {
                 continue;
             }
             let size = content_size(&settings, screen.rect);
-            let treeview_area =
-                treeview_area(&settings, size, self.treeview_pinned, self.treeview_pinned);
             self.holder.tree.resize_screen(
                 index,
                 Some(DisplayContainerSize::new(
-                    applet_area(treeview_area, size)[1],
+                    applet_area(&settings, size, self.pinned)[1],
                     size.height,
                 )),
             );
@@ -499,7 +506,8 @@ impl RootNodeApplet {
             brightness: self.brightness.clone(),
             screen_focus: Vec::new(),
             focus: WorldTreePath::root(),
-            treeview_pinned: self.treeview_pinned,
+            side_view: self.pinned,
+            treeview_pinned: false,
         };
         if self.saved_session.as_ref() == Some(&session) {
             return;
@@ -684,10 +692,8 @@ impl RootNodeApplet {
             treeview_shown: true,
             alt_traversal: false,
             capture_focus: None,
-            // a clean session starts pinned
-            treeview_pinned: saved_session
-                .as_ref()
-                .is_none_or(|saved| saved.treeview_pinned),
+            pinned: initial_pin(saved_session.as_ref()),
+            history_revision: history::revision(),
             view_path: None,
             view_path_focus: None,
             applet_area: [0, 800],
@@ -856,6 +862,9 @@ impl RootNodeApplet {
             }
             RootKeybind::Swipe { vertical, forward } => self.swipe_key(vertical, forward),
             RootKeybind::RestoreClosed => self.restore_closed(),
+            RootKeybind::History => {
+                self.pin((self.pinned != Some(SideView::History)).then_some(SideView::History))
+            }
         }
     }
 
@@ -936,7 +945,7 @@ impl RootNodeApplet {
             }
             // it has the screens itself
             StandardEvent::ScreenViews { .. } => {}
-            StandardEvent::ToggleTreeview => self.toggle_treeview(),
+            StandardEvent::PinSideView(view) => self.pin(view),
             StandardEvent::ActivateScreen(index) => {
                 self.lent_from = None;
                 self.activate_screen(index);
@@ -1042,10 +1051,11 @@ impl RootNodeApplet {
             return;
         }
         let settings = settings::get();
+        let areas = self.side_areas(&settings);
         let response = treeview_mouse(
             &self.holder.tree,
             &settings,
-            self.treeview_area(&settings),
+            areas.tree,
             (self.holder.tree.active_screen(), self.view_path.as_ref()),
             &mut self.treeview_pointer,
             &mouse_event,
@@ -1056,7 +1066,7 @@ impl RootNodeApplet {
         if let Some(action) = response.action {
             self.apply_treeview_action(action);
         }
-        if response.consumed {
+        if response.consumed || areas.history_has(mouse_event.position) {
             return;
         }
 
@@ -1076,13 +1086,17 @@ impl RootNodeApplet {
         mouse_event.position[0] -= f64::from(x);
         mouse_event.position[1] -= f64::from(y);
         let size = content_size(&settings, self.screens[index].rect);
-        let pinned = self.treeview_pinned;
-        let treeview_area = treeview_area(&settings, size, pinned, pinned);
+        let areas = side_areas(
+            &settings,
+            size,
+            self.pinned,
+            self.pinned == Some(SideView::Tree),
+        );
         let screen = &mut self.screens[index];
         let response = treeview_mouse(
             &self.holder.tree,
             &settings,
-            treeview_area,
+            areas.tree,
             (index, screen.view_path.as_ref()),
             &mut screen.treeview_pointer,
             &mouse_event,
@@ -1091,10 +1105,10 @@ impl RootNodeApplet {
             self.surface.damage();
         }
         // its actions come from presses, which activate the screen first
-        if response.consumed {
+        if response.consumed || areas.history_has(mouse_event.position) {
             return;
         }
-        mouse_event.position[0] -= f64::from(applet_area(treeview_area, size)[0]);
+        mouse_event.position[0] -= f64::from(applet_area(&settings, size, self.pinned)[0]);
         self.holder.tree.screen_mouse(index, mouse_event);
     }
 
@@ -1149,12 +1163,12 @@ impl RootNodeApplet {
             Some(_) => self.latest_size,
             None => return,
         };
-        let (shown, pinned) = if active {
-            (self.treeview_shown, self.treeview_pinned)
+        let shown = if active {
+            self.treeview_shown
         } else {
-            (self.treeview_pinned, self.treeview_pinned)
+            self.pinned == Some(SideView::Tree)
         };
-        let area = treeview_area(&settings, size, shown, pinned);
+        let area = side_areas(&settings, size, self.pinned, shown).tree;
         let (view_path, pointer) = if active {
             (self.view_path.as_ref(), &mut self.treeview_pointer)
         } else {
@@ -1174,9 +1188,9 @@ impl RootNodeApplet {
         }
     }
 
-    /// The status bar's arrow
-    fn toggle_treeview(&mut self) {
-        self.treeview_pinned = !self.treeview_pinned;
+    /// Pins the view in the side column, or unpins (the status bar's arrow, Super+H)
+    fn pin(&mut self, view: Option<SideView>) {
+        self.pinned = view;
         self.surface.damage();
         self.update_treeview_visibility();
     }
@@ -1184,7 +1198,7 @@ impl RootNodeApplet {
     /// Tells the status bar (through the runner) what it shows of the root, if it changed
     fn send_bar_state(&mut self) {
         let state = BarState {
-            treeview_shown: self.treeview_pinned,
+            pinned: self.pinned,
             active_screen: self.holder.tree.active_screen(),
         };
         if state != self.bar_state {
@@ -1532,6 +1546,20 @@ impl RootNodeApplet {
         }
     }
 
+    /// The history view at `area`, framed like the treeview
+    fn get_history(&(area, place): &([u32; 4], TreeviewPlace)) -> UITree {
+        let settings = settings::get();
+        let ([x, y, width, height], border) = treeview_frame(&settings, area, place);
+        let inner = [width, height].map(|length| length.saturating_sub(2 * border) as f32);
+        ui::frame(
+            settings.border.treeview,
+            if border > 0 { settings.radius } else { 0.0 },
+            border as f32,
+            Style::absolute([x as f32, y as f32], [width as f32, height as f32]),
+            vec![history_view::view(&settings, inner)],
+        )
+    }
+
     /// The treeview at `area` with its pin button, framed like a pane with `always_frame` (a floating one always is)
     fn get_treeview(
         tree: &NodeTree,
@@ -1574,28 +1602,68 @@ impl RootNodeApplet {
     }
 }
 
-/// Where the treeview is drawn on a screen of `size` (`[x, y, width, height]`, frame included), and how;
-/// `None` while hidden
-fn treeview_area(
-    settings: &Settings,
-    DisplayContainerSize { width, height }: DisplayContainerSize,
-    shown: bool,
-    pinned: bool,
-) -> Option<([u32; 4], TreeviewPlace)> {
-    // pinned by the status bar's arrow; else floating while Alt is held after an Alt+traversal key
-    if !shown {
-        return None;
+/// The side view pinned at start: the saved one, else (a clean session) the tree
+fn initial_pin(saved: Option<&Session>) -> Option<SideView> {
+    saved.map_or(Some(SideView::Tree), Session::pinned)
+}
+
+/// Where the treeview and the history are drawn (`[x, y, width, height]`, frame included, and how); `None`
+/// while hidden
+struct SideAreas {
+    tree: Option<([u32; 4], TreeviewPlace)>,
+    history: Option<([u32; 4], TreeviewPlace)>,
+}
+impl SideAreas {
+    /// Whether `[x, y]` is on the history
+    fn history_has(&self, [x, y]: [f64; 2]) -> bool {
+        self.history.is_some_and(|([ax, ay, width, height], _)| {
+            let [ax, ay, width, height] = [ax, ay, width, height].map(f64::from);
+            (ax..ax + width).contains(&x) && (ay..ay + height).contains(&y)
+        })
     }
+}
+
+/// The pinned column on a screen of `size` (`[x, y, width, height]`, frame included) and its side
+fn column_area(settings: &Settings, size: DisplayContainerSize) -> ([u32; 4], TreeviewSide) {
     let side = settings.treeview.side;
-    let column = width * settings.treeview.width.min(100) / 100;
+    let column = size.width * settings.treeview.width.min(100) / 100;
     let column_x = match side {
         TreeviewSide::Left => 0,
-        TreeviewSide::Right => width - column,
+        TreeviewSide::Right => size.width - column,
     };
-    if pinned {
-        return Some(([column_x, 0, column, height], TreeviewPlace::Column(side)));
-    }
-    let area = match settings.treeview.floating {
+    ([column_x, 0, column, size.height], side)
+}
+
+/// Where the treeview and the history are drawn on a screen of `size`. `shown`: the treeview is (pinned, or Alt
+/// held after Alt+traversal). Shown without being pinned it floats per `treeview.floating`; over a pinned view,
+/// `side` takes the pinned column's place and hides the history meanwhile.
+fn side_areas(
+    settings: &Settings,
+    size: DisplayContainerSize,
+    pinned: Option<SideView>,
+    shown: bool,
+) -> SideAreas {
+    let (column, side) = column_area(settings, size);
+    let column = (column, TreeviewPlace::Column(side));
+    let tree = shown.then(|| {
+        let takes_column = pinned == Some(SideView::Tree)
+            || (pinned.is_some() && settings.treeview.floating == TreeviewFloating::Side);
+        if takes_column {
+            column
+        } else {
+            (floating_area(settings, size), TreeviewPlace::Floating)
+        }
+    });
+    let history = (pinned == Some(SideView::History)
+        && !matches!(tree, Some((_, TreeviewPlace::Column(_)))))
+    .then_some(column);
+    SideAreas { tree, history }
+}
+
+/// The floating treeview's area, per `treeview.floating`
+fn floating_area(settings: &Settings, size: DisplayContainerSize) -> [u32; 4] {
+    let DisplayContainerSize { width, height } = size;
+    match settings.treeview.floating {
         TreeviewFloating::Center => {
             let [w, h] = settings.treeview.floating_size;
             let [w, h] = [width * w.min(100) / 100, height * h.min(100) / 100];
@@ -1603,6 +1671,7 @@ fn treeview_area(
         }
         // in the column's place, with the gap all around
         TreeviewFloating::Side => {
+            let ([column_x, _, column, _], _) = column_area(settings, size);
             let (gap, _) = settings.gap_and_border_px();
             [
                 column_x + gap,
@@ -1611,23 +1680,22 @@ fn treeview_area(
                 height.saturating_sub(2 * gap),
             ]
         }
-    };
-    Some((area, TreeviewPlace::Floating))
+    }
 }
 
-/// The applets' area's left edge and width on a screen of `size`: beside a treeview column, else everything
+/// The applets' area's left edge and width on a screen of `size`: beside the column if a view is pinned, else
+/// everything
 fn applet_area(
-    treeview_area: Option<([u32; 4], TreeviewPlace)>,
+    settings: &Settings,
     size: DisplayContainerSize,
+    pinned: Option<SideView>,
 ) -> [u32; 2] {
-    match treeview_area {
-        Some(([_, _, width, _], TreeviewPlace::Column(TreeviewSide::Left))) => {
-            [width, size.width - width]
-        }
-        Some(([_, _, width, _], TreeviewPlace::Column(TreeviewSide::Right))) => {
-            [0, size.width - width]
-        }
-        Some((_, TreeviewPlace::Floating)) | None => [0, size.width],
+    if pinned.is_none() {
+        return [0, size.width];
+    }
+    match column_area(settings, size) {
+        ([_, _, width, _], TreeviewSide::Left) => [width, size.width - width],
+        ([_, _, width, _], TreeviewSide::Right) => [0, size.width - width],
     }
 }
 
@@ -1840,6 +1908,8 @@ enum RootKeybind {
     ViewParent,
     /// Restores the newest closed node (#162)
     RestoreClosed,
+    /// Toggles the history as the pinned side view (#162)
+    History,
     /// Like a 3 finger swipe, by one row
     Swipe {
         vertical: bool,
@@ -1847,7 +1917,7 @@ enum RootKeybind {
     },
 }
 impl RootKeybind {
-    /// From the keybinds (setting `keybinds`): `help`, `view_root`, `view_parent`, `restore_closed`, `swipe` and a direction
+    /// From the keybinds (setting `keybinds`): `help`, `view_root`, `view_parent`, `restore_closed`, `history`, `swipe` and a direction
     fn of(ui_event: &UIEvent) -> Option<Self> {
         let &UIEvent::Key { modifiers, .. } = ui_event else {
             return None;
@@ -1858,6 +1928,7 @@ impl RootKeybind {
             "view_root" => Self::ViewRoot,
             "view_parent" => Self::ViewParent,
             "restore_closed" => Self::RestoreClosed,
+            "history" => Self::History,
             "swipe" => {
                 let (vertical, forward) = match args.first()?.as_str()? {
                     "left" => (false, false),
@@ -2794,16 +2865,19 @@ mod tests {
         let mut settings = Settings::default();
         settings.treeview.width = 20;
         let size = DisplayContainerSize::new(1000, 500);
-        assert_eq!(treeview_area(&settings, size, false, true), None);
+        assert_eq!(
+            side_areas(&settings, size, Some(SideView::Tree), false).tree,
+            None
+        );
 
         settings.treeview.side = TreeviewSide::Left;
         assert_eq!(
-            treeview_area(&settings, size, true, true),
+            side_areas(&settings, size, Some(SideView::Tree), true).tree,
             Some(([0, 0, 200, 500], TreeviewPlace::Column(TreeviewSide::Left)))
         );
         settings.treeview.side = TreeviewSide::Right;
         assert_eq!(
-            treeview_area(&settings, size, true, true),
+            side_areas(&settings, size, Some(SideView::Tree), true).tree,
             Some((
                 [800, 0, 200, 500],
                 TreeviewPlace::Column(TreeviewSide::Right)
@@ -2813,14 +2887,14 @@ mod tests {
         settings.treeview.floating = TreeviewFloating::Center;
         settings.treeview.floating_size = [40, 70];
         assert_eq!(
-            treeview_area(&settings, size, true, false),
+            side_areas(&settings, size, None, true).tree,
             Some(([300, 75, 400, 350], TreeviewPlace::Floating))
         );
 
         settings.treeview.floating = TreeviewFloating::Side;
         let (gap, _) = settings.gap_and_border_px();
         assert_eq!(
-            treeview_area(&settings, size, true, false),
+            side_areas(&settings, size, None, true).tree,
             Some((
                 [800 + gap, gap, 200 - 2 * gap, 500 - 2 * gap],
                 TreeviewPlace::Floating

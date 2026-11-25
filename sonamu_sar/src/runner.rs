@@ -430,8 +430,9 @@ impl AppletRunner {
                     self.send_screens();
                 }
             }
-            BarRequest::ToggleTreeview => {
-                self.root_client.send_event(StandardEvent::ToggleTreeview);
+            BarRequest::PinSideView(view) => {
+                self.root_client
+                    .send_event(StandardEvent::PinSideView(view));
             }
             BarRequest::ActivateScreen(index) => {
                 self.root_client

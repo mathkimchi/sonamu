@@ -129,7 +129,13 @@ fn holds_children(saved: &SavedApplet) -> bool {
 /// Stands in for an applet that isn't running (restored or deactivated), saved as it was, until it is woken.
 /// Labeled by a project's name, else the file it shows (its last arg), else its spawner's name.
 pub fn hibernate(saved: SavedApplet) -> NodularAppletInitializer {
-    let label = match &saved {
+    let label = format!("{} (inactive)", saved_label(&saved));
+    RestoringApplet::initializer(saved, label)
+}
+
+/// A saved applet's name: a project's name, else the file it shows (its last arg), else its spawner's name
+pub fn saved_label(saved: &SavedApplet) -> String {
+    match saved {
         SavedApplet::Wl(wl) => wl_label(wl),
         SavedApplet::Spawner { name, args, inner } => inner
             .as_ref()
@@ -139,8 +145,7 @@ pub fn hibernate(saved: SavedApplet) -> NodularAppletInitializer {
                 Some(file_name.to_string_lossy().into_owned())
             })
             .unwrap_or_else(|| name.clone()),
-    };
-    RestoringApplet::initializer(saved, format!("{label} (inactive)"))
+    }
 }
 
 /// Starts a hibernating wl client, with the program running in its terminal if it is in `restore_programs`.
