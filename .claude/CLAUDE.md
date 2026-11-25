@@ -39,3 +39,12 @@ Component docs are `CLAUDE.md` beside their code; keep each component's instruct
 - Commit frequently. Pre-commit hook (`.githooks/`, `core.hooksPath`) runs `cargo fmt` and clippy `-D warnings`.
 - A Claude `PostToolUse` hook (`.claude/settings.json`) rustfmts each edited `.rs` file.
 - Unless in autonomous mode, clarify design features before implementing.
+
+# Delegation
+
+To save tokens, the main agent may delegate; it decides, using its best judgement:
+
+- `cargo-check` (Haiku): cargo builds, clippy, tests; returns only failures.
+- `Explore`: searches across crates.
+- `rust-edit` (Sonnet): mechanical multi-file edits you fully specify (change, files, acceptance check). Review its `git diff`, then commit yourself.
+- Design, architecture, debugging and small edits: do them yourself.
