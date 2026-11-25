@@ -38,7 +38,7 @@ Component docs are `CLAUDE.md` beside their code; keep each component's instruct
 - Never edit `docs/`, `README.md` or `DEVLOG.md`.
 - Commit frequently. Pre-commit hook (`.githooks/`, `core.hooksPath`) runs `cargo fmt` and clippy `-D warnings`.
 - A Claude `PostToolUse` hook (`.claude/settings.json`) rustfmts each edited `.rs` file.
-- Unless in autonomous mode, clarify design features before implementing.
+- Unless in autonomous mode, run non-trivial decisions by the user before implementing, e.g. anything user-visible or contradicting what's written (code, docs, earlier decisions). State assumptions as questions.
 
 # Delegation
 
