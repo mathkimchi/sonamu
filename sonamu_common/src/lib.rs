@@ -20,6 +20,9 @@ pub const WAYLAND_DISPLAY_ENV: &str = "SONAMU_WAYLAND_DISPLAY";
 /// bindings that would take typing (keys with a symbol, without Super)
 pub static BUFFER_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The root's history view has the keyboard (Super+H, a click on it): plain keys go to the root, like in buffer mode
+pub static HISTORY_KEYS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Applets recording a keybind (`Capture`s held): every key goes to the focused applet; settings, `keymap.set` and
 /// the root's bindings are skipped. A count, so a new capture can start before the old one drops
 pub static KEY_CAPTURE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

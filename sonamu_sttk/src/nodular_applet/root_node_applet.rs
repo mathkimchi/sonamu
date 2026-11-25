@@ -60,6 +60,7 @@ const BUFFER_OUTPUT_ROWS: usize = 10;
 /// evdev keycodes (`UIEvent::Key::raw_keycode`)
 const KEY_LEFTALT: u32 = 56;
 const KEY_RIGHTALT: u32 = 100;
+const KEY_DELETE: u32 = 111;
 
 /// Holds the tree of nodes, is held by a Basic Applet runner (applet runner).
 ///
@@ -881,8 +882,11 @@ impl RootNodeApplet {
             }
             RootKeybind::Swipe { vertical, forward } => self.swipe_key(vertical, forward),
             RootKeybind::RestoreClosed => self.restore(history::pop_newest()),
+            // pins it with the keys, then gives them, then unpins
             RootKeybind::History => {
-                self.pin((self.pinned != Some(SideView::History)).then_some(SideView::History))
+                let unpin = self.pinned == Some(SideView::History) && self.history_pointer.keys;
+                self.pin((!unpin).then_some(SideView::History));
+                self.set_history_keys(!unpin);
             }
         }
     }
@@ -930,6 +934,9 @@ impl RootNodeApplet {
             }
             self.traverse(traversal);
             self.damage_if_tree_changed();
+            return;
+        }
+        if !capturing && self.take_history_key(&event) {
             return;
         }
         match event {
@@ -1097,6 +1104,10 @@ impl RootNodeApplet {
         if let Some(action) = history.action {
             self.apply_history_action(action);
         }
+        // a click gives the history the keys, or takes them away
+        if let MouseEventKind::Button { pressed: true, .. } = mouse_event.kind {
+            self.set_history_keys(history.consumed);
+        }
         if response.consumed || history.consumed {
             return;
         }
@@ -1231,9 +1242,54 @@ impl RootNodeApplet {
         }
     }
 
+    /// Gives the history view the keyboard, or takes it away
+    fn set_history_keys(&mut self, on: bool) {
+        if std::mem::replace(&mut self.history_pointer.keys, on) != on {
+            sonamu_common::HISTORY_KEYS.store(on, Ordering::Relaxed);
+            self.surface.damage();
+        }
+    }
+
+    /// Whether the history view, if it has the keyboard, took the event: every key, so nothing else sees half a key
+    fn take_history_key(&mut self, event: &StandardEvent) -> bool {
+        let &StandardEvent::UIEvent(UIEvent::Key {
+            symbol,
+            modifiers,
+            raw_keycode,
+            pressed,
+        }) = event
+        else {
+            return false;
+        };
+        if !self.history_pointer.keys {
+            return false;
+        }
+        if pressed && modifiers == KeyModifiers::NONE {
+            self.history_key(symbol, raw_keycode);
+        }
+        true
+    }
+
+    /// A key while the history view has the keyboard: Up/Down select, Enter restores, Delete removes, Esc gives it
+    /// back
+    fn history_key(&mut self, symbol: Option<KeySymbol>, raw_keycode: u32) {
+        if matches!(symbol, Some(KeySymbol::Escape)) {
+            self.set_history_keys(false);
+            return;
+        }
+        let action = self.history_pointer.key(symbol, raw_keycode == KEY_DELETE);
+        self.surface.damage();
+        if let Some(action) = action {
+            self.apply_history_action(action);
+        }
+    }
+
     /// Pins the view in the side column, or unpins (the status bar's arrow, Super+H)
     fn pin(&mut self, view: Option<SideView>) {
         self.pinned = view;
+        if view != Some(SideView::History) {
+            self.set_history_keys(false);
+        }
         self.surface.damage();
         self.update_treeview_visibility();
     }
@@ -1598,7 +1654,11 @@ impl RootNodeApplet {
         let ([x, y, width, height], border) = treeview_frame(&settings, area, place);
         let inner = [width, height].map(|length| length.saturating_sub(2 * border) as f32);
         ui::frame(
-            settings.border.treeview,
+            if pointer.keys {
+                settings.border.focused
+            } else {
+                settings.border.treeview
+            },
             if border > 0 { settings.radius } else { 0.0 },
             border as f32,
             Style::absolute([x as f32, y as f32], [width as f32, height as f32]),
@@ -2022,6 +2082,7 @@ fn is_buffer_mode_key(ui_event: &UIEvent) -> bool {
 pub fn is_keybind(ui_event: &UIEvent) -> bool {
     sonamu_common::capturing()
         || sonamu_common::BUFFER_MODE.load(Ordering::Relaxed)
+        || sonamu_common::HISTORY_KEYS.load(Ordering::Relaxed)
         || is_buffer_mode_key(ui_event)
         || RootKeybind::of(ui_event).is_some()
         || standard_keybind_request(ui_event).is_some()

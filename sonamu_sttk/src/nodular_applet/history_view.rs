@@ -12,7 +12,7 @@ use crate::{
 use sonamu_common::settings::{self, HistoryMode, Settings};
 use sonamu_ui::{
     ui_element::{Style, UIElement, UITree, font_size},
-    ui_event::{MouseEvent, MouseEventKind},
+    ui_event::{KeySymbol, MouseEvent, MouseEventKind},
 };
 
 /// Rows above the entries: the title, the mode and Clear
@@ -59,6 +59,12 @@ pub struct HistoryPointer {
     scrolled: ui::ScrollSteps,
     /// Clear was clicked once
     confirm: bool,
+    /// The view has the keyboard (the root's `HISTORY_KEYS`)
+    pub keys: bool,
+    /// The entry Up/Down selected (its row among the entries), shown while `keys`
+    selected: usize,
+    /// `selected` moved: the next draw scrolls to it
+    follow: bool,
 }
 
 /// A closed node's name
@@ -122,6 +128,23 @@ fn shown(height: f32) -> usize {
 }
 
 impl HistoryPointer {
+    /// A key with the keyboard: Up/Down move the selection, Enter restores it, Delete removes it
+    pub fn key(&mut self, symbol: Option<KeySymbol>, delete: bool) -> Option<HistoryAction> {
+        let entries = rows(&history::entries());
+        let last = entries.len().saturating_sub(1);
+        self.selected = self.selected.min(last);
+        let id = entries.get(self.selected).map(|&(id, _)| id);
+        match symbol {
+            Some(KeySymbol::ArrowKeyUp) => self.selected = self.selected.saturating_sub(1),
+            Some(KeySymbol::ArrowKeyDown) => self.selected = (self.selected + 1).min(last),
+            Some(KeySymbol::Enter) => return id.map(HistoryAction::Restore),
+            _ if delete => return id.map(HistoryAction::Remove),
+            _ => return None,
+        }
+        self.follow = true;
+        None
+    }
+
     /// `event` is in the view's coords; `inside`: it's over the view
     pub fn handle_mouse(
         &mut self,
@@ -201,6 +224,10 @@ impl HistoryPointer {
         let fixed = Rows::new(0.0);
         let entries = rows(&history::entries());
         let shown = shown(height);
+        self.selected = self.selected.min(entries.len().saturating_sub(1));
+        if std::mem::take(&mut self.follow) {
+            self.scroll = ui::scroll_to(self.scroll, self.selected, shown);
+        }
         self.scroll = self.scroll.min(ui::max_scroll(entries.len(), shown));
         let list = fixed.scrolled(self.scroll);
         let line = |layout: &Rows, index: usize, text: UIElement, background: Option<_>| {
@@ -212,6 +239,7 @@ impl HistoryPointer {
             )
         };
         let hover = |index: usize| (self.hovered == Some(index)).then(|| ui::raised_bg(palette));
+        let selected = FIXED + self.selected;
 
         let mut spans = vec![(MODE_LABEL.to_owned(), palette.inactive)];
         for (index, &(word, mode)) in MODES.iter().enumerate() {
@@ -258,7 +286,12 @@ impl HistoryPointer {
                     .with_pointer(),
                 );
             }
-            children.push(list.row(row, width, hover(row), parts).with_pointer());
+            let background = if self.keys && row == selected {
+                Some(ui::selected_bg(palette))
+            } else {
+                hover(row)
+            };
+            children.push(list.row(row, width, background, parts).with_pointer());
         }
         children.extend(ui::scrollbar(
             palette,
