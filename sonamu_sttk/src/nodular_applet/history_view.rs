@@ -61,6 +61,8 @@ pub struct HistoryPointer {
     confirm: bool,
     /// The view has the keyboard (the root's `HISTORY_KEYS`)
     pub keys: bool,
+    /// Raw keycodes whose presses it took, so their releases are too
+    pub taken: Vec<u32>,
     /// The entry Up/Down selected (its row among the entries), shown while `keys`
     selected: usize,
     /// `selected` moved: the next draw scrolls to it

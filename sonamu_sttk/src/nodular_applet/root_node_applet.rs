@@ -289,6 +289,10 @@ impl RootNodeApplet {
             self.treeview_shown = shown;
             self.surface.damage();
         }
+        // the temporary tree took the column: the history is hidden, so it gives the keys back
+        if self.history_pointer.keys && self.side_areas(&settings).history.is_none() {
+            self.set_history_keys(false);
+        }
         // the buffer line's room may have changed with the settings
         let size = self
             .screens
@@ -1250,7 +1254,8 @@ impl RootNodeApplet {
         }
     }
 
-    /// Whether the history view, if it has the keyboard, took the event: every key, so nothing else sees half a key
+    /// Whether the history view took the event: every press while it has the keyboard, and the release of each
+    /// press it took, so nothing else sees half a key (other releases go on as usual)
     fn take_history_key(&mut self, event: &StandardEvent) -> bool {
         let &StandardEvent::UIEvent(UIEvent::Key {
             symbol,
@@ -1261,10 +1266,22 @@ impl RootNodeApplet {
         else {
             return false;
         };
+        if !pressed {
+            return self
+                .history_pointer
+                .taken
+                .iter()
+                .position(|&taken| taken == raw_keycode)
+                .map(|index| self.history_pointer.taken.swap_remove(index))
+                .is_some();
+        }
         if !self.history_pointer.keys {
             return false;
         }
-        if pressed && modifiers == KeyModifiers::NONE {
+        if !self.history_pointer.taken.contains(&raw_keycode) {
+            self.history_pointer.taken.push(raw_keycode);
+        }
+        if modifiers == KeyModifiers::NONE {
             self.history_key(symbol, raw_keycode);
         }
         true
@@ -1651,7 +1668,7 @@ impl RootNodeApplet {
         pointer: &mut HistoryPointer,
     ) -> UITree {
         let settings = settings::get();
-        let ([x, y, width, height], border) = treeview_frame(&settings, area, place);
+        let ([x, y, width, height], border) = history_frame(&settings, area, place, pointer.keys);
         let inner = [width, height].map(|length| length.saturating_sub(2 * border) as f32);
         ui::frame(
             if pointer.keys {
@@ -1721,7 +1738,7 @@ fn history_mouse(
     mouse_event: &MouseEvent,
 ) -> HistoryResponse {
     let ([x, y, width, height], border) = area.map_or(([0; 4], 0), |(area, place)| {
-        treeview_frame(settings, area, place)
+        history_frame(settings, area, place, pointer.keys)
     });
     let [x, y, width, height] = [x, y, width, height].map(f64::from);
     let [pointer_x, pointer_y] = mouse_event.position;
@@ -1861,6 +1878,17 @@ fn treeview_frame(
             border,
         ),
     }
+}
+
+/// The history view's frame: the treeview's, but with the keyboard it always has a border (inside the column)
+fn history_frame(
+    settings: &Settings,
+    area: [u32; 4],
+    place: TreeviewPlace,
+    keys: bool,
+) -> ([u32; 4], u32) {
+    let (rect, border) = treeview_frame(settings, area, place);
+    (rect, if keys { border.max(1) } else { border })
 }
 
 /// The treeview's rows: the view root's subtree (`view_path`, else the `NodeTree`'s),

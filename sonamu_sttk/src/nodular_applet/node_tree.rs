@@ -3838,13 +3838,15 @@ impl NodeTree {
     /// The panes on `screen`
     fn window(&self, panes: &[Pane], focused: Option<NodeId>, screen: usize) -> UITree {
         let settings = settings::get();
+        // the history view has the keys: no pane shows focus
+        let history_keys = sonamu_common::HISTORY_KEYS.load(std::sync::atomic::Ordering::Relaxed);
         let panes = panes
             .iter()
             .filter(|pane| self.nodes.contains_key(pane.node))
             .map(|pane| {
                 let node = &self.nodes[pane.node];
                 let border = match node.focus {
-                    _ if Some(pane.node) != focused => settings.border.unfocused,
+                    _ if history_keys || Some(pane.node) != focused => settings.border.unfocused,
                     FocusIndex::Here if node.main.is_some() => settings.border.focused,
                     _ => settings.palette.accent,
                 };

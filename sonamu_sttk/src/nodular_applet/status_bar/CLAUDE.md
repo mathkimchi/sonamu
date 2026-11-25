@@ -21,6 +21,5 @@ Replaces DMS (bar, notifications, tray, OSD). Code: `sonamu_sttk/src/nodular_app
 ## To do
 
 - Calendar is a placeholder; wifi can't prompt for a password.
-- Super+? help still mentions the pin button (`man_page.rs`).
 - `pactl subscribe` isn't killed on exit. Tray: no tooltips, no unregistered signal, `IconThemePath` ignored. Notifications: no inline images, store never trimmed.
 - Example `settings` still reads DMS colors.

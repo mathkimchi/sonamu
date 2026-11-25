@@ -33,7 +33,14 @@ const MAN_PAGE: &[ManSection] = &[
             ("Traversal keys", "as above, without Alt (but Alt+Enter)"),
             ("Enter", "focus on main content"),
             ("Space", "toggle children visibility"),
-            ("Click top right circle", "pin/unpin tree view"),
+            (
+                "Status bar arrow",
+                "left click pins/unpins the tree, right click: side-view menu",
+            ),
+            (
+                "Super+H",
+                "history view (takes the keys; Esc gives them back)",
+            ),
             ("Double click on node", "makes it the view root"),
             ("Drag/drop nodes", "moves them"),
             ("Right click", "brings up options"),
