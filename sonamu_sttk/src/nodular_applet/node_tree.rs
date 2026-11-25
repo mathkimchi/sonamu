@@ -4374,6 +4374,42 @@ mod tests {
         assert_eq!(tree.nodes[adopted].parent, Some(id));
     }
 
+    /// A dissolved project is made again around its contents, and adopts its outer children
+    #[test]
+    fn restore_closed_rewraps_a_dissolved_project() {
+        let [x, c1, c2, o1, s, p_uid, inner_uid] = [(); 7].map(|()| NodeUid::new());
+        let saved = SavedTree {
+            children: [x, c1, c2, o1, s]
+                .map(|uid| tab_uid(uid, Vec::new()))
+                .to_vec(),
+            ..SavedTree::default()
+        };
+        let mut tree = new_tree(saved);
+        let root = tree.root();
+        let entry = Closed {
+            tree: SavedTree {
+                id: Some(p_uid),
+                main: Some(SavedApplet::Spawner {
+                    name: ProjectApplet::SPAWNER.to_string(),
+                    args: Vec::new(),
+                    inner: Some(Box::new(SavedTree {
+                        id: Some(inner_uid),
+                        label: Some("P".to_string()),
+                        ..SavedTree::default()
+                    })),
+                }),
+                ..SavedTree::default()
+            },
+            contents: vec![c1, c2],
+            ..closed(p_uid, Some(x), vec![o1])
+        };
+        let id = tree.restore_closed(root, entry);
+        assert_eq!(child_uids(&tree, root), [x, p_uid, s]);
+        assert_eq!(tree.nodes[id].uid, p_uid);
+        assert_eq!(child_uids(&tree, id), [o1]);
+        assert!(tree.nodes[id].main.is_some());
+    }
+
     /// Nothing is adopted when the sibling after it wasn't its child
     #[test]
     fn restore_closed_adopts_nothing_when_next_isnt_former_child() {
