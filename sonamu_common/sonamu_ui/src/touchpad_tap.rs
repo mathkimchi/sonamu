@@ -73,3 +73,95 @@ impl TapFilter {
         pass
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LEFT: u32 = 0x110;
+    const RIGHT: u32 = 0x111;
+
+    /// Feeds (tap, button, pressed, time) events, returning which were passed on
+    fn run(mode: Tap, events: &[(bool, u32, bool, u32)]) -> Vec<bool> {
+        let mut filter = TapFilter::default();
+        events
+            .iter()
+            .map(|&(tap, button, pressed, time)| filter.pass(mode, tap, button, pressed, time))
+            .collect()
+    }
+
+    #[test]
+    fn modes_on_a_lone_tap() {
+        let tap = [(true, LEFT, true, 0), (false, LEFT, false, 180)];
+        assert_eq!(run(Tap::None, &tap), [false, false]);
+        assert_eq!(run(Tap::Single, &tap), [true, true]);
+        assert_eq!(run(Tap::Twice, &tap), [false, false]);
+    }
+
+    #[test]
+    fn physical_clicks_always_pass() {
+        let click = [(false, LEFT, true, 0), (false, LEFT, false, 50)];
+        for mode in [Tap::None, Tap::Single, Tap::Twice] {
+            assert_eq!(run(mode, &click), [true, true]);
+        }
+    }
+
+    #[test]
+    fn twice_clicks_on_the_second_tap() {
+        let taps = [
+            (true, LEFT, true, 0),
+            (false, LEFT, false, 100),
+            (true, LEFT, true, 200),
+            (false, LEFT, false, 300),
+        ];
+        assert_eq!(run(Tap::Twice, &taps), [false, false, true, true]);
+    }
+
+    #[test]
+    fn twice_then_drag_holds_the_second_press() {
+        let taps = [
+            (true, LEFT, true, 0),
+            (false, LEFT, false, 100),
+            (true, LEFT, true, 200),
+            (false, LEFT, false, 2000),
+        ];
+        assert_eq!(run(Tap::Twice, &taps), [false, false, true, true]);
+    }
+
+    #[test]
+    fn twice_three_taps_double_click() {
+        let taps = [
+            (true, LEFT, true, 0),
+            (false, LEFT, false, 100),
+            (true, LEFT, true, 200),
+            (false, LEFT, false, 300),
+            (true, LEFT, true, 400),
+            (false, LEFT, false, 500),
+        ];
+        assert_eq!(
+            run(Tap::Twice, &taps),
+            [false, false, true, true, true, true]
+        );
+    }
+
+    #[test]
+    fn twice_right_clicks_after_any_tap() {
+        let taps = [
+            (true, LEFT, true, 0),
+            (false, LEFT, false, 100),
+            (true, RIGHT, true, 200),
+            (false, RIGHT, false, 300),
+        ];
+        assert_eq!(run(Tap::Twice, &taps), [false, false, true, true]);
+    }
+
+    #[test]
+    fn twice_slow_taps_dont_click() {
+        let taps = [
+            (true, LEFT, true, 0),
+            (false, LEFT, false, 100),
+            (true, LEFT, true, 100 + TWICE_WINDOW_MS + 1),
+        ];
+        assert_eq!(run(Tap::Twice, &taps), [false, false, false]);
+    }
+}
