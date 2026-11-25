@@ -102,18 +102,45 @@ pub fn pop_newest() -> Vec<Closed> {
 }
 
 fn take_newest(entries: &mut Vec<Closed>) -> Vec<Closed> {
-    let Some(newest) = entries.pop() else {
+    entries
+        .len()
+        .checked_sub(1)
+        .map_or_else(Vec::new, |newest| take_at(entries, newest))
+}
+
+/// The entry at `index` and the rest of its group, removed; newest first
+fn take_at(entries: &mut Vec<Closed>, index: usize) -> Vec<Closed> {
+    let Some(group) = entries[index].group else {
+        return vec![entries.remove(index)];
+    };
+    let (mut same, rest): (Vec<_>, Vec<_>) = std::mem::take(entries)
+        .into_iter()
+        .partition(|entry| entry.group == Some(group));
+    *entries = rest;
+    same.reverse();
+    same
+}
+
+/// The entry `id` and the rest of its group, removed; newest first (the order to restore in)
+pub fn take(id: u64) -> Vec<Closed> {
+    let mut history = history();
+    let Some(index) = history.entries.iter().position(|entry| entry.id == id) else {
         return Vec::new();
     };
-    let mut taken = vec![newest];
-    if let Some(group) = taken[0].group {
-        let (same, rest): (Vec<_>, Vec<_>) = std::mem::take(entries)
-            .into_iter()
-            .partition(|entry| entry.group == Some(group));
-        *entries = rest;
-        taken.extend(same.into_iter().rev());
-    }
-    taken
+    history.touch();
+    take_at(&mut history.entries, index)
+}
+
+/// Forgets the entry `id` and the rest of its group
+pub fn remove(id: u64) {
+    drop(take(id));
+}
+
+/// Forgets every entry
+pub fn clear() {
+    let mut history = history();
+    history.entries.clear();
+    history.touch();
 }
 
 /// Holds a popped entry until its world `take`s it
@@ -122,7 +149,7 @@ pub fn hold(entry: Closed) {
 }
 
 /// A held entry
-pub fn take(id: u64) -> Option<Closed> {
+pub fn take_pending(id: u64) -> Option<Closed> {
     history().pending.remove(&id)
 }
 

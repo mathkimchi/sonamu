@@ -46,7 +46,7 @@ pub fn height() -> u32 {
 }
 
 /// A character's advance in the monospace font (0.6 em, eg Noto Sans Mono's)
-fn char_width() -> f32 {
+pub(super) fn char_width() -> f32 {
     font_size() * 0.6
 }
 

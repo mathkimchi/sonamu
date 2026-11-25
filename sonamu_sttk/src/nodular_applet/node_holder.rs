@@ -547,8 +547,9 @@ impl NodeHolder {
             "focus" => request(self, NodeRequest::FocusSelf),
             // hidden: only the root's keybind sends it (a history entry's id), not in `NODE_COMMANDS`
             command::RESTORE_CLOSED => (|| {
-                let entry = history::take((command::number_arg(args, 0)? as i64).cast_unsigned())
-                    .ok_or("that closed node was already restored")?;
+                let entry =
+                    history::take_pending((command::number_arg(args, 0)? as i64).cast_unsigned())
+                        .ok_or("that closed node was already restored")?;
                 let restored = self.tree.restore_closed(id, entry);
                 Ok((
                     Value::Nil,

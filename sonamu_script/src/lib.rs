@@ -665,7 +665,7 @@ fn setting(path: &str) -> Result<serde_json::Value, String> {
 
 /// Writes the setting at the dotted `path` to `settings.json`, like the settings editor (if valid; the default
 /// removes it); the watcher reloads it
-fn set_setting(path: &str, value: serde_json::Value) -> Result<(), String> {
+pub fn set_setting(path: &str, value: serde_json::Value) -> Result<(), String> {
     let (file, mut user) = user_settings()?;
     settings_file::migrate(&mut user);
     settings_file::set(&mut user, &split_path(path), value);

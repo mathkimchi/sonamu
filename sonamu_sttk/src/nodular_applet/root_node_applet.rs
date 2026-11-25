@@ -2,7 +2,8 @@ use crate::{
     command_hub::repl::{self, Repl},
     man_page::ManPageApplet,
     nodular_applet::{
-        AppletSpawner, NodeRequest, NodularAppletInitializer, history, history_view,
+        AppletSpawner, NodeRequest, NodularAppletInitializer, history,
+        history_view::{HistoryAction, HistoryPointer, HistoryResponse},
         node_holder::{NodeHolder, client_spawners},
         node_tree::{AttachClient, NodeId, NodeTree, SpawnClient},
         project_applet::ProjectApplet,
@@ -71,6 +72,8 @@ pub struct RootNodeApplet {
     latest_size: DisplayContainerSize,
 
     treeview_pointer: TreeviewPointer,
+    /// Mouse state over the history view, shared by the screens (it acts on the active one)
+    history_pointer: HistoryPointer,
     /// The last treeview drop and the node it was on.
     /// A drop can come before its drag's pluck finishes, which can shift the paths.
     last_drop: Option<(WorldTreePath, NodeId)>,
@@ -319,6 +322,7 @@ impl RootNodeApplet {
         let Self {
             holder,
             treeview_pointer,
+            history_pointer,
             view_path,
             screens,
             repl,
@@ -350,7 +354,7 @@ impl RootNodeApplet {
                         vec![holder.tree.get_screen_window(index)],
                     )];
                     if let Some(area) = areas.history {
-                        content.push(Self::get_history(&area));
+                        content.push(Self::get_history(&area, history_pointer));
                     }
                     if let Some(area) = areas.tree {
                         content.push(Self::get_treeview(
@@ -527,11 +531,25 @@ impl RootNodeApplet {
         history::complete_ancestors(tree.uid(tree.root()), || tree.save());
     }
 
-    /// Restores the newest closed node (with its group) under its nearest ancestor that's still there, else the root; that node's
-    /// world does it (also this one, on its own thread's next turn)
-    fn restore_closed(&mut self) {
+    /// What a click on the history view asked for
+    fn apply_history_action(&mut self, action: HistoryAction) {
+        match action {
+            HistoryAction::SetMode(mode) => {
+                if let Err(err) = sonamu_script::set_setting("history.mode", mode.into()) {
+                    log::warn!("Couldn't set history.mode: {err}");
+                }
+            }
+            HistoryAction::Restore(id) => self.restore(history::take(id)),
+            HistoryAction::Remove(id) => history::remove(id),
+            HistoryAction::Clear => history::clear(),
+        }
+    }
+
+    /// Restores the entries (newest first) each under its nearest ancestor that's still there, else the root; that
+    /// node's world does it (also this one, on its own thread's next turn)
+    fn restore(&mut self, entries: Vec<history::Closed>) {
         self.complete_history();
-        for entry in history::pop_newest() {
+        for entry in entries {
             let tree = &self.holder.tree;
             let target = entry
                 .ancestors
@@ -687,6 +705,7 @@ impl RootNodeApplet {
             // Just making stuff up
             latest_size: DisplayContainerSize::new(800, 600),
             treeview_pointer: TreeviewPointer::default(),
+            history_pointer: HistoryPointer::default(),
             last_drop: None,
             // the root node starts focused
             treeview_shown: true,
@@ -861,7 +880,7 @@ impl RootNodeApplet {
                 self.set_view_root(&parent);
             }
             RootKeybind::Swipe { vertical, forward } => self.swipe_key(vertical, forward),
-            RootKeybind::RestoreClosed => self.restore_closed(),
+            RootKeybind::RestoreClosed => self.restore(history::pop_newest()),
             RootKeybind::History => {
                 self.pin((self.pinned != Some(SideView::History)).then_some(SideView::History))
             }
@@ -1066,7 +1085,19 @@ impl RootNodeApplet {
         if let Some(action) = response.action {
             self.apply_treeview_action(action);
         }
-        if response.consumed || areas.history_has(mouse_event.position) {
+        let history = history_mouse(
+            &settings,
+            areas.history,
+            &mut self.history_pointer,
+            &mouse_event,
+        );
+        if history.damaged {
+            self.surface.damage();
+        }
+        if let Some(action) = history.action {
+            self.apply_history_action(action);
+        }
+        if response.consumed || history.consumed {
             return;
         }
 
@@ -1105,7 +1136,16 @@ impl RootNodeApplet {
             self.surface.damage();
         }
         // its actions come from presses, which activate the screen first
-        if response.consumed || areas.history_has(mouse_event.position) {
+        let history = history_mouse(
+            &settings,
+            areas.history,
+            &mut self.history_pointer,
+            &mouse_event,
+        );
+        if history.damaged {
+            self.surface.damage();
+        }
+        if response.consumed || history.consumed {
             return;
         }
         mouse_event.position[0] -= f64::from(applet_area(&settings, size, self.pinned)[0]);
@@ -1184,6 +1224,9 @@ impl RootNodeApplet {
             &outside,
         );
         if response.damaged {
+            self.surface.damage();
+        }
+        if history_mouse(&settings, None, &mut self.history_pointer, &outside).damaged {
             self.surface.damage();
         }
     }
@@ -1547,7 +1590,10 @@ impl RootNodeApplet {
     }
 
     /// The history view at `area`, framed like the treeview
-    fn get_history(&(area, place): &([u32; 4], TreeviewPlace)) -> UITree {
+    fn get_history(
+        &(area, place): &([u32; 4], TreeviewPlace),
+        pointer: &mut HistoryPointer,
+    ) -> UITree {
         let settings = settings::get();
         let ([x, y, width, height], border) = treeview_frame(&settings, area, place);
         let inner = [width, height].map(|length| length.saturating_sub(2 * border) as f32);
@@ -1556,7 +1602,7 @@ impl RootNodeApplet {
             if border > 0 { settings.radius } else { 0.0 },
             border as f32,
             Style::absolute([x as f32, y as f32], [width as f32, height as f32]),
-            vec![history_view::view(&settings, inner)],
+            vec![pointer.view(&settings, inner)],
         )
     }
 
@@ -1607,20 +1653,38 @@ fn initial_pin(saved: Option<&Session>) -> Option<SideView> {
     saved.map_or(Some(SideView::Tree), Session::pinned)
 }
 
+/// The history view's take on a pointer event in the screen's coords (`area`: where it is, if shown)
+fn history_mouse(
+    settings: &Settings,
+    area: Option<([u32; 4], TreeviewPlace)>,
+    pointer: &mut HistoryPointer,
+    mouse_event: &MouseEvent,
+) -> HistoryResponse {
+    let ([x, y, width, height], border) = area.map_or(([0; 4], 0), |(area, place)| {
+        treeview_frame(settings, area, place)
+    });
+    let [x, y, width, height] = [x, y, width, height].map(f64::from);
+    let [pointer_x, pointer_y] = mouse_event.position;
+    let inside = area.is_some()
+        && (x..x + width).contains(&pointer_x)
+        && (y..y + height).contains(&pointer_y);
+    let mut event = *mouse_event;
+    event.position = [
+        pointer_x - x - f64::from(border),
+        pointer_y - y - f64::from(border),
+    ];
+    pointer.handle_mouse(
+        &event,
+        inside,
+        [width, height].map(|length| (length - f64::from(2 * border)).max(0.0) as f32),
+    )
+}
+
 /// Where the treeview and the history are drawn (`[x, y, width, height]`, frame included, and how); `None`
 /// while hidden
 struct SideAreas {
     tree: Option<([u32; 4], TreeviewPlace)>,
     history: Option<([u32; 4], TreeviewPlace)>,
-}
-impl SideAreas {
-    /// Whether `[x, y]` is on the history
-    fn history_has(&self, [x, y]: [f64; 2]) -> bool {
-        self.history.is_some_and(|([ax, ay, width, height], _)| {
-            let [ax, ay, width, height] = [ax, ay, width, height].map(f64::from);
-            (ax..ax + width).contains(&x) && (ay..ay + height).contains(&y)
-        })
-    }
 }
 
 /// The pinned column on a screen of `size` (`[x, y, width, height]`, frame included) and its side
