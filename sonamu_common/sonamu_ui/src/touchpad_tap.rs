@@ -13,7 +13,7 @@ pub enum Tap {
     /// Each tap clicks
     Single,
     /// A tap only clicks right after moving the cursor or another tap (within [`window_ms`]), so stray taps
-    /// (eg while typing) do nothing. Move, tap, then touch and move drags (libinput's tap-and-drag)
+    /// (eg while typing) do nothing. Tap, then touch and move drags (libinput's tap-and-drag)
     Smart,
 }
 
@@ -61,8 +61,9 @@ pub struct TapFilter {
 }
 
 impl TapFilter {
-    /// The touchpad moved the cursor
-    pub fn moved(&mut self, time_msec: u32) {
+    /// The touchpad moved the cursor. Returns a dropped tap's button to press now: moving while a tap is held is
+    /// libinput's tap-and-drag (the tap's own finger lifted before its press came), so tap then drag drags
+    pub fn moved(&mut self, mode: Tap, time_msec: u32) -> Option<u32> {
         self.motions.push_back(time_msec);
         while self
             .motions
@@ -71,6 +72,12 @@ impl TapFilter {
         {
             self.motions.pop_front();
         }
+        if mode == Tap::None {
+            return None;
+        }
+        let (button, pass) = self.held.iter_mut().find(|(_, pass)| !*pass)?;
+        *pass = true;
+        Some(*button)
     }
 
     /// Whether to pass on a button event. `tap`: the press came from a tap, not a physical button
@@ -207,7 +214,7 @@ mod tests {
     fn tap_after_moves(moves: &[u32]) -> bool {
         let mut filter = TapFilter::default();
         for &time in moves {
-            filter.moved(time);
+            filter.moved(Tap::Smart, time);
         }
         filter.pass(Tap::Smart, WINDOW, true, LEFT, true, 1000)
     }
@@ -231,8 +238,8 @@ mod tests {
     #[test]
     fn smart_forgets_old_motions() {
         let mut filter = TapFilter::default();
-        filter.moved(0);
-        filter.moved(MAX_WINDOW_MS + 1);
+        filter.moved(Tap::Smart, 0);
+        filter.moved(Tap::Smart, MAX_WINDOW_MS + 1);
         assert_eq!(filter.motions, [MAX_WINDOW_MS + 1]);
     }
 }

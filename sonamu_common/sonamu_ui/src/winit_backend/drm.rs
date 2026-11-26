@@ -944,8 +944,19 @@ impl DrmDisplay {
                 self.handle_key(event.key_code(), event.state() == KeyState::Pressed);
             }
             InputEvent::PointerMotion { event } => {
-                if event.device().config_tap_finger_count() > 0 {
-                    self.tap_filter.moved(event.time().millis());
+                if event.device().config_tap_finger_count() > 0
+                    && let Some(button) = self
+                        .tap_filter
+                        .moved(touchpad_tap::mode(), event.time().millis())
+                {
+                    // where the tap was, before this motion
+                    self.send_mouse(
+                        MouseEventKind::Button {
+                            button,
+                            pressed: true,
+                        },
+                        event.time().millis(),
+                    );
                 }
                 let delta = event.delta_unaccel();
                 let _ = self

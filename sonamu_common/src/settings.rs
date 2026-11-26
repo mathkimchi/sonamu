@@ -543,7 +543,7 @@ pub enum TouchpadTap {
     /// Each tap clicks
     Single,
     /// A tap clicks only right after moving the cursor or another tap, so stray taps (eg while typing) do
-    /// nothing. Move, tap, then touch and move again to drag; two finger taps right click
+    /// nothing. Tap, then touch and move to drag; two finger taps right click
     Smart,
 }
 
