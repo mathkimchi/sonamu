@@ -242,4 +242,21 @@ mod tests {
         filter.moved(Tap::Smart, MAX_WINDOW_MS + 1);
         assert_eq!(filter.motions, [MAX_WINDOW_MS + 1]);
     }
+
+    #[test]
+    fn smart_tap_then_drag_presses_on_the_drag() {
+        let mut filter = TapFilter::default();
+        assert!(!filter.pass(Tap::Smart, WINDOW, true, LEFT, true, 1000));
+        assert_eq!(filter.moved(Tap::Smart, 1200), Some(LEFT));
+        assert_eq!(filter.moved(Tap::Smart, 1210), None);
+        assert!(filter.pass(Tap::Smart, WINDOW, false, LEFT, false, 2000));
+    }
+
+    #[test]
+    fn none_never_drags() {
+        let mut filter = TapFilter::default();
+        assert!(!filter.pass(Tap::None, WINDOW, true, LEFT, true, 1000));
+        assert_eq!(filter.moved(Tap::None, 1200), None);
+        assert!(!filter.pass(Tap::None, WINDOW, false, LEFT, false, 2000));
+    }
 }
