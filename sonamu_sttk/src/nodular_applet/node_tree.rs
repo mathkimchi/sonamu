@@ -2298,6 +2298,7 @@ impl NodeTree {
             && pane.rect == area
         {
             pane.rect = full;
+            pane.clip = full;
             pane.border = 0;
             pane.framed = false;
         }
@@ -2305,6 +2306,7 @@ impl NodeTree {
             if self.frames_itself(pane.node, screen) {
                 // it frames its own content, with its own gap around it, so it takes this gap back
                 pane.rect = grow(pane.rect, gap);
+                pane.clip = grow(pane.clip, gap);
                 pane.border = 0;
                 pane.framed = false;
             }
