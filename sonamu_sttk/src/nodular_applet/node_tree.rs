@@ -260,13 +260,15 @@ struct Screen {
 
 /// A node shown on screen, at `rect` (`[x, y, width, height]`, border included) of the tree's area,
 /// cut to `clip` (the strip it is in, #144)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Pane {
     node: NodeId,
     rect: [i32; 4],
     clip: [i32; 4],
     /// From the settings; 0 when unframed
     border: u32,
+    /// Of its corners, from the settings; 0 when unframed
+    radius: f32,
     /// Has a border and rounded corners: not the only pane (unless `always_frame`), and not a project
     framed: bool,
 }
@@ -310,6 +312,21 @@ struct ZoomLayout {
     center: NodeId,
     scale: f32,
     column: [f32; 4],
+}
+
+/// How `layout` lays out a swipe between its ends
+#[derive(Clone, Copy)]
+struct Slide {
+    /// This strip scrolled this far instead, showing every child in sight (a swipe between siblings)
+    fixed: Option<(NodeId, i32)>,
+    /// How framed, 0 to 1: the gap, borders and corners are this much of the settings' (#159)
+    frame: f32,
+}
+impl Slide {
+    const NONE: Self = Self {
+        fixed: None,
+        frame: 1.0,
+    };
 }
 
 /// How `push_panes` lays out strips
@@ -2176,7 +2193,7 @@ impl NodeTree {
                 size,
                 self.active_screen,
                 true,
-                None,
+                Slide::NONE,
             );
             for pane in &panes {
                 self.resize(pane.node, pane.inner_size());
@@ -2211,7 +2228,7 @@ impl NodeTree {
             let Some(size) = screen.size else {
                 continue;
             };
-            let panes = self.layout(view_root, focus, size, index, false, None);
+            let panes = self.layout(view_root, focus, size, index, false, Slide::NONE);
             for pane in &panes {
                 if !shown.contains(&pane.node) {
                     self.resize(pane.node, pane.inner_size());
@@ -2267,7 +2284,7 @@ impl NodeTree {
     }
 
     /// The panes showing `view_root` at `size`, with focus on `focus`
-    /// (on `screen`); `remember` keeps how far the strips are scrolled, `fixed` scrolls one strip this far
+    /// (on `screen`); `remember` keeps how far the strips are scrolled
     fn layout(
         &self,
         view_root: NodeId,
@@ -2275,11 +2292,13 @@ impl NodeTree {
         size: DisplayContainerSize,
         screen: usize,
         remember: bool,
-        fixed: Option<(NodeId, i32)>,
+        Slide { fixed, frame }: Slide,
     ) -> Vec<Pane> {
         let settings = settings::get();
         let (gap, border) = settings.gap_and_border_px();
-        let gap = gap.cast_signed();
+        let framed = |px: u32| (px as f32 * frame).round().to_px();
+        let (gap, border) = (framed(gap).cast_signed(), framed(border));
+        let radius = settings.radius * frame;
         let full = [0, 0, size.width.cast_signed(), size.height.cast_signed()];
         let area = grow(full, -gap);
         let mut panes = Vec::new();
@@ -2293,6 +2312,7 @@ impl NodeTree {
         self.push_panes(view_root, area, full, &strips, &mut panes);
         for pane in &mut panes {
             pane.border = border;
+            pane.radius = radius;
         }
         if let (false, [pane]) = (settings.always_frame, panes.as_mut_slice())
             && pane.rect == area
@@ -2300,6 +2320,7 @@ impl NodeTree {
             pane.rect = full;
             pane.clip = full;
             pane.border = 0;
+            pane.radius = 0.0;
             pane.framed = false;
         }
         for pane in panes.iter_mut().filter(|pane| pane.framed) {
@@ -2308,6 +2329,7 @@ impl NodeTree {
                 pane.rect = grow(pane.rect, gap);
                 pane.clip = grow(pane.clip, gap);
                 pane.border = 0;
+                pane.radius = 0.0;
                 pane.framed = false;
             }
         }
@@ -2394,6 +2416,7 @@ impl NodeTree {
                         rect: [left, y, column, height],
                         clip,
                         border: 0,
+                        radius: 0.0,
                         framed: true,
                     });
                 }
@@ -2409,6 +2432,7 @@ impl NodeTree {
             rect,
             clip,
             border: 0,
+            radius: 0.0,
             framed: true,
         });
     }
@@ -2506,7 +2530,7 @@ impl NodeTree {
                         size,
                         self.active_screen,
                         false,
-                        None,
+                        Slide::NONE,
                     );
                     if let Some(parent) = parent {
                         let index = usize::from(Some(id) == swipe.to);
@@ -3420,6 +3444,7 @@ impl NodeTree {
                             rect: [0, 0, view.width.cast_signed(), view.height.cast_signed()],
                             clip: [0, 0, view.width.cast_signed(), view.height.cast_signed()],
                             border,
+                            radius: settings.radius,
                             framed: true,
                         };
                         let position = [x + index as f32 * (mini[0] + gap), y + pane_height + gap];
@@ -3730,19 +3755,36 @@ impl NodeTree {
             return view(focused, &self.panes);
         }
         let [from_panes, to_panes] = &swipe.panes;
-        // siblings scrolled differently: the strip slides from one's scroll to the other's (#144)
-        if let Some((strip, [from_scroll, to_scroll])) = swipe.strip
+        // siblings scrolled differently: the strip slides from one's scroll to the other's (#144);
+        // an unframed end (a lone pane) frames by the middle (#159)
+        if let (Some((strip, [from_scroll, to_scroll])), Some(to)) = (swipe.strip, swipe.to)
             && from_scroll != to_scroll
         {
-            let scroll = from_scroll as f32 + (to_scroll - from_scroll) as f32 * swipe.progress;
-            let panes = self.layout(
-                self.view_root_for(swipe.from),
-                swipe.from,
-                size,
-                self.active_screen,
-                false,
-                Some((strip, scroll.round() as i32)),
-            );
+            let progress = swipe.progress;
+            let framed =
+                |panes: &[Pane]| f32::from(u8::from(!matches!(panes, [pane] if !pane.framed)));
+            let frame = framed(from_panes)
+                .max(2.0 * progress)
+                .min(framed(to_panes).max(2.0 * (1.0 - progress)))
+                .min(1.0);
+            let layout = |id, fixed| {
+                let slide = Slide { fixed, frame };
+                self.layout(
+                    self.view_root_for(id),
+                    id,
+                    size,
+                    self.active_screen,
+                    false,
+                    slide,
+                )
+            };
+            // at this frame, so it ends where each end is
+            let [from_scroll, to_scroll] = [swipe.from, to].map(|id| {
+                layout(id, None);
+                self.nodes[strip].laid_scroll.get()
+            });
+            let scroll = from_scroll as f32 + (to_scroll - from_scroll) as f32 * progress;
+            let panes = layout(swipe.from, Some((strip, scroll.round() as i32)));
             return self.window(&panes, Some(focused), self.active_screen);
         }
         // ends that show the same panes don't move, the focus ring does
@@ -3788,7 +3830,7 @@ impl NodeTree {
         } else {
             settings.palette.accent
         };
-        let radius = if pane.framed { settings.radius } else { 0.0 };
+        let radius = pane.radius;
         // at least the usual width, so an unframed pane's focus still shows
         let border = (pane.border as f32).max(settings.border.width).max(2.0);
         UITree::new_container(vec![
@@ -3872,7 +3914,7 @@ impl NodeTree {
                         [x, y, pane.rect[2], pane.rect[3]].map(|value| value as f32);
                     ui::frame(
                         border,
-                        if pane.framed { settings.radius } else { 0.0 },
+                        pane.radius,
                         pane.border as f32,
                         Style::absolute([x, y], [width, height]),
                         vec![surface],
