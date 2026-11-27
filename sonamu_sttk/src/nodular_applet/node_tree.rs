@@ -1513,6 +1513,17 @@ impl NodeTree {
         })
     }
 
+    /// Whether its panes on `screen` (as of the last `update_layout`) have its gap around them: not a lone one filling
+    /// it unframed (`always_frame` off) that doesn't frame itself either (#159)
+    pub fn frames_panes(&self, screen: usize) -> bool {
+        let panes = if screen == self.active_screen {
+            &self.panes
+        } else {
+            &self.screens[screen].panes
+        };
+        !matches!(panes.as_slice(), [pane] if !pane.framed && !self.frames_itself(pane.node, screen))
+    }
+
     /// Its applet's treeview label (or `EMPTY_LABEL`)
     pub fn label(&self, id: NodeId) -> String {
         self.applet_treeview(id).get_root_value().clone()

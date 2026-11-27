@@ -1210,10 +1210,10 @@ impl StandardApplet for ProjectApplet {
         !self.dissolved && self.holder.tree.screen_count() > 1
     }
 
-    /// Its panes are framed by its own tree; the overview isn't
+    /// Its panes are framed by its own tree, unless it leaves a lone one unframed; the overview isn't
     fn screen_frames_itself(&self) -> Vec<bool> {
         (0..self.holder.tree.screen_count())
-            .map(|screen| !self.at_root_on(screen))
+            .map(|screen| !self.at_root_on(screen) && self.holder.tree.frames_panes(screen))
             .collect()
     }
 
@@ -1268,9 +1268,14 @@ impl StandardApplet for ProjectApplet {
         !self.dissolved && !self.at_root() && self.holder.tree.is_traversing()
     }
 
-    /// Its panes are framed by its own tree; the overview isn't
+    /// Its panes are framed by its own tree, unless it leaves a lone one unframed; the overview isn't
     fn frames_itself(&self) -> bool {
-        !self.dissolved && !self.at_root()
+        !self.dissolved
+            && !self.at_root()
+            && self
+                .holder
+                .tree
+                .frames_panes(self.holder.tree.active_screen())
     }
 
     fn focus(&mut self, path: &WorldTreePath) {
@@ -1433,6 +1438,11 @@ impl StandardApplet for ProjectApplet {
             self.hook.damage_window();
         }
         self.holder.update_wl_focus();
+    }
+
+    /// `always_frame` may change `frames_itself`
+    fn settings_changed(&mut self, _settings: &settings::Settings) {
+        self.hook.damage_treeview();
     }
 }
 
