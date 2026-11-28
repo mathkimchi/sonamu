@@ -1,17 +1,16 @@
 {
   "$schema": "https://raw.githubusercontent.com/mathkimchi/sonamu/dev/assets/settings.schema.json",
   "palette": {
-    "bg": "#07210f",
-    "fg": "#e7efe9",
-    "accent": "#c2adeb",
-    "inactive": "#84ad90"
+    "bg": "#0f1519",
+    "fg": "#e7ebef",
+    "accent": "#adcfeb",
+    "inactive": "#838d95"
   },
   "border": {
-    "focused": "#97e6d4",
-    "unfocused": "#404f44",
-    "treeview": "#62846b"
+    "focused": "#a5a9e9",
+    "unfocused": "#40484f",
+    "treeview": "#627484"
   },
-  "gap": 12.0,
   "radius": 0.0,
   "treeview": {
     "floating": "center",
@@ -99,9 +98,9 @@
   "zoom_out": {
     "view": "free"
   },
-  "buffer_line": "always",
   "agent_url": "http://127.0.0.1:11434",
   "wallpaper": {
-    "color": "#4d6005"
-  }
+    "image": "~/Pictures/Wallpapers/carina_nebula_4k_wallpaper.webp"
+  },
+  "always_frame": false
 }
